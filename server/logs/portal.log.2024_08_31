@@ -1,0 +1,70 @@
+|Portal| 2024-08-20 21:05:32 [..] Loaded.
+|Portal| 2024-08-20 21:05:29 [..] Loading /root/cyberpunk/env/lib/python3.12/site-packages/evennia/server/portal/portal.py...
+|Portal| 2024-08-20 21:05:32 [..] Loaded.
+|Portal| 2024-08-20 21:05:32 [..] twistd 23.10.0 (/root/cyberpunk/env/bin/python3 3.12.3) starting up.
+|Portal| 2024-08-20 21:05:32 [..] reactor class: twisted.internet.epollreactor.EPollReactor.
+|Portal| 2024-08-20 21:05:32 [..] AMP starting on 4006
+|Portal| 2024-08-20 21:05:32 [..] Telnet starting on 4000
+|Portal| 2024-08-20 21:05:32 [..] Websocket starting on 4002
+|Portal| 2024-08-20 21:05:32 [..] Webserver-proxy starting on 4001
+|Portal| 2024-08-20 21:05:32 [..] Portal starting server ... 
+|Portal| 2024-08-20 21:05:37 [..] Portal starting server ... 
+|Portal| 2024-08-20 21:40:53 [EE] Malformed telnet input: ('Stumped', b'\x01')
+|Portal| 2024-08-20 21:40:53 [EE] Malformed telnet input: ('Stumped', b'\x15')
+|Portal| 2024-08-20 21:41:00 [EE] Malformed telnet input: ('Stumped', b'\x00')
+|Portal| 2024-08-20 21:41:00 [EE] Malformed telnet input: ('Stumped', b'\x01')
+|Portal| 2024-08-20 21:41:00 [EE] Malformed telnet input: ('Stumped', b'\x15')
+|Portal| 2024-08-21 08:38:49 [WW] dropping connection to peer tcp4:205.210.31.237:54042 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-22 00:09:08 [EE] Malformed telnet input: ('Stumped', b'\x01')
+|Portal| 2024-08-22 00:09:08 [EE] Malformed telnet input: ('Stumped', b'\xb5')
+|Portal| 2024-08-22 00:09:08 [EE] Malformed telnet input: ('Stumped', b'\x15')
+|Portal| 2024-08-22 07:28:01 [WW] dropping connection to peer tcp4:198.235.24.252:55968 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-22 21:06:16 [WW] dropping connection to peer tcp4:172.234.90.26:9279 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-22 21:06:16 [..] failing WebSocket opening handshake ('Bad HTTP request status line ''')
+|Portal| 2024-08-22 21:06:16 [WW] dropping connection to peer tcp4:172.234.90.26:22549 with abort=False: Bad HTTP request status line ''
+|Portal| 2024-08-22 21:06:16 [..] failing WebSocket opening handshake ('Unsupported HTTP version 'HTTP/1.0'')
+|Portal| 2024-08-22 21:06:16 [WW] dropping connection to peer tcp4:172.234.90.26:31723 with abort=False: Unsupported HTTP version 'HTTP/1.0'
+|Portal| 2024-08-22 21:06:17 [..] failing WebSocket opening handshake ('HTTP method 'OPTIONS' not allowed')
+|Portal| 2024-08-22 21:06:17 [WW] dropping connection to peer tcp4:172.234.90.26:32797 with abort=False: HTTP method 'OPTIONS' not allowed
+|Portal| 2024-08-22 21:06:17 [..] failing WebSocket opening handshake ('HTTP method 'OPTIONS' not allowed')
+|Portal| 2024-08-22 21:06:17 [WW] dropping connection to peer tcp4:172.234.90.26:19609 with abort=False: HTTP method 'OPTIONS' not allowed
+|Portal| 2024-08-22 21:06:22 [WW] dropping connection to peer tcp4:172.234.90.26:22401 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-22 21:06:27 [WW] dropping connection to peer tcp4:172.234.90.26:22539 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-22 21:06:33 [WW] dropping connection to peer tcp4:172.234.90.26:17439 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-22 21:06:38 [WW] dropping connection to peer tcp4:172.234.90.26:16883 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-22 21:06:43 [WW] dropping connection to peer tcp4:172.234.90.26:19687 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-22 21:06:48 [WW] dropping connection to peer tcp4:172.234.90.26:23851 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-22 21:06:53 [WW] dropping connection to peer tcp4:172.234.90.26:14347 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-22 21:06:58 [WW] dropping connection to peer tcp4:172.234.90.26:32443 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-22 21:06:58 [..] failing WebSocket opening handshake ('HTTP method 'OPTIONS' not allowed')
+|Portal| 2024-08-22 21:06:58 [WW] dropping connection to peer tcp4:172.234.90.26:25599 with abort=False: HTTP method 'OPTIONS' not allowed
+|Portal| 2024-08-22 22:41:13 [WW] dropping connection to peer tcp4:198.235.24.216:53060 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-23 17:12:46 [EE] Malformed telnet input: ('Stumped', b'\x01')
+|Portal| 2024-08-23 17:12:46 [EE] Malformed telnet input: ('Stumped', b'\x01')
+|Portal| 2024-08-23 20:37:56 [EE] Malformed telnet input: ('Stumped', b'\x01')
+|Portal| 2024-08-23 22:48:13 [WW] dropping connection to peer tcp4:205.210.31.234:50043 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-24 10:08:49 [EE] Malformed telnet input: ('Stumped', b'\x01')
+|Portal| 2024-08-24 10:10:08 [EE] Malformed telnet input: ('Stumped', b'\x01')
+|Portal| 2024-08-24 17:08:58 [EE] Malformed telnet input: ('Stumped', b'\x01')
+|Portal| 2024-08-25 09:33:20 [WW] dropping connection to peer tcp4:198.235.24.240:49862 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-25 12:20:02 [EE] Malformed telnet input: ('Stumped', b'\x01')
+|Portal| 2024-08-25 13:31:24 [WW] dropping connection to peer tcp4:87.251.67.195:65031 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-25 19:17:33 [WW] dropping connection to peer tcp4:147.185.132.159:55834 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-26 07:04:55 [EE] Malformed telnet input: ('Stumped', b'\x01')
+|Portal| 2024-08-26 09:03:47 [WW] dropping connection to peer tcp4:87.251.67.195:63672 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-26 20:45:01 [WW] dropping connection to peer tcp4:147.185.132.195:55901 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-28 00:32:51 [WW] dropping connection to peer tcp4:87.236.176.232:33259 with abort=False: None
+|Portal| 2024-08-28 02:29:50 [WW] dropping connection to peer tcp4:205.210.31.208:56795 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-28 03:12:14 [WW] dropping connection to peer tcp4:92.255.85.107:63463 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-28 11:21:27 [WW] dropping connection to peer tcp4:92.255.85.107:62992 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-29 09:06:52 [WW] dropping connection to peer tcp4:198.235.24.76:53416 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-29 15:15:06 [EE] Malformed telnet input: ('Stumped', b'\x01')
+|Portal| 2024-08-29 23:37:14 [WW] dropping connection to peer tcp4:198.235.24.219:50320 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-30 17:20:12 [EE] Malformed telnet input: ('Stumped', b'L')
+|Portal| 2024-08-30 17:20:13 [EE] Malformed telnet input: ('Stumped', b'M')
+|Portal| 2024-08-30 23:14:42 [WW] dropping connection to peer tcp4:87.236.176.121:57147 with abort=False: None
+|Portal| 2024-08-31 07:08:45 [WW] dropping connection to peer tcp4:205.210.31.216:54494 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)
+|Portal| 2024-08-31 15:21:57 [EE] Malformed telnet input: ('Stumped', b'\x01')
+|Portal| 2024-08-31 15:21:57 [EE] Malformed telnet input: ('Stumped', b'J')
+|Portal| 2024-08-31 15:21:57 [EE] Malformed telnet input: ('Stumped', b'\x15')
+|Portal| 2024-08-31 21:59:06 [WW] dropping connection to peer tcp4:147.185.132.36:56183 with abort=True: WebSocket opening handshake timeout (peer did not finish the opening handshake in time)

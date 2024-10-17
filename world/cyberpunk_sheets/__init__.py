@@ -1,0 +1,1 @@
+default_app_config = 'world.cyberpunk_sheets.apps.CyberpunkSheetsConfig'
