@@ -8,7 +8,10 @@ creation commands.
 """
 from evennia import DefaultCharacter
 from world.cyberpunk_sheets.models import CharacterSheet
-import logging
+from evennia.utils.ansi import ANSIString
+from world.utils.ansi_utils import wrap_ansi
+from world.utils.formatting import header, footer, divider
+import logging, re
 
 logger = logging.getLogger('cyberpunk.character')
 
@@ -88,10 +91,116 @@ class Character(DefaultCharacter):
 
     @property
     def language_list(self):
-        return [f"{lang.language.name if hasattr(lang.language, 'name') else lang.language['name']} (Level {lang.level})" 
-                for lang in self.character_languages.all()]
+        if not self.character_sheet:
+            return []
+        return [f"{cl.language.name} (Level {cl.level})" 
+                for cl in self.character_sheet.character_languages.all()]
+
+    def knows_language(self, language_name):
+        if not self.character_sheet:
+            return False
+        return self.character_sheet.character_languages.filter(
+            language__name__iexact=language_name
+        ).exists()
 
     def at_post_move(self, source_location, **kwargs):
         super().at_post_move(source_location, **kwargs)
         if self.character_sheet:
             self.character_sheet.refresh_from_db()
+
+    def return_appearance(self, looker, **kwargs):
+        """
+        This formats a description for any object looking at this object.
+        """
+        if not looker:
+            return ""
+        
+        # Get the description
+        desc = self.db.desc
+
+        # Start with the name
+        string = f"|c{self.get_display_name(looker)}|n\n"
+
+        # Process character description
+        if desc:
+            # Replace both %t and |- with a consistent tab marker
+            desc = desc.replace('%t', '|t').replace('|-', '|t')
+            
+            paragraphs = desc.split('%r')
+            formatted_paragraphs = []
+            for p in paragraphs:
+                if not p.strip():
+                    formatted_paragraphs.append('')  # Add blank line for empty paragraph
+                    continue
+                
+                # Handle tabs manually
+                lines = p.split('|t')
+                indented_lines = [line.strip() for line in lines]
+                indented_text = '\n    '.join(indented_lines)
+                
+                # Wrap each line individually
+                wrapped_lines = [wrap_ansi(line, width=78) for line in indented_text.split('\n')]
+                formatted_paragraphs.append('\n'.join(wrapped_lines))
+            
+            # Join paragraphs with a single newline, and remove any consecutive newlines
+            joined_paragraphs = '\n'.join(formatted_paragraphs)
+            joined_paragraphs = re.sub(r'\n{3,}', '\n\n', joined_paragraphs)
+            
+            string += joined_paragraphs + "\n"
+
+        # Add any other details you want to include in the character's appearance
+        # For example, you might want to add information about their equipment, stats, etc.
+
+        return string
+
+    def execute_cmd(self, raw_string, session=None, **kwargs):
+        # Use regex to match ':' followed immediately by any non-space character
+        if re.match(r'^:\S', raw_string):
+            # Treat it as a pose command, inserting a space after the colon
+            raw_string = "pose " + raw_string[1:]
+        return super().execute_cmd(raw_string, session=session, **kwargs)
+
+    def add_note(self, name, text, category='General', is_public=False):
+        if self.character_sheet:
+            return self.character_sheet.add_note(name, text, category, is_public)
+        return None
+
+    def get_note(self, name):
+        if self.character_sheet:
+            return self.character_sheet.get_note(name)
+        return None
+
+    def update_note(self, name, new_text, new_category=None):
+        if self.character_sheet:
+            return self.character_sheet.update_note(name, new_text, new_category)
+        return None
+
+    def delete_note(self, name):
+        if self.character_sheet:
+            return self.character_sheet.delete_note(name)
+        return False
+
+    def get_notes_by_category(self, category):
+        if self.character_sheet:
+            return self.character_sheet.get_notes_by_category(category)
+        return []
+
+    def get_all_notes(self):
+        if self.character_sheet:
+            return self.character_sheet.get_all_notes()
+        return []
+
+    def approve_note(self, name):
+        if self.character_sheet:
+            return self.character_sheet.approve_note(name)
+        return False
+
+    def unapprove_note(self, name):
+        if self.character_sheet:
+            return self.character_sheet.unapprove_note(name)
+        return False
+
+    def change_note_status(self, name, is_public):
+        if self.character_sheet:
+            return self.character_sheet.change_note_status(name, is_public)
+        return False

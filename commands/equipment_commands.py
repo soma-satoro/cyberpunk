@@ -1,13 +1,17 @@
 from evennia import Command
+from evennia.commands.default.muxcommand import MuxCommand
 from django.utils import timezone
 from datetime import timedelta
-from evennia.utils.evtable import EvTable
-from world.inventory.models import Weapon, Armor, Gear, Inventory
+from world.inventory.models import Weapon, Armor, Gear, Ammunition, Cyberdeck, Inventory
 from world.cyberware.models import Cyberware
 from world.equipment_data import populate_weapons, populate_armor, populate_gear, populate_all_equipment
 from world.cyberpunk_sheets.models import CharacterSheet
+from world.utils.ansi_utils import wrap_ansi
+from world.utils.formatting import header, footer, divider, format_stat
 from world.cyberware.utils import populate_cyberware
-
+from evennia.utils.ansi import ANSIString
+from evennia.utils import evtable
+from math import ceil
 
 class CmdAddWeapon(Command):
     """
@@ -286,7 +290,7 @@ class CmdPopulateCyberware(Command):
         except Exception as e:
             self.caller.msg(f"An error occurred while populating cyberware: {str(e)}")
 
-class CmdViewEquipment(Command):
+class CmdViewEquipment(MuxCommand):
     """
     View all equipment in the database.
 
@@ -294,14 +298,8 @@ class CmdViewEquipment(Command):
       equipment [type]
 
     Options:
-      type - Optional. Can be 'weapons', 'armor', or 'gear'.
+      type - Optional. Can be 'weapons', 'armor', 'gear', 'ammo', or 'cyberdecks'.
              If not specified, shows all equipment.
-
-    Examples:
-      equipdb
-      equipdb weapons
-      equipdb armor
-      equipdb gear
     """
 
     key = "equipdb"
@@ -310,78 +308,99 @@ class CmdViewEquipment(Command):
     help_category = "Inventory"
 
     def func(self):
-        if self.args and self.args.strip().lower() not in ['weapons', 'armor', 'gear']:
-            self.caller.msg("Invalid equipment type. Use 'weapons', 'armor', or 'gear'.")
+        valid_types = ['weapons', 'armor', 'gear', 'ammo', 'cyberdecks']
+        if self.args and self.args.strip().lower() not in valid_types:
+            self.caller.msg(f"Invalid equipment type. Use one of: {', '.join(valid_types)}.")
             return
 
-        if not self.args or self.args.strip().lower() == 'weapons':
-            self.display_weapons()
-        
-        if not self.args or self.args.strip().lower() == 'armor':
-            self.display_armor()
-        
-        if not self.args or self.args.strip().lower() == 'gear':
-            self.display_gear()
+        output = []
+
+        if not self.args:
+            for equip_type in valid_types:
+                output.append(getattr(self, f"display_{equip_type}")())
+        else:
+            output.append(getattr(self, f"display_{self.args.strip().lower()}")())
+
+        self.caller.msg("\n".join(filter(None, output)))
 
     def display_weapons(self):
         weapons = Weapon.objects.all()
         if not weapons:
-            self.caller.msg("No weapons found in the database.")
-            return
+            return divider("Weapons", width=80, fillchar="|m-|n") + "\nNo weapons found in the database.\n"
         
-        table = EvTable("Name", "Damage", "ROF", "Hands", "Concealable", "Weight", "Value", border="cells")
+        output = [divider("Weapons", width=80, fillchar="|m-|n")]
         for weapon in weapons:
-            table.add_row(
-                weapon.name,
-                weapon.damage,
-                weapon.rof,
-                weapon.hands,
-                "Yes" if weapon.concealable else "No",
-                weapon.weight,
-                f"{weapon.value} eb"
-            )
-        
-        self.caller.msg("|cWeapons:|n")
-        self.caller.msg(table)
+            name_damage = f"|c{weapon.name:<25}|n |gDamage:|n {weapon.damage:<10}"
+            rof_hands = f"|gROF:|n {weapon.rof:<5} |gHands:|n {weapon.hands}"
+            output.append(f"{name_damage}{rof_hands:>40}")
+            concealable = "Yes" if weapon.concealable else "No"
+            weight_value = f"|gWeight:|n {weapon.weight:<5} |gValue:|n |y{weapon.value:>4} eb|n"
+            output.append(f"  |gConcealable:|n {concealable:<5}{weight_value:>58}")
+        output.append(divider("", width=80, fillchar="|m-|n"))
+        return "\n".join(output) + "\n"
 
     def display_armor(self):
         armors = Armor.objects.all()
         if not armors:
-            self.caller.msg("No armor found in the database.")
-            return
+            return divider("Armor", width=80, fillchar="|m-|n") + "\nNo armor found in the database.\n"
         
-        table = EvTable("Name", "SP", "EV", "Locations", "Weight", "Value", border="cells")
+        output = [divider("Armor", width=80, fillchar="|m-|n")]
         for armor in armors:
-            table.add_row(
-                armor.name,
-                armor.sp,
-                armor.ev,
-                armor.locations,
-                armor.weight,
-                f"{armor.value} eb"
-            )
-        
-        self.caller.msg("|cArmor:|n")
-        self.caller.msg(table)
+            name_sp_ev = f"|c{armor.name:<25}|n |gSP:|n {armor.sp:<5} |gEV:|n {armor.ev:<5}"
+            weight_value = f"|gWeight:|n {armor.weight:<5} |gValue:|n |y{armor.value:>4} eb|n"
+            output.append(f"{name_sp_ev}{weight_value:>35}")
+            output.append(f"  |gLocations:|n {armor.locations}")
+        output.append(divider("", width=80, fillchar="|m-|n"))
+        return "\n".join(output) + "\n"
 
     def display_gear(self):
         gears = Gear.objects.all()
         if not gears:
-            self.caller.msg("No gear found in the database.")
-            return
+            return divider("Gear", width=80, fillchar="|m-|n") + "\nNo gear found in the database.\n"
         
-        table = EvTable("Name", "Category", "Description", "Weight", "Value", border="cells")
+        output = [divider("Gear", width=80, fillchar="|m-|n")]
         for gear in gears:
-            table.add_row(
-                gear.name,
-                gear.category,
-                gear.description[:30] + "..." if len(gear.description) > 30 else gear.description,
-                gear.weight,
-                f"{gear.value} eb"
-            )
+            name_cat = f"|c{gear.name:<25}|n |gCategory:|n {gear.category:<15}"
+            weight_value = f"|gWeight:|n {gear.weight:<5} |gValue:|n |y{gear.value:>4} eb|n"
+            output.append(f"{name_cat}{weight_value:>35}")
+            
+            description = wrap_ansi(gear.description, 76)  # Wrap to 76 to account for initial spaces
+            if len(ANSIString(description)) > 76:
+                description = description[:73] + "..."
+            output.append(f"  |gDescription:|n {description}")
         
-        self.caller.msg("|cGear:|n")
-        self.caller.msg(table)
+        output.append(divider("", width=80, fillchar="|m-|n"))
+        return "\n".join(output) + "\n"
+
+    def display_ammo(self):
+        ammos = Ammunition.objects.all()
+        if not ammos:
+            return divider("Ammunition", width=80, fillchar="|m-|n") + "\nNo ammunition found in the database.\n"
+        
+        output = [divider("Ammunition", width=80, fillchar="|m-|n")]
+        for ammo in ammos:
+            name_type = f"|c{ammo.name:<25}|n |gType:|n {ammo.ammo_type:<15}"
+            weapon_type = f"|gWeapon Type:|n {ammo.weapon_type}"
+            output.append(f"{name_type}{weapon_type:>35}")
+            damage_ap = f"|gDamage Mod:|n {ammo.damage_modifier:<5} |gAP:|n {ammo.armor_piercing:<5}"
+            cost = f"|gCost:|n |y{ammo.cost:>4} eb|n"
+            output.append(f"  {damage_ap}{cost:>53}")
+        output.append(divider("", width=80, fillchar="|m-|n"))
+        return "\n".join(output) + "\n"
+
+    def display_cyberdecks(self):
+        cyberdecks = Cyberdeck.objects.all()
+        if not cyberdecks:
+            return divider("Cyberdecks", width=80, fillchar="|m-|n") + "\nNo cyberdecks found in the database.\n"
+        
+        output = [divider("Cyberdecks", width=80, fillchar="|m-|n")]
+        for deck in cyberdecks:
+            output.append(f"|c{deck.name:<80}|n")
+            slots = f"|gHardware Slots:|n {deck.hardware_slots:<5} |gProgram Slots:|n {deck.program_slots:<5} |gAny Slots:|n {deck.any_slots:<5}"
+            value = f"|gValue:|n |y{deck.value:>4} eb|n"
+            output.append(f"  {slots}{value:>27}")
+        output.append(divider("", width=80, fillchar="|m-|n"))
+        return "\n".join(output) + "\n"
 
 class CmdRemoveEquipment(Command):
     """

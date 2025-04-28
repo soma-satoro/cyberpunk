@@ -1,16 +1,47 @@
+from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Count
 from evennia import Command
-from django.core.management.base import BaseCommand
-from evennia.utils import logger, evtable, utils
-from evennia.utils.utils import list_to_string
+from world.cyberpunk_sheets.models import CharacterSheet
+from evennia import EvTable
+from .character_commands import CmdSheet
+from evennia.utils.search import search_object
+from evennia.objects.models import ObjectDB
+from world.languages.language_dictionary import LANGUAGES
+from world.cyberpunk_sheets.models import CharacterSheet
+from world.languages.models import Language, CharacterLanguage
+from evennia.utils import logger
 from world.inventory.models import Gear
 from world.equipment_data import populate_weapons, populate_armor, populate_gear, populate_all_equipment
 from world.cyberpunk_sheets.models import CharacterSheet
 from world.cyberware.npcs import create_cyberware_merchant
-from world.inventory.models import Weapon, Armor
 from typeclasses.rental import RentableRoom
-from evennia.objects.models import ObjectDB
+from evennia.commands.default.muxcommand import MuxCommand
+from evennia.utils.utils import inherits_from
+from world.utils.ansi_utils import wrap_ansi
 import re
+
+class AdminCommand(MuxCommand):
+    """
+    Base class for admin commands.
+    Update with any additional definitions that may be useful to admin, then call the class by using 'CmdName(AdminCommand)', which
+    will apply the following functions.
+    """
+
+    #search for a character by name match or dbref.
+    def search_for_character(self, search_string):
+        # First, try to find by exact name match
+        results = search_object(search_string, typeclass="typeclasses.characters.Character")
+        if results:
+            return results[0]
+        
+        # If not found, try to find by dbref
+        if search_string.startswith("#") and search_string[1:].isdigit():
+            results = search_object(search_string, typeclass="typeclasses.characters.Character")
+            if results:
+                return results[0]
+        
+        # If still not found, return None
+        return None
 
 class CmdCleanupDuplicateGear(Command):
     """
@@ -108,7 +139,7 @@ class CmdPopulateAllEquipment(Command):
         populate_all_equipment()
         self.caller.msg("All equipment databases populated successfully.")
 
-class CmdStat(Command):
+class CmdStat(AdminCommand):
     """
     Set or modify stats on a player character.
     Usage:
@@ -220,12 +251,10 @@ class CmdStat(Command):
             "Humanity": sheet.humanity
         }
 
-# Update this in your commands/admin_commands.py file
-
 from evennia import Command
 from evennia.utils import utils
 
-class CmdClearAllStates(Command):
+class CmdClearAllStates(AdminCommand):
     """
     Clear all lingering states for a character.
     Usage:
@@ -278,7 +307,7 @@ class CmdClearAllStates(Command):
         # Force a look to refresh the character's view
         target.execute_cmd('look')
 
-class CmdHeal(Command):
+class CmdHeal(AdminCommand):
     """
     Heal yourself or another character.
 
@@ -329,7 +358,7 @@ class CmdHeal(Command):
         except Exception as e:
             self.caller.msg(f"Error healing {target.name}: {str(e)}")
 
-class CmdHurt(Command):
+class CmdHurt(AdminCommand):
     """
     Inflict damage on yourself or another character.
 
@@ -384,7 +413,7 @@ class CmdHurt(Command):
         except Exception as e:
             self.caller.msg(f"Error hurting {target.name}: {str(e)}")
 
-class CmdApprove(Command):
+class CmdApprove(AdminCommand):
     """
     Approve a player's character.
 
@@ -418,7 +447,7 @@ class CmdApprove(Command):
         self.caller.msg(f"You have approved {target.name}.")
         target.msg("Your character has been approved. You may now begin playing.")
 
-class CmdUnapprove(Command):
+class CmdUnapprove(AdminCommand):
     """
     Set a character's status to unapproved.
 
@@ -453,23 +482,22 @@ class CmdUnapprove(Command):
         self.caller.msg(f"You have unapproved {target.name}.")
         target.msg("Your character has been unapproved. You may now use chargen commands again.")
 
-from evennia import Command
-from evennia.utils import evtable
-from world.cyberpunk_sheets.models import CharacterSheet
-from world.inventory.models import Weapon, Armor
-
-class CmdAdminViewSheet(Command):
+class CmdAdminViewSheet(AdminCommand):
     """
-    View a character's sheet as an admin.
+    View a character's sheet or lifepath as an admin.
 
     Usage:
       adminsheet <character_name>
+      adminsheet/lifepath <character_name>
+
+    Switches:
+      lifepath - Show detailed lifepath information
 
     This command allows admins to view the complete character sheet
-    of any character in the game.
+    or lifepath details of any character in the game.
     """
     key = "adminsheet"
-    aliases = ["adminview"]
+    aliases = ["adminview", "adminlifepath"]
     locks = "cmd:perm(Admin)"
     help_category = "Admin"
 
@@ -478,149 +506,106 @@ class CmdAdminViewSheet(Command):
             self.caller.msg("Usage: adminsheet <character_name>")
             return
 
-        target = self.caller.search(self.args)
+        target = self.caller.search(self.args.strip())
         if not target:
             return
 
         try:
-            cs = CharacterSheet.objects.get(character=target)
-        except CharacterSheet.DoesNotExist:
+            cs = target.character_sheet
+        except AttributeError:
             self.caller.msg(f"{target.name} doesn't have a character sheet.")
             return
 
-        self.show_sheet(target, cs)
+        if "lifepath" in self.switches or self.cmdstring == "adminlifepath":
+            self.view_lifepath(target, cs)
+        else:
+            self.view_sheet(target, cs)
 
-    def show_sheet(self, target, cs):
-        width = 78
+    def header(self, text, width=78, fillchar="-"):
+        """Create a header."""
+        return f"|044{text.center(width, fillchar)}|n"
 
+    def divider(self, text, width=78, fillchar="-"):
+        """Create a divider with text."""
+        return f"|044{text.center(width, fillchar)}|n"
+
+    def footer(self, width=78, fillchar="-"):
+        """Create a footer."""
+        return f"|044{fillchar * width}|n"
+
+    def safe_get_attr(self, obj, attr):
+        """Safely get an attribute value, returning 'N/A' if it doesn't exist."""
+        return getattr(obj, attr, 'N/A')
+
+    def view_sheet(self, target, cs):
         # Main header
-        header = f"Character Sheet for {cs.full_name}"
-        self.caller.msg(f"|044{'-' * 78}|n")
-        self.caller.msg(f"|044|c{header.center(76)}|n|044|n")
-        self.caller.msg(f"|044{'-' * 78}|n")
+        output = self.header(f"Character Sheet for {cs.full_name} (Admin View)", width=80) + "\n"
 
-        # Basic Info
-        basic_info = evtable.EvTable(border="table", table_pad=2)
-        basic_info.add_column("|cBasic Info|n", align="l", width=20)
-        basic_info.add_column("", align="l", width=58)
-        basic_info.add_row("Name:", cs.full_name)
-        basic_info.add_row("Role:", cs.role)
-        basic_info.add_row("Gender:", cs.gender)
-        basic_info.add_row("Luck:", f"{cs.current_luck}/{cs.luck}")
-        self.caller.msg(basic_info)
+        # Basic Information
+        output += self.divider("Basic Information", width=80) + "\n"
+        basic_info = [
+            ("Full Name:", self.safe_get_attr(cs, 'full_name'), "Gender:", self.safe_get_attr(cs, 'gender')),
+            ("Handle:", self.safe_get_attr(cs, 'handle'), "Age:", self.safe_get_attr(cs, 'age')),
+            ("Hometown:", self.safe_get_attr(cs, 'hometown'), "Height:", f"{self.safe_get_attr(cs, 'height')} cm"),
+            ("Night City Rep:", self.safe_get_attr(cs, 'reputation'), "Weight:", f"{self.safe_get_attr(cs, 'weight')} kg"),
+            ("Role:", self.safe_get_attr(cs, 'role'), "Luck:", f"{self.safe_get_attr(cs, 'current_luck')}/{self.safe_get_attr(cs, 'luck')}")
+        ]
+        for row in basic_info:
+            output += f"|c{row[0]:<20}|n {row[1]:<20} |c{row[2]:<15}|n {row[3]:<20}\n"
 
         # Stats
-        stats = evtable.EvTable(border="table", table_pad=2)
-        stats.add_column("|cSTATS|n", align="l", width=76)
-        stats_row = evtable.EvTable(border=None, table_pad=1)
-        stats_row.add_column("Intelligence:", align="l", width=18)
-        stats_row.add_column(str(cs.intelligence), align="l", width=4)
-        stats_row.add_column("Technology:", align="l", width=18)
-        stats_row.add_column(str(cs.technology), align="l", width=4)
-        stats_row.add_column("Move:", align="l", width=18)
-        stats_row.add_column(str(cs.move), align="l", width=4)
-        stats.add_row(stats_row)
-        stats_row = evtable.EvTable(border=None, table_pad=1)
-        stats_row.add_column("Reflexes:", align="l", width=18)
-        stats_row.add_column(str(cs.reflexes), align="l", width=4)
-        stats_row.add_column("Cool:", align="l", width=18)
-        stats_row.add_column(str(cs.cool), align="l", width=4)
-        stats_row.add_column("Body:", align="l", width=18)
-        stats_row.add_column(str(cs.body), align="l", width=4)
-        stats.add_row(stats_row)
-        stats_row = evtable.EvTable(border=None, table_pad=1)
-        stats_row.add_column("Dexterity:", align="l", width=18)
-        stats_row.add_column(str(cs.dexterity), align="l", width=4)
-        stats_row.add_column("Willpower:", align="l", width=18)
-        stats_row.add_column(str(cs.willpower), align="l", width=4)
-        stats_row.add_column("Empathy:", align="l", width=18)
-        stats_row.add_column(str(cs.empathy), align="l", width=4)
-        stats.add_row(stats_row)
-        self.caller.msg(stats)
+        output += self.divider("STATS", width=80) + "\n"
+        stats = [
+            ("Intelligence:", cs.intelligence, "Technology:", cs.technology, "Move:", cs.move),
+            ("Reflexes:", cs.reflexes, "Cool:", cs.cool, "Body:", cs.body),
+            ("Dexterity:", cs.dexterity, "Willpower:", cs.willpower, "Empathy:", cs.empathy)
+        ]
+        for row in stats:
+            output += "".join(f"|c{label:<13}|n {value:<8}" for label, value in zip(row[::2], row[1::2])) + "\n"
+        output += "\n"
 
         # Skills
-        skills = evtable.EvTable(border="table", table_pad=2)
-        skills.add_column("|cSKILLS|n", align="l", width=76)
-        # Add logic to display skills here
-        # For example:
-        skills.add_row("Evasion 5")
-        skills.add_row("Handgun 5")
-        self.caller.msg(skills)
+        output += self.divider("SKILLS", width=80) + "\n"
+        # Add skill logic here
 
-        # Derived Statistics
-        derived = evtable.EvTable(border="table", table_pad=2)
-        derived.add_column("|cDerived Statistics|n", align="l", width=76)
-        derived_row = evtable.EvTable(border=None, table_pad=1)
-        derived_row.add_column("Hit Points:", align="l", width=18)
-        derived_row.add_column(f"{cs._current_hp}/{cs._max_hp}", align="l", width=10)
-        derived_row.add_column("Death Save:", align="l", width=18)
-        derived_row.add_column(str(cs.death_save), align="l", width=10)
-        derived.add_row(derived_row)
-        derived_row = evtable.EvTable(border=None, table_pad=1)
-        derived_row.add_column("Serious Wounds:", align="l", width=18)
-        derived_row.add_column(str(cs.serious_wounds), align="l", width=10)
-        derived_row.add_column("Humanity:", align="l", width=18)
-        derived_row.add_column(str(cs.humanity), align="l", width=10)
-        derived.add_row(derived_row)
-        self.caller.msg(derived)
+        # Derived Stats
+        output += self.divider("Derived Statistics", width=80) + "\n"
+        derived_stats = [
+            ("Hit Points:", f"{cs._current_hp}/{cs._max_hp}", "Death Save:", cs.death_save),
+            ("Serious Wounds:", cs.serious_wounds, "Humanity:", cs.humanity)
+        ]
+        for row in derived_stats:
+            output += "".join(f"|c{label:<16}|n {value:<18}" for label, value in zip(row[::2], row[1::2])) + "\n"
+        output += "\n"
 
         # Equipment
-        equipment = evtable.EvTable(border="table", table_pad=2)
-        equipment.add_column("|cEquipment|n", align="l", width=76)
-        equipment.add_row("Weapons:")
-        for weapon in Weapon.objects.filter(inventory__character=cs):
-            equipment.add_row(f"- {weapon.name} (Damage: {weapon.damage}, ROF: {weapon.rof})")
-        equipment.add_row("Armor:")
-        for armor in Armor.objects.filter(inventory__character=cs):
-            equipment.add_row(f"- {armor.name} (SP: {armor.sp}, EV: {armor.ev}, Locations: {armor.locations})")
-        self.caller.msg(equipment)
+        output += self.divider("Equipment", width=80) + "\n"
+        # Add equipment logic here
 
-class CmdAdminViewLifepath(Command):
-    """
-    View a character's lifepath as an admin.
+        # Languages
+        output += self.divider("Languages", width=80) + "\n"
+        languages = cs.character_languages.all()
+        if languages:
+            for lang in languages:
+                output += f"- {lang.language} (Level {lang.level})\n"
+        else:
+            output += "None\n"
 
-    Usage:
-      adminlifepath <character_name>
+        output += self.footer(width=80)
+        self.caller.msg(output)
 
-    This command allows admins to view the lifepath information
-    of any character in the game.
-    """
-    key = "adminlifepath"
-    locks = "cmd:perm(Admin)"
-    help_category = "Admin"
-
-    def func(self):
-        if not self.args:
-            self.caller.msg("Usage: adminlifepath <character_name>")
-            return
-
-        target = self.caller.search(self.args)
-        if not target:
-            return
-
-        try:
-            cs = CharacterSheet.objects.get(character=target)
-        except CharacterSheet.DoesNotExist:
-            self.caller.msg(f"{target.name} doesn't have a character sheet.")
-            return
-
-        self.show_lifepath(target, cs)
-
-    def show_lifepath(self, target, cs):
-        width = 78
-
+    def view_lifepath(self, target, cs):
         # Main header
-        header = f"Character Sheet for {cs.full_name}"
-        self.caller.msg(f"|044{'-' * 78}|n")
-        self.caller.msg(f"|044|c{header.center(76)}|n|044|n")
-        self.caller.msg(f"|044{'-' * 78}|n")
+        header = f"Lifepath for {cs.full_name} (Admin View)"
+        self.caller.msg(self.header(header, width=78))
+
         # Create the main table
-        table = evtable.EvTable(border="table", table_pad=2)
+        table = EvTable(border="table", table_pad=2)
         table.add_column("|cBasic Information|n", align="l", width=30)
         table.add_column("", align="l", width=50)
 
         # Add general lifepath information
-        general_fields_1 = [
+        general_fields = [
             ("Cultural Origin", "cultural_origin"),
             ("Personality", "personality"),
             ("Clothing Style", "clothing_style"),
@@ -628,21 +613,13 @@ class CmdAdminViewLifepath(Command):
             ("Affectation", "affectation"),
             ("Motivation", "motivation"),
             ("Life Goal", "life_goal"),
-        ]
-        for title, field in general_fields_1:
-            value = getattr(cs, field, "Not set")
-            table.add_row(title, value)
-    
-            # Continue general lifepath information
-        general_fields_2 = [
             ("Most Valued Person", "valued_person"),
             ("Valued Possession", "valued_possession"),
             ("Family Background", "family_background"),
             ("Origin Environment", "environment"),
             ("Family Crisis", "family_crisis")
         ]
-        table.add_row("|cBackground Data|n", "")  # Empty row for separation
-        for title, field in general_fields_2:
+        for title, field in general_fields:
             value = getattr(cs, field, "Not set")
             table.add_row(title, value)
 
@@ -944,3 +921,371 @@ class CmdCleanupDuplicates(Command):
                     char.delete()
 
         self.caller.msg("Cleanup of duplicate characters complete.")
+
+from evennia.commands.default.building import CmdExamine as EvenniaCmdExamine
+from evennia import Command
+
+class CmdExamine(EvenniaCmdExamine):
+    """
+    Examine an object in detail.
+
+    Usage:
+      examine [<object>[/attrname]]
+      examine [*<account>[/attrname]]
+
+    Switch:
+      /script - examine the object's scripts instead of attributes
+
+    The examine command shows detailed game info about an
+    object and optionally a specific attribute or script.
+    If object is not specified, the current location is examined.
+
+    Append a * before the search string to examine an account
+    rather than an object. Use examine *self to examine
+    yourself.
+    """
+
+    key = "examine"
+    aliases = ["ex", "exam", "@ex"]
+    locks = "cmd:perm(examine) or perm(Builder)"
+    help_category = "Building"
+
+    def format_single_attribute(self, attr):
+        try:
+            value = attr.value
+            if isinstance(value, str):
+                return f"{attr.key}={value} [type: str]"
+            else:
+                return super().format_single_attribute(attr)
+        except Exception as e:
+            return f"{attr.key}=<ERROR: {str(e)}> [type: {type(attr.value)}]"
+
+# Add this command to your custom command set
+from evennia import CmdSet
+
+class CmdViewCharacterSheetID(Command):
+    """
+    View your character sheet ID.
+
+    Usage:
+      viewsheetid
+    """
+    key = "viewsheetid"
+    locks = "cmd:all()"
+
+    def func(self):
+        sheet_id = self.caller.db.character_sheet_id
+        if sheet_id:
+            self.caller.msg(f"Your character sheet ID is: {sheet_id}")
+        else:
+            self.caller.msg("You don't have a character sheet ID set.")
+
+class CmdSetCharacterSheetID(Command):
+    """
+    Set your character sheet ID.
+
+    Usage:
+      setsheetid <id>
+    """
+    key = "setsheetid"
+    locks = "cmd:all()"
+
+    def func(self):
+        if not self.args:
+            self.caller.msg("Usage: setsheetid <id>")
+            return
+
+        try:
+            sheet_id = int(self.args)
+            sheet = CharacterSheet.objects.get(id=sheet_id)
+            self.caller.db.character_sheet_id = sheet_id
+            sheet.character = self.caller
+            sheet.save()
+            self.caller.msg(f"Character sheet ID set to: {sheet_id}")
+            logger.log_info(f"Character {self.caller.name} associated with sheet ID {sheet_id}")
+        except ValueError:
+            self.caller.msg("Please provide a valid integer ID.")
+        except CharacterSheet.DoesNotExist:
+            self.caller.msg(f"No character sheet found with ID {sheet_id}")
+
+class CmdAllSheets(Command):
+    """
+    List all character sheets in the database.
+
+    Usage:
+      listsheets
+    """
+    key = "@sheets"
+    locks = "cmd:perm(Admin)"
+
+    def func(self):
+        sheets = CharacterSheet.objects.all()
+        if sheets:
+            self.caller.msg("Character Sheets in the database:")
+            for sheet in sheets:
+                character_name = sheet.character.name if sheet.character else "No character"
+                self.caller.msg(f"ID: {sheet.id}, Character: {character_name}, Role: {sheet.role}")
+        else:
+            self.caller.msg("No character sheets found in the database.")
+
+class CmdAssociateAllCharacterSheets(Command):
+    """
+    Associate all characters with their character sheets.
+
+    Usage:
+      associatesheets
+    """
+    key = "associatesheets"
+    locks = "cmd:perm(Admin)"
+
+    def func(self):
+        from evennia.objects.models import ObjectDB
+        characters = ObjectDB.objects.filter(db_typeclass_path__contains="characters.Character")
+        associated_count = 0
+
+        for character in characters:
+            sheet = CharacterSheet.objects.filter(character=character).first()
+            if sheet:
+                character.db.character_sheet_id = sheet.id
+                associated_count += 1
+                logger.log_info(f"Associated character {character.name} with sheet ID {sheet.id}")
+
+        self.caller.msg(f"Associated {associated_count} characters with their character sheets.")
+
+class CmdViewSheetAttributes(Command):
+    """
+    View all attributes of a specific character sheet.
+
+    Usage:
+      viewsheet <sheet_id>
+    """
+    key = "viewsheet"
+    locks = "cmd:perm(Admin)"
+
+    def func(self):
+        if not self.args:
+            self.caller.msg("Usage: viewsheet <sheet_id>")
+            return
+
+        try:
+            sheet_id = int(self.args)
+            sheet = CharacterSheet.objects.get(id=sheet_id)
+            
+            # Get all fields of the CharacterSheet model
+            fields = CharacterSheet._meta.get_fields()
+            
+            self.caller.msg(f"Attributes for Character Sheet ID {sheet_id}:")
+            for field in fields:
+                field_name = field.name
+                try:
+                    if field.is_relation:
+                        if field.many_to_many or field.one_to_many:
+                            related_objects = getattr(sheet, field_name).all()
+                            field_value = ", ".join([str(obj) for obj in related_objects])
+                        elif field.many_to_one or field.one_to_one:
+                            field_value = str(getattr(sheet, field_name))
+                    else:
+                        field_value = getattr(sheet, field_name)
+                    
+                    self.caller.msg(f"{field_name}: {field_value}")
+                except Exception as e:
+                    self.caller.msg(f"Error processing field '{field_name}': {str(e)}")
+            
+            # Display character_sheet_id from the associated character if it exists
+            if sheet.character:
+                character_sheet_id = sheet.character.db.character_sheet_id
+                self.caller.msg(f"Associated character's character_sheet_id: {character_sheet_id}")
+            else:
+                self.caller.msg("No character associated with this sheet.")
+
+            # Display languages
+            languages = sheet.character.language_list
+            if languages:
+                self.caller.msg("Languages:")
+                for lang in languages:
+                    self.caller.msg(f"- {lang}")
+            else:
+                self.caller.msg("No languages.")
+
+            # Display group memberships
+            self.display_related_objects(sheet, 'group_memberships', "Group Memberships")
+
+            # Display faction reputations
+            self.display_related_objects(sheet, 'faction_reputations', "Faction Reputations")
+
+            # Display cyberware
+            self.display_related_objects(sheet, 'cyberware_instances', "Cyberware")
+
+            # Display owned cyberdecks
+            self.display_related_objects(sheet, 'owned_cyberdecks', "Owned Cyberdecks")
+
+            # Display netrun sessions
+            self.display_related_objects(sheet, 'netrun_sessions', "Netrun Sessions")
+
+        except ValueError:
+            self.caller.msg("Please provide a valid integer ID.")
+        except ObjectDoesNotExist:
+            self.caller.msg(f"No character sheet found with ID {sheet_id}")
+        except Exception as e:
+            self.caller.msg(f"An error occurred: {str(e)}")
+            logger.log_err(f"Error in viewsheet command: {str(e)}")
+
+    def display_related_objects(self, sheet, relation_name, display_name):
+        try:
+            related_objects = getattr(sheet, relation_name).all()
+            if related_objects:
+                self.caller.msg(f"{display_name}:")
+                for obj in related_objects:
+                    if relation_name == 'character_languages':
+                        self.caller.msg(f"- {obj.language.name} (Level {obj.level})")
+                    else:
+                        self.caller.msg(f"- {obj}")
+            else:
+                self.caller.msg(f"No {display_name.lower()}.")
+        except AttributeError:
+            self.caller.msg(f"Error: '{relation_name}' is not a valid attribute for this character sheet.")
+        except Exception as e:
+            self.caller.msg(f"Error displaying {display_name.lower()}: {str(e)}")
+
+class CmdVerifySheets(Command):
+    key = "verifysheets"
+    locks = "cmd:perm(Admin)"
+    help = 'Verify and fix character sheet data'
+
+    def handle(self, *args, **options):
+        characters = ObjectDB.objects.filter(db_typeclass_path__contains='characters.Character')
+        for char in characters:
+            sheet, created = CharacterSheet.objects.get_or_create(character=char)
+            if created:
+                self.stdout.write(f"Created new character sheet for {char.key}")
+            
+            # Ensure Streetslang is added
+            streetslang, _ = Language.objects.get_or_create(name="Streetslang")
+            CharacterLanguage.objects.get_or_create(
+                character_sheet=sheet,
+                language=streetslang,
+                defaults={'level': 4}
+            )
+
+        self.stdout.write(self.style.SUCCESS('Character sheet verification complete'))
+
+class CmdSyncLanguages(Command):
+    """
+    Sync languages in the database with the LANGUAGES list
+
+    Usage:
+      sync_languages
+
+    This command will update the language database to match the LANGUAGES list
+    defined in the language_dictionary.py file.
+    """
+
+    key = "sync_languages"
+    locks = "cmd:perm(Admin)"
+    help_category = "Admin"
+
+    def func(self):
+        try:
+            added = 0
+            updated = 0
+            removed = 0
+
+            for lang_data in LANGUAGES:
+                lang, created = Language.objects.update_or_create(
+                    name=lang_data['name'],
+                    defaults={
+                        'local': lang_data['local'],
+                        'corporate': lang_data['corporate']
+                    }
+                )
+                if created:
+                    added += 1
+                else:
+                    updated += 1
+
+            # Remove languages that are in the database but not in LANGUAGES
+            db_languages = set(Language.objects.values_list('name', flat=True))
+            list_languages = set(lang['name'] for lang in LANGUAGES)
+            languages_to_remove = db_languages - list_languages
+            removed = Language.objects.filter(name__in=languages_to_remove).delete()[0]
+
+            self.caller.msg(f"Languages synced successfully:")
+            self.caller.msg(f"Added: {added}")
+            self.caller.msg(f"Updated: {updated}")
+            self.caller.msg(f"Removed: {removed}")
+
+        except ObjectDoesNotExist:
+            self.caller.msg("Error: Language model not found. Make sure the languages app is installed and migrated.")
+        except Exception as e:
+            self.caller.msg(f"An error occurred: {str(e)}")
+
+class CmdSummon(AdminCommand):
+    """
+    Summon a player to your location.
+
+    Usage:
+      +summon <player>
+
+    Teleports the specified player to your location.
+    """
+
+    key = "+summon"
+    locks = "cmd:perm(admin)"
+    help_category = "Admin"
+
+    def func(self):
+        caller = self.caller
+
+        if not self.args:
+            caller.msg("Usage: +summon <player>")
+            return
+
+        target = self.search_for_character(self.args)
+        if not target:
+            caller.msg(f"Could not find character '{self.args}'.")
+            return
+
+        if not inherits_from(target, "typeclasses.characters.Character"):
+            caller.msg("You can only summon characters.")
+            return
+
+        old_location = target.location
+        target.move_to(caller.location, quiet=True)
+        caller.msg(f"You have summoned {target.name} to your location.")
+        target.msg(f"{caller.name} has summoned you.")
+        old_location.msg_contents(f"{target.name} has been summoned by {caller.name}.", exclude=target)
+        caller.location.msg_contents(f"{target.name} appears, summoned by {caller.name}.", exclude=[caller, target])
+
+class CmdJoin(AdminCommand):
+    """
+    Join a player at their location.
+
+    Usage:
+      +join <player>
+
+    Teleports you to the specified player's location.
+    """
+
+    key = "+join"
+    locks = "cmd:perm(admin)"
+    help_category = "Admin"
+
+    def func(self):
+        caller = self.caller
+
+        if not self.args:
+            caller.msg("Usage: +join <player>")
+            return
+
+        target = self.search_for_character(self.args)
+        if not target:
+            caller.msg(f"Could not find character '{self.args}'.")
+            return
+
+        if not inherits_from(target, "typeclasses.characters.Character"):
+            caller.msg("You can only join characters.")
+            return
+
+        caller.move_to(target.location, quiet=True)
+        caller.msg(f"You have joined {target.name} at their location.")
+        target.location.msg_contents(f"{caller.name} appears in the room.", exclude=caller)

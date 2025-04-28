@@ -1,28 +1,32 @@
 import random
-from evennia import Command, logger
+from evennia import Command, logger, search_object, default_cmds
 from world.utils.character_utils import get_full_attribute_name, ALL_ATTRIBUTES, TOPSHEET_MAPPING
 from world.utils.calculation_utils import get_remaining_points, STAT_MAPPING, SKILL_MAPPING
 from typeclasses.chargen import ChargenRoom
 from evennia.utils import evtable
-from evennia.utils.utils import list_to_string
+from evennia.utils.utils import list_to_string, inherits_from
 from evennia.utils.create import create_object
+from evennia.utils import create
 from world.cyberpunk_sheets.models import CharacterSheet
 from world.languages.models import Language
 from evennia.utils.evtable import EvTable
 from world.utils.formatting import header, footer, divider
 from world.utils.ansi_utils import wrap_ansi
-from world.languages.language_dictionary import LANGUAGES
-from world.languages.models import Language, CharacterLanguage
 from world.inventory.models import Weapon, Armor, Gear, Inventory
 from evennia.commands.default.muxcommand import MuxCommand
+from world.lifepath_dictionary import CULTURAL_ORIGINS, PERSONALITIES, CLOTHING_STYLES, HAIRSTYLES, AFFECTATIONS, MOTIVATIONS, LIFE_GOALS, ROLE_SPECIFIC_LIFEPATHS, VALUED_PERSON, VALUED_POSSESSION, FAMILY_BACKGROUND, ENVIRONMENT, FAMILY_CRISIS
 from math import ceil
 
-class CmdSheet(Command):
+class CmdSheet(MuxCommand):
     """
-    Show character sheet
+    Show character sheet or lifepath details
 
     Usage:
       sheet
+      sheet/lifepath
+
+    Switches:
+      lifepath - Show detailed lifepath information
     """
 
     key = "sheet"
@@ -35,6 +39,154 @@ class CmdSheet(Command):
         return getattr(obj, attr, 'N/A')
 
     def func(self):
+        if "lifepath" in self.switches:
+            self.view_lifepath()
+        else:
+            self.view_sheet()
+
+    def view_lifepath(self):
+        try:
+            cs = self.caller.character_sheet
+        except AttributeError:
+            self.caller.msg("You don't have a character sheet yet. Use the 'lifepath' command to create one.")
+            return
+
+        if not cs:
+            self.caller.msg("You don't have a character sheet yet. Use the 'lifepath' command to create one.")
+            return
+
+        width = 80
+        title_width = 30
+        output = ""
+
+        # Main header
+        output += header(f"Lifepath for {cs.full_name}", width=width, fillchar="|m-|n") + "\n"
+
+        # Present Section
+        output += divider("|yPresent|n", width=width, fillchar="|m=|n") + "\n"
+        present_fields = [
+            ("Cultural Origin", "cultural_origin"),
+            ("Personality", "personality"),
+            ("Clothing Style", "clothing_style"),
+            ("Hairstyle", "hairstyle"),
+            ("Affectation", "affectation"),
+            ("Motivation", "motivation"),
+            ("Life Goal", "life_goal"),
+            ("Most Valued Person", "valued_person"),
+        ]
+        for title, field in present_fields:
+            value = getattr(cs, field, "Not set")
+            output += self.wrap_field(title, value, width, title_width)
+        output += "\n"
+
+        # Past Section
+        output += divider("|yPast|n", width=width, fillchar="|m=|n") + "\n"
+        past_fields = [
+            ("Valued Possession", "valued_possession"),
+            ("Family Background", "family_background"),
+            ("Origin Environment", "environment"),
+            ("Family Crisis", "family_crisis")
+        ]
+        for title, field in past_fields:
+            value = getattr(cs, field, "Not set")
+            output += self.wrap_field(title, value, width, title_width)
+        output += "\n"
+
+        # Role Section
+        if cs.role:
+            output += divider(f"|yRole: {cs.role}|n", width=width, fillchar="|m=|n") + "\n"
+            role_specific_fields = {
+                "Rockerboy": [
+                    "what_kind_of_rockerboy_are_you",
+                    "whos_gunning_for_you_your_group",
+                    "where_do_you_perform"
+                ],
+                "Solo": [
+                    "what_kind_of_solo_are_you",
+                    "whats_your_moral_compass_like",
+                    "whos_gunning_for_you",
+                    "whats_your_operational_territory"
+                ],
+                "Netrunner": [
+                    "what_kind_of_runner_are_you",
+                    "who_are_some_of_your_other_clients",
+                    "where_do_you_get_your_programs",
+                    "whos_gunning_for_you"
+                ],
+                "Tech": [
+                    "what_kind_of_tech_are_you",
+                    "whats_your_workspace_like",
+                    "who_are_your_main_clients",
+                    "where_do_you_get_your_supplies"
+                ],
+                "Medtech": [
+                    "what_kind_of_medtech_are_you",
+                    "who_are_your_main_clients",
+                    "where_do_you_get_your_supplies"
+                ],
+                "Media": [
+                    "what_kind_of_media_are_you",
+                    "how_does_your_work_reach_the_public",
+                    "how_ethical_are_you",
+                    "what_types_of_stories_do_you_want_to_tell"
+                ],
+                "Exec": [
+                    "what_kind_of_corp_do_you_work_for",
+                    "what_division_do_you_work_in",
+                    "how_good_bad_is_your_corp",
+                    "where_is_your_corp_based",
+                    "current_state_with_your_boss"
+                ],
+                "Lawman": [
+                    "what_is_your_position_on_the_force",
+                    "how_wide_is_your_groups_jurisdiction",
+                    "how_corrupt_is_your_group",
+                    "who_is_your_groups_major_target"
+                ],
+                "Fixer": [
+                    "what_kind_of_fixer_are_you",
+                    "who_are_your_side_clients",
+                    "whos_gunning_for_you"
+                ],
+                "Nomad": [
+                    "how_big_is_your_pack",
+                    "what_do_you_do_for_your_pack",
+                    "whats_your_packs_overall_philosophy",
+                    "is_your_pack_based_on_land_air_or_sea"
+                ]
+            }
+            for field in role_specific_fields.get(cs.role, []):
+                value = getattr(cs, field, None)
+                if value:
+                    title = field.replace('_', ' ').title()
+                    output += self.wrap_field(title, value, width, title_width)
+            output += "\n"
+
+        output += footer(width=width, fillchar="|m-|n")
+        
+        # Send the formatted output to the caller
+        self.caller.msg(output)
+
+    def wrap_field(self, title, value, width=80, title_width=30):
+        wrapped_title = wrap_ansi(title, width=title_width)
+        wrapped_value = wrap_ansi(value, width=width-title_width-1)
+        
+        title_lines = wrapped_title.split('\n')
+        value_lines = wrapped_value.split('\n')
+        
+        output = ""
+        for i in range(max(len(title_lines), len(value_lines))):
+            title_line = title_lines[i] if i < len(title_lines) else ""
+            value_line = value_lines[i] if i < len(value_lines) else ""
+            
+            if i == 0:
+                output += f"|c{title_line:<{title_width}}|n {value_line}\n"
+            else:
+                output += f"|c{title_line:<{title_width}}|n {value_line}\n"
+        
+        return output
+    
+    def view_sheet(self):
         cs = self.caller.character_sheet
         if not cs:
             self.caller.msg("You don't have a character sheet.")
@@ -49,12 +201,11 @@ class CmdSheet(Command):
             ("Full Name:", self.safe_get_attr(cs, 'full_name'), "Gender:", self.safe_get_attr(cs, 'gender')),
             ("Handle:", self.safe_get_attr(cs, 'handle'), "Age:", self.safe_get_attr(cs, 'age')),
             ("Hometown:", self.safe_get_attr(cs, 'hometown'), "Height:", f"{self.safe_get_attr(cs, 'height')} cm"),
-            ("Night City Reputation:", self.safe_get_attr(cs, 'reputation'), "Weight:", f"{self.safe_get_attr(cs, 'weight')} kg"),
+            ("Night City Rep:", self.safe_get_attr(cs, 'reputation'), "Weight:", f"{self.safe_get_attr(cs, 'weight')} kg"),
             ("Role:", self.safe_get_attr(cs, 'role'), "Luck:", f"{self.safe_get_attr(cs, 'current_luck')}/{self.safe_get_attr(cs, 'luck')}")
         ]
         for row in basic_info:
-            output += f"|c{row[0]:<25}|n {row[1]:<20} |c{row[2]:<25}|n {row[3]:<20}\n"
-        output += "\n"
+            output += f"|c{row[0]:<20}|n {row[1]:<20} |c{row[2]:<15}|n {row[3]:<20}\n"
 
         # Stats
         output += divider("STATS", width=80, fillchar="|m-|n") + "\n"
@@ -147,8 +298,14 @@ class CmdSheet(Command):
         Get a list of active skills (skills with value > 0).
         """
         skill_list = []
-        excluded_fields = ['id', 'age', 'height', 'weight', 'hometown', 'account', 'total_cyberware_humanity_loss', 'rep', 'full_name', 'handle', 'gender', 'unarmed_damage_die_type', 'unarmed_damage_dice', 'current_luck', '_max_hp', '_current_hp', 'humanity', 'death_save', 'serious_wounds', 'eurodollars', 'role', 'eqweapon', 'eqarmor', 'humanity_loss', 'is_complete']
-        excluded_prefixes = ('intelligence', 'reflexes', 'dexterity', 'technology', 'cool', 'willpower', 'luck', 'move', 'body', 'empathy')
+        excluded_fields = ['id', 'age', 'height', 'weight', 'hometown', 'account', 'total_cyberware_humanity_loss', 
+                        'rep', 'full_name', 'handle', 'gender', 'unarmed_damage_die_type', 'unarmed_damage_dice', 
+                        'current_luck', '_max_hp', '_current_hp', 'humanity', 'death_save', 'serious_wounds', 
+                        'eurodollars', 'role', 'eqweapon', 'eqarmor', 'humanity_loss', 'is_complete']
+        excluded_prefixes = ('intelligence', 'reflexes', 'dexterity', 'technology', 'cool', 
+                            'willpower', 'luck', 'move', 'body', 'empathy')
+        
+        added_skills = set()
         
         for field in cs._meta.get_fields():
             if (field.name not in excluded_fields and 
@@ -156,7 +313,21 @@ class CmdSheet(Command):
                 not field.is_relation):  # This line excludes relation fields
                 value = getattr(cs, field.name, 0)
                 if isinstance(value, int) and value > 0:
-                    skill_list.append([field.name.replace('_', ' ').title(), value])
+                    skill_name = field.name.replace('_', ' ').title()
+                    if skill_name not in added_skills:
+                        skill_list.append([skill_name, value])
+                        added_skills.add(skill_name)
+        
+        # Add role abilities
+        role_abilities = ['charismatic_impact', 'combat_awareness', 'interface', 'maker', 
+                        'medicine', 'credibility', 'teamwork', 'backup', 'operator', 'moto']
+        for ability in role_abilities:
+            value = getattr(cs, ability, 0)
+            if value > 0:
+                ability_name = ability.replace('_', ' ').title()
+                if ability_name not in added_skills:
+                    skill_list.append([ability_name, value])
+                    added_skills.add(ability_name)
         
         skill_list.sort(key=lambda x: (-x[1], x[0]))
         return skill_list
@@ -323,182 +494,6 @@ class CmdChargenDelete(Command):
         else:
             self.caller.msg("You don't have a character sheet to delete.")
 
-class CmdSetStat(Command):
-    """
-    Set a stat, skill, or topsheet attribute for your character.
-
-    Usage:
-      setstat <attribute>=<value>
-
-    Examples:
-      setstat INT=5
-      setstat AUTO=3
-      setstat HANDLE=CoolRunner
-      setstat AGE=25
-    """
-
-    key = "setstat"
-    locks = "cmd:all()"
-
-    def func(self):
-        if not isinstance(self.caller.location, ChargenRoom):
-            self.caller.msg("You can only use this command in a character generation room.")
-            return
-
-        if not self.args or "=" not in self.args:
-            self.caller.msg("Usage: setstat <attribute>=<value>")
-            return
-
-        attr, value = self.args.split("=", 1)
-        attr = attr.strip()
-        value = value.strip()
-
-        full_attr_name = get_full_attribute_name(attr)
-        if not full_attr_name:
-            self.caller.msg(f"Invalid attribute name. Choose from: {', '.join(ALL_ATTRIBUTES.values())}")
-            return
-
-        sheet = self.caller.character_sheet
-        if not sheet:
-            self.caller.msg("You don't have a character sheet.")
-            return
-
-        if full_attr_name in STAT_MAPPING.values():
-            try:
-                value = int(value)
-                if value < 0 or value > 10:
-                    self.caller.msg("Stat value must be between 0 and 10.")
-                    return
-            except ValueError:
-                self.caller.msg("You must specify an integer value for stats.")
-                return
-
-            current_value = getattr(sheet, full_attr_name)
-            points_needed = value - current_value
-            remaining_stat_points, _ = sheet.get_remaining_points()
-
-            if points_needed > remaining_stat_points:
-                self.caller.msg(f"Not enough stat points. You need {points_needed} but only have {remaining_stat_points}.")
-                return
-
-        elif full_attr_name in SKILL_MAPPING.values():
-            try:
-                value = int(value)
-                if value < 0 or value > 10:
-                    self.caller.msg("Skill value must be between 0 and 10.")
-                    return
-            except ValueError:
-                self.caller.msg("You must specify an integer value for skills.")
-                return
-
-            current_value = getattr(sheet, full_attr_name)
-            points_needed = value - current_value
-            is_double_cost = full_attr_name in ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
-            actual_points_needed = points_needed * 2 if is_double_cost else points_needed
-
-            _, remaining_skill_points = sheet.get_remaining_points()
-
-            if actual_points_needed > remaining_skill_points:
-                self.caller.msg(f"Not enough skill points. You need {actual_points_needed} but only have {remaining_skill_points}.")
-                return
-
-        # For topsheet attributes, we don't need to check points
-        setattr(sheet, full_attr_name, value)
-        sheet.save()
-
-        self.caller.msg(f"Set {full_attr_name} to {value}.")
-        
-        if full_attr_name in STAT_MAPPING.values() or full_attr_name in SKILL_MAPPING.values():
-            new_remaining_stat_points, new_remaining_skill_points = sheet.get_remaining_points()
-            self.caller.msg(f"You have {new_remaining_stat_points} stat points and {new_remaining_skill_points} skill points remaining to spend.")
-
-        # Update the room's display
-        if isinstance(self.caller.location, ChargenRoom):
-            self.caller.location.update_remaining_points(self.caller)
-
-    def get_derived_stats(self, sheet):
-        return {
-            "Max HP": sheet._max_hp,
-            "Current HP": sheet._current_hp,
-            "Death Save": sheet.death_save,
-            "Serious Wounds": sheet.serious_wounds,
-            "Humanity": sheet.humanity
-        }
-
-class CmdSetLanguage(MuxCommand):
-    """
-    Set a language skill for your character.
-
-    Usage:
-      setlanguage <language name> <level>
-      setlanguage/remove <language name>
-      setlanguage/list
-
-    Examples:
-      setlanguage Streetslang 3
-      setlanguage/remove Streetslang
-      setlanguage/list
-
-    This command allows you to add, update, remove, or list language skills.
-    The level should be between 1 and 10.
-    """
-    key = "setlanguage"
-    locks = "cmd:all()"
-    help_category = "Character"
-
-    def func(self):
-        if not hasattr(self.caller, 'character_sheet'):
-            self.caller.msg("You don't have a character sheet!")
-            return
-
-        sheet = self.caller.character_sheet
-
-        if "list" in self.switches:
-            languages = sheet.character_languages.all()
-            if languages:
-                self.caller.msg("Your languages:")
-                for lang in languages:
-                    self.caller.msg(f"{lang.language} (Level {lang.level})")
-            else:
-                self.caller.msg("You don't know any languages.")
-            return
-
-        if "remove" in self.switches:
-            if not self.args:
-                self.caller.msg("Usage: setlanguage/remove <language name>")
-                return
-            language_name = self.args.strip()
-            sheet.remove_language(language_name)
-            self.caller.msg(f"Removed {language_name} from your languages.")
-            return
-
-        if not self.args or len(self.args.split()) < 2:
-            self.caller.msg("Usage: setlanguage <language name> <level>")
-            return
-
-        try:
-            language_name, level = self.args.rsplit(None, 1)
-            level = int(level)
-            if not 1 <= level <= 10:
-                raise ValueError
-        except ValueError:
-            self.caller.msg("Please provide a valid language name and level (1-10).")
-            return
-
-        language_info = next((lang for lang in LANGUAGES if lang.name.lower() == language_name.lower()), None)
-
-        if language_info:
-            sheet.add_language(language_info.name, level)
-            self.caller.msg(f"Added {language_info.name} at level {level} to your character sheet.")
-        else:
-            # If not found in LANGUAGES, try to get it from the database
-            try:
-                language_obj = Language.objects.get(name__iexact=language_name)
-                sheet.add_language(language_obj.name, level)
-                self.caller.msg(f"Added {language_obj.name} at level {level} to your character sheet.")
-            except Language.DoesNotExist:
-                self.caller.msg(f"Language '{language_name}' not found. Please check the spelling and try again.")
-
 class CmdRoll(Command):
     """
     Roll a skill check.
@@ -644,3 +639,196 @@ class CmdGainLuck(Command):
         
         new_luck = gain_luck(sheet, amount)
         self.caller.msg(f"You regained luck points. Current luck: {new_luck}/{sheet.luck}")
+
+class CmdOOC(MuxCommand):
+    """
+    Speak or pose out-of-character in your current location.
+
+    Usage:
+      ooc <message>
+      ooc :<pose>
+
+    Examples:
+      ooc Hello everyone!
+      ooc :waves to the group.
+    """
+    key = "ooc"
+    locks = "cmd:all()"
+    help_category = "Communication"
+
+    def func(self):
+        if not self.args:
+            self.caller.msg("Say or pose what?")
+            return
+
+        location = self.caller.location
+        if not location:
+            self.caller.msg("You are not in any location.")
+            return
+
+        # Strip leading and trailing whitespace from the message
+        ooc_message = self.args.strip()
+
+        # Check if it's a pose (starts with ':')
+        if ooc_message.startswith(':'):
+            pose = ooc_message[1:].strip()  # Remove the ':' and any following space
+            message = f"<|mOOC|n> {self.caller.name} {pose}"
+            self_message = f"<|mOOC|n> {self.caller.name} {pose}"
+        else:
+            message = f"<|mOOC|n> {self.caller.name} says, \"{ooc_message}\""
+            self_message = f"<|mOOC|n> You say, \"{ooc_message}\""
+
+        location.msg_contents(message, exclude=self.caller)
+        self.caller.msg(self_message)
+
+class CmdPlusIc(MuxCommand):
+    """
+    Return to the IC area from OOC.
+
+    Usage:
+      +ic
+
+    This command moves you back to your previous IC location if available,
+    or to the default IC starting room if not. You must be approved to use this command.
+    """
+
+    key = "+ic"
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        caller = self.caller
+
+        # Check if the character is approved
+        if not caller.tags.has("approved", category="approval"):
+            caller.msg("You must be approved to enter IC areas.")
+            return
+
+        # Get the stored pre_ooc_location, or use the default room #30
+        target_location = caller.db.pre_ooc_location or search_object("#30")[0]
+
+        if not target_location:
+            caller.msg("Error: Unable to find a valid IC location.")
+            return
+
+        # Move the caller to the target location
+        caller.move_to(target_location, quiet=True)
+        caller.msg(f"You return to the IC area ({target_location.name}).")
+        target_location.msg_contents(f"{caller.name} has returned to the IC area.", exclude=caller)
+
+        # Clear the pre_ooc_location attribute
+        caller.attributes.remove("pre_ooc_location")
+
+class CmdPlusOoc(MuxCommand):
+    """
+    Move to the OOC area (Limbo).
+
+    Usage:
+      +ooc
+
+    This command moves you to the OOC area (Limbo) and stores your
+    previous location so you can return later.
+    """
+
+    key = "+ooc"
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        caller = self.caller
+        current_location = caller.location
+
+        # Store the current location as an attribute
+        caller.db.pre_ooc_location = current_location
+
+        # Find Limbo (object #2)
+        limbo = search_object("#2")[0]
+
+        if not limbo:
+            caller.msg("Error: Limbo not found.")
+            return
+
+        # Move the caller to Limbo
+        caller.move_to(limbo, quiet=True)
+        caller.msg(f"You move to the OOC area ({limbo.name}).")
+        limbo.msg_contents(f"{caller.name} has entered the OOC area.", exclude=caller)
+
+class CmdMeet(MuxCommand):
+    """
+    Send a meet request to another player or respond to one.
+
+    Usage:
+      +meet <player>
+      +meet/accept
+      +meet/reject
+
+    Sends a meet request to another player. If accepted, they'll be
+    teleported to your location.
+    """
+
+    key = "+meet"
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def search_for_character(self, search_string):
+        # First, try to find by exact name match
+        results = search_object(search_string, typeclass="typeclasses.characters.Character")
+        if results:
+            return results[0]
+        
+        # If not found, try to find by dbref
+        if search_string.startswith("#") and search_string[1:].isdigit():
+            results = search_object(search_string, typeclass="typeclasses.characters.Character")
+            if results:
+                return results[0]
+        
+        # If still not found, return None
+        return None
+
+    def func(self):
+        caller = self.caller
+
+        if not self.args and not self.switches:
+            caller.msg("Usage: +meet <player> or +meet/accept or +meet/reject")
+            return
+
+        if "accept" in self.switches:
+            if not caller.ndb.meet_request:
+                caller.msg("You have no pending meet requests.")
+                return
+            requester = caller.ndb.meet_request
+            old_location = caller.location
+            caller.move_to(requester.location, quiet=True)
+            caller.msg(f"You accept the meet request from {requester.name} and join them.")
+            requester.msg(f"{caller.name} has accepted your meet request and joined you.")
+            old_location.msg_contents(f"{caller.name} has left to meet {requester.name}.", exclude=caller)
+            requester.location.msg_contents(f"{caller.name} appears, joining {requester.name}.", exclude=[caller, requester])
+            caller.ndb.meet_request = None
+            return
+
+        if "reject" in self.switches:
+            if not caller.ndb.meet_request:
+                caller.msg("You have no pending meet requests.")
+                return
+            requester = caller.ndb.meet_request
+            caller.msg(f"You reject the meet request from {requester.name}.")
+            requester.msg(f"{caller.name} has rejected your meet request.")
+            caller.ndb.meet_request = None
+            return
+
+        target = self.search_for_character(self.args)
+        if not target:
+            caller.msg(f"Could not find character '{self.args}'.")
+            return
+
+        if target == caller:
+            caller.msg("You can't send a meet request to yourself.")
+            return
+
+        if target.ndb.meet_request:
+            caller.msg(f"{target.name} already has a pending meet request.")
+            return
+
+        target.ndb.meet_request = caller
+        caller.msg(f"You sent a meet request to {target.name}.")
+        target.msg(f"{caller.name} has sent you a meet request. Use +meet/accept to accept or +meet/reject to decline.")

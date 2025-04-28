@@ -16,10 +16,9 @@ own cmdsets by inheriting from them or directly from `evennia.CmdSet`.
 """
 
 from evennia import default_cmds, CmdSet
-from .character_commands import CmdSheet, CmdSetStat, CmdRoll, CmdRole, CmdSpendLuck, CmdGainLuck, CmdEquipWeapon, CmdUnequipWeapon, CmdShortDesc, CmdSetLanguage
-from .chargen import CmdChargen, CmdChargenFinish, CmdClearSheet, CmdListCharacterSheets
-from .lifepath import CmdViewLifepath, CmdLifepath  
-from .admin_commands import CmdStat, CmdHeal, CmdApprove, CmdUnapprove, CmdAdminViewSheet, CmdAdminViewLifepath, CmdFixSheet, CmdSpawnRipperdoc, CmdGradientName, CmdClearAllStates, CmdCleanupDuplicateGear, CmdClearRental, CmdCleanupDuplicates
+from .character_commands import CmdSheet, CmdRoll, CmdRole, CmdSpendLuck, CmdGainLuck, CmdEquipWeapon, CmdUnequipWeapon, CmdShortDesc, CmdOOC, CmdPlusOoc, CmdPlusIc, CmdMeet
+from .chargen import CmdChargen, CmdChargenFinish, CmdClearSheet, CmdListCharacterSheets, CmdLifepath, CmdSetStat, CmdSetLanguage
+from .admin_commands import CmdStat, CmdHeal, CmdApprove, CmdUnapprove, CmdAdminViewSheet, CmdFixSheet, CmdSpawnRipperdoc, CmdGradientName, CmdClearAllStates, CmdCleanupDuplicateGear, CmdClearRental, CmdCleanupDuplicates, CmdExamine, CmdAssociateAllCharacterSheets, CmdViewCharacterSheetID, CmdSetCharacterSheetID, CmdAllSheets, CmdViewSheetAttributes, CmdSyncLanguages, CmdJoin, CmdSummon
 from .inventory_commands import CmdInventory, CmdEquipment
 from .equipment_commands import CmdAddWeapon, CmdAddArmor, CmdAddGear, CmdPopulateWeapons, CmdPopulateArmor, CmdPopulateGear, CmdViewEquipment, CmdPopulateAllEquipment, CmdRemoveEquipment, CmdPopulateCyberware, CmdDepopulateAllEquipment, CmdYes
 from .economy import CmdAdminMoney, CmdGiveMoney, CmdBalance, CmdRentRoom, CmdLeaveRental
@@ -29,13 +28,15 @@ from .bulletin_commands import CmdBoardList, CmdBoardRead, CmdBoardPost, CmdBoar
 from .hustle_commands import CmdHustle, CmdDebugHustle, CmdClearHustleAttempt, CmdRegenerateHustles
 from .faction_commands import CmdCreateFaction, CmdFactionInfo, CmdFactionRep, CmdModifyFactionRep, CmdCreateGroup, CmdJoinGroup, CmdLeaveGroup, CmdGroupInfo, CmdFactionInfluence, CmdCreateGroupRole, CmdAssignGroupRole, CmdGroupChat, CmdFactionMission, CmdListGroupsAndFactions, CmdApproveJoin, CmdFactionDesc, CmdGroupDesc, CmdSetGroupLeader
 from world.mail.commands import CmdMail, CmdMailbox, CmdMailDelete
-from .request_commands import CmdRequests, CmdStaffRequest, CmdStaffRequestView, CmdStaffRequestAssign, CmdStaffRequestComment, CmdStaffRequestClose
+from .request_commands import CmdRequests
 from .cyberware_commands import CmdCyberware, CmdActivateCyberware
 from .netrun_commands import CmdNetrun, CmdInstallProgram, CmdListPrograms, CmdListNetArchitectures
 from .netrun_admin_commands import CmdCreateNetArchitecture
 from .combat_system import CombatStartCommand, CombatCommand, CmdReload, CmdJoinCombat
-from .language_commands import CmdLanguage, CmdMaskedSay, CmdMaskedPose, CmdMaskedEmit
+from .language_commands import CmdLanguage, CmdMaskedSay, CmdMaskedEmit, CmdMaskedPose
 from .building import CmdCreateRentableRoom
+from .notes import CmdNotes
+from evennia.contrib.base_systems.mux_comms_cmds import CmdSetLegacyComms
 from evennia import default_cmds
 # from typeclasses.characters import CharacterCmdSet as BaseCharacterCmdSet
 
@@ -54,11 +55,11 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         """
         super().at_cmdset_creation()
         
+        self.add(CmdSetLegacyComms())
         self.add(CmdSheet())
         self.add(CmdSetStat())
         self.add(CmdRoll())
         self.add(CmdRole())
-        self.add(CmdViewLifepath())
         self.add(CmdLifepath())
         self.add(CmdSpendLuck())
         self.add(CmdGainLuck())
@@ -130,6 +131,11 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdMaskedEmit())
         self.add(CmdRentRoom())
         self.add(CmdLeaveRental())
+        self.add(CmdOOC())
+        self.add(CmdPlusOoc())
+        self.add(CmdPlusIc())
+        self.add(CmdMeet())
+        self.add(CmdNotes())
 
 class AccountCmdSet(default_cmds.AccountCmdSet):
     """
@@ -163,7 +169,6 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdApprove())
         self.add(CmdUnapprove())
         self.add(CmdAdminViewSheet())
-        self.add(CmdAdminViewLifepath())
         self.add(CmdFixSheet())
         self.add(CmdPopulateCyberware())
         self.add(CmdAdminMoney())
@@ -178,11 +183,6 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdModifyFactionRep())
         self.add(CmdFactionDesc())
         self.add(CmdSetGroupLeader())
-        self.add(CmdStaffRequest())
-        self.add(CmdStaffRequestView())
-        self.add(CmdStaffRequestAssign())
-        self.add(CmdStaffRequestComment())
-        self.add(CmdStaffRequestClose())
         self.add(CmdGradientName())
         self.add(CmdCreateNetArchitecture())
         self.add(CmdClearAllStates())
@@ -192,6 +192,15 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdCreateRentableRoom())
         self.add(CmdClearRental())
         self.add(CmdCleanupDuplicates())
+        self.add(CmdExamine())
+        self.add(CmdAssociateAllCharacterSheets())
+        self.add(CmdAllSheets())
+        self.add(CmdSetCharacterSheetID())
+        self.add(CmdViewCharacterSheetID())
+        self.add(CmdViewSheetAttributes())
+        self.add(CmdSyncLanguages())
+        self.add(CmdJoin())
+        self.add(CmdSummon())
 
 class EquipmentAdminCmdSet(CmdSet): # type: ignore
     """

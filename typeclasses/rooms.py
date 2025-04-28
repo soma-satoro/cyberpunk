@@ -39,12 +39,29 @@ class Room(DefaultRoom):
         desc = self.db.desc
 
         # Header with room name
-        
         string = header(name, width=78, bcolor="|m", fillchar=ANSIString("|m-|n")) + "\n"
         
-        # Optional: add custom room description here if available
+        # Process room description
         if desc:
-            string += wrap_ansi(desc, 78, left_padding=1) + "\n\n"
+            paragraphs = desc.split('%r')
+            formatted_paragraphs = []
+            for i, p in enumerate(paragraphs):
+                if not p.strip():
+                    if i > 0 and not paragraphs[i-1].strip():
+                        formatted_paragraphs.append('')  # Add blank line for double %r
+                    continue
+                
+                lines = p.split('%t')
+                formatted_lines = []
+                for j, line in enumerate(lines):
+                    if j == 0 and line.strip():
+                        formatted_lines.append(wrap_ansi(line.strip(), width=76))
+                    elif line.strip():
+                        formatted_lines.append(wrap_ansi('    ' + line.strip(), width=76))
+                
+                formatted_paragraphs.append('\n'.join(formatted_lines))
+            
+            string += '\n'.join(formatted_paragraphs) + "\n\n"
 
         # List all characters in the room
         characters = [obj for obj in self.contents if obj.has_account]

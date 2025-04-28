@@ -3,7 +3,16 @@ from world.cyberpunk_sheets.models import CharacterSheet
 from django.db import IntegrityError
 
 def start_lifepath(caller):
-    cs = caller.account.character_sheet
+    try:
+        cs = caller.character_sheet
+    except AttributeError:
+        caller.msg("Error: You don't have a character sheet. Please contact an admin.")
+        return None, None
+
+    if not cs:
+        caller.msg("You don't have a character sheet. Please contact an admin.")
+        return None, None
+
     text = "Welcome to the Cyberpunk RED Lifepath creation process!\n"
     text += "This will guide you through creating your character's background.\n"
     if cs.role:
@@ -13,7 +22,7 @@ def start_lifepath(caller):
     text += "Choose an aspect to define:"
     options = [
         {"key": "1", "desc": "Set Role", "goto": "set_role"},
-        {"key": "2", "desc": "Cultural Origin", "goto": "cultural_origin"},
+        {"key": "2", "desc": "Cultural Origin", "goto": "choose_cultural_origin"},
         {"key": "3", "desc": "Personality", "goto": "personality"},
         {"key": "4", "desc": "Clothing Style", "goto": "clothing_style"},
         {"key": "5", "desc": "Hairstyle", "goto": "hairstyle"},
@@ -36,26 +45,49 @@ def choose_cultural_origin(caller):
     options = []
     
     for i, origin in enumerate(CULTURAL_ORIGINS, 1):
-        text += f"{i}. {origin}\n"
         options.append({"key": str(i), "desc": origin, "goto": ("set_cultural_origin", {"origin": origin})})
     
     options.append({"key": "b", "desc": "Back", "goto": "start_lifepath"})
     return text, options
 
-def set_cultural_origin(caller, origin):
-    cs = caller.account.character_sheet
+def set_cultural_origin(caller, raw_string, **kwargs):
+    origin = kwargs.get('origin')
+    cs = caller.character_sheet
+    
+    # Clear previous languages associated with cultural origin
+    cs.clear_cultural_languages()
+    
     cs.cultural_origin = origin
     cs.save()
     
-    text = f"Your cultural origin has been set to: {origin}\n"
-    text += "Next, let's choose your personality."
+    caller.msg(f"Your Cultural Origin has been set to: {origin}")
     
-    options = [
-        {"key": "1", "desc": "Continue", "goto": "choose_personality"},
-        {"key": "b", "desc": "Back", "goto": "choose_cultural_origin"}
-    ]
+    # Proceed directly to language selection
+    return choose_language(caller, origin=origin)
+
+def choose_language(caller, raw_string="", **kwargs):
+    origin = kwargs.get("origin")
+    languages = CULTURAL_ORIGINS.get(origin, [])
     
+    text = f"Choose a language you know from your {origin} background:\n\n"
+    options = []
+    
+    for i, lang in enumerate(languages, 1):
+        options.append({"key": str(i), "desc": lang, "goto": ("set_language", {"language": lang})})
+    
+    options.append({"key": "b", "desc": "Back", "goto": "choose_cultural_origin"})
     return text, options
+
+def set_language(caller, raw_string, **kwargs):
+    language = kwargs.get("language")
+    cs = caller.character_sheet
+    
+    cs.add_language(language, 4)
+    
+    caller.msg(f"You've gained full fluency in {language}.")
+    
+    # Return to the main menu
+    return start_lifepath(caller)
 
 # Add more functions for other lifepath steps...
 
@@ -64,7 +96,18 @@ def exit_menu(caller):
     return text, None
 
 def cultural_origin(caller):
-    return create_menu("Cultural Origin", CULTURAL_ORIGINS, "cultural_origin")
+    return choose_cultural_origin(caller)
+
+def choose_cultural_origin(caller):
+    text = "Choose your character's cultural origin:\n\n"
+    text += "(Note: Changing your cultural origin will reset your cultural language.)\n\n"
+    options = []
+    
+    for i, origin in enumerate(CULTURAL_ORIGINS, 1):
+        options.append({"key": str(i), "desc": origin, "goto": ("set_cultural_origin", {"origin": origin})})
+    
+    options.append({"key": "b", "desc": "Back", "goto": "start_lifepath"})
+    return text, options
 
 def personality(caller):
     return create_menu("Personality", PERSONALITIES, "personality")
@@ -100,7 +143,16 @@ def family_crisis(caller):
     return create_menu("Family Crisis", FAMILY_CRISIS, "family_crisis")
 
 def role_specific(caller):
-    cs = caller.account.character_sheet
+    try:
+        cs = caller.character_sheet
+    except AttributeError:
+        caller.msg("Error: You don't have a character sheet. Please contact an admin.")
+        return None, None
+
+    if not cs:
+        caller.msg("You don't have a character sheet. Please contact an admin.")
+        return None, None
+
     if not cs.role:
         text = "You need to select a role first. Use the 'Set Role' option in the main menu to set your role."
         options = [{"key": "0", "desc": "Return to main menu", "goto": "start_lifepath"}]
@@ -137,8 +189,14 @@ def set_field(caller, raw_string, **kwargs):
     field = kwargs['field']
     value = kwargs['value']
     
-    cs = caller.account.character_sheet
-    
+    try:
+        cs = caller.character_sheet
+    except AttributeError:
+        # Create a new character sheet if one doesn't exist
+        cs = CharacterSheet.objects.create(character=caller)
+        caller.db.character_sheet_id = cs.id
+        caller.msg("A new character sheet has been created for you.")
+
     db_field = field.lower().replace(' ', '_').replace('?', '').replace('/', '_').strip()
     
     if hasattr(cs, db_field):
@@ -183,7 +241,14 @@ def set_role_helper(caller, raw_string, **kwargs):
         caller.msg("Error: No role selected. Please try again.")
         return "set_role"
     
-    cs = caller.account.character_sheet
+    try:
+        cs = caller.character_sheet
+    except AttributeError:
+        # Create a new character sheet if one doesn't exist
+        cs = CharacterSheet.objects.create(character=caller)
+        caller.db.character_sheet_id = cs.id
+        caller.msg("A new character sheet has been created for you.")
+
     cs.role = role
     cs.save()
     caller.msg(f"Your role has been set to: {role}")

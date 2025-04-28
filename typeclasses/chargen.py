@@ -7,6 +7,7 @@ from world.utils.formatting import header, footer, divider
 from world.cyberpunk_constants import STATS, ROLE_SKILLS
 from evennia.utils.utils import inherits_from
 import logging
+from world.utils.character_utils import get_pronouns
 
 logger = logging.getLogger('cyberpunk.chargen')
 
@@ -27,12 +28,24 @@ class ChargenRoom(DefaultRoom):
         return character.character_sheet.get_remaining_points()
 
     def update_remaining_points(self, character):
+        sheet = character.character_sheet
+        if sheet:
+            remaining_stat_points, remaining_skill_points = sheet.get_remaining_points()
+            pronouns = get_pronouns(sheet.gender)
+            self.msg_contents(f"{character.name} has updated {pronouns['possessive']} stats. Remaining points have been updated.", exclude=[character])
+            self.display_points(character)
+
+    def display_points(self, character):
+        """
+        Display the remaining stat and skill points for a character.
+        """
+        if not hasattr(character, 'character_sheet') or not character.character_sheet:
+            character.msg("You don't have a character sheet. Please contact an admin.")
+            return
+
         remaining_stat_points, remaining_skill_points = self.get_remaining_points(character)
-        self.db.remaining_points = {
-            "stat_points": remaining_stat_points,
-            "skill_points": remaining_skill_points
-        }
-        self.msg_contents(f"{character.name} has updated their stats. Remaining points have been updated.")
+        if remaining_stat_points is not None and remaining_skill_points is not None:
+            character.msg(f"|wRemaining Points:|n Stat Points: |g{remaining_stat_points}|n, Skill Points: |g{remaining_skill_points}|n")
 
     def get_display_name(self, looker, **kwargs):
         """
@@ -87,9 +100,26 @@ class ChargenRoom(DefaultRoom):
                 points_info = f"|wRemaining Points:|n Stat Points: |g{remaining_stat_points}|n, Skill Points: |g{remaining_skill_points}|n\n"
                 string += points_info + "\n"
 
-        # Optional: add custom room description here if available
+        # Process room description
         if desc:
-            string += wrap_ansi(desc, 78, left_padding=1) + "\n\n"
+            paragraphs = desc.split('%r')
+            formatted_paragraphs = []
+            for i, p in enumerate(paragraphs):
+                if not p.strip():
+                    formatted_paragraphs.append('')  # Add blank line for empty paragraph
+                    continue
+                
+                lines = p.split('%t')
+                formatted_lines = []
+                for j, line in enumerate(lines):
+                    if j == 0 and line.strip():
+                        formatted_lines.append(wrap_ansi(line.strip(), width=76))
+                    elif line.strip():
+                        formatted_lines.append(wrap_ansi('    ' + line.strip(), width=76))
+                
+                formatted_paragraphs.append('\n'.join(formatted_lines))
+            
+            string += '\n'.join(formatted_paragraphs) + "\n\n"
 
         # List all characters in the room
         characters = [obj for obj in self.contents if obj.has_account]
@@ -121,16 +151,57 @@ class ChargenRoom(DefaultRoom):
             for obj in objects:
                 string += f" {obj.get_display_name(looker)}\n"
 
-        # List all exits
-        exits = [obj for obj in self.contents if obj.destination]
-        if exits:
+        # Separate exits into directions and building exits
+        exits = [ex for ex in self.contents if ex.destination]
+        directions = []
+        building_exits = []
+
+        direction_aliases = ['n', 's', 'e', 'w', 'ne', 'se', 'nw', 'sw', 'u', 'd', 'o']
+        
+        for ex in exits:
+            if any(alias in ex.aliases.all() for alias in direction_aliases):
+                directions.append(ex)
+            else:
+                building_exits.append(ex)
+
+        # Building Exits section
+        if building_exits:
             string += divider("Exits", width=78, fillchar=ANSIString("|m-|n")) + "\n"
-            for exit in exits:
-                string += f" {exit.get_display_name(looker)}\n"
+            exit_strings = []
+            for ex in building_exits:
+                aliases = ex.aliases.all() or []
+                short = min(aliases, key=len) if aliases else ""
+                exit_strings.append(ANSIString(f" <|y{short.upper()}|n> {ex.get_display_name(looker)}"))
+            
+            # Split into two columns
+            string += self.format_two_columns(exit_strings)
+
+        # Directions section
+        if directions:
+            string += divider("Directions", width=78, fillchar=ANSIString("|m-|n")) + "\n"
+            direction_strings = []
+            for ex in directions:
+                aliases = ex.aliases.all() or []
+                short = min(aliases, key=len) if aliases else ""
+                direction_strings.append(ANSIString(f" <|y{short.upper()}|n> {ex.get_display_name(looker)}"))
+            
+            # Split into two columns
+            string += self.format_two_columns(direction_strings)
 
         string += footer(width=78, fillchar=ANSIString("|m-|n"))
 
         return string
+    
+    def format_two_columns(self, items):
+        """
+        Format a list of items into two columns.
+        """
+        output = ""
+        for i in range(0, len(items), 2):
+            left = items[i].ljust(38)
+            right = items[i+1] if i+1 < len(items) else ""
+            output += f"{left} {right}\n"
+        return output
 
     def idle_time_display(self, idle_time):
         """

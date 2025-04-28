@@ -3,15 +3,16 @@
 from evennia import Command
 from evennia.utils.evtable import EvTable
 from evennia.utils.utils import crop
-from django.conf import settings
 from world.requests.models import Request, Comment
-from itertools import cycle
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils.utils import crop
 from world.utils.ansi_utils import wrap_ansi
 from world.utils.formatting import header, footer, divider
 from evennia.utils.ansi import ANSIString
+from evennia.utils.utils import inherits_from
 
+
+from evennia.commands.default.muxcommand import MuxCommand
 
 class CmdRequests(MuxCommand):
     """
@@ -25,15 +26,21 @@ class CmdRequests(MuxCommand):
       request/cancel <#>
       request/addplayer <#>=<player>
 
+    Staff-only commands:
+      request/assign <#>=<staff>
+      request/close <#>
+
     Switches:
       create - Create a new request
       comment - Add a comment to a request
-      cancel - Cancel one of your requests
-      addplayer - Add another player to your request
+      cancel - Cancel one of your requests (player-only)
+      addplayer - Add another player to your request (player-only)
+      assign - Assign a request to a staff member (staff-only)
+      close - Close a request (staff-only)
     """
     key = "+request"
     aliases = ["+requests", "+myjob", "+myjobs"]
-    help_category = "Requests"
+    help_category = "General"
 
     def func(self):
         if not self.args and not self.switches:
@@ -48,11 +55,19 @@ class CmdRequests(MuxCommand):
             self.cancel_request()
         elif "addplayer" in self.switches:
             self.add_player()
+        elif "assign" in self.switches:
+            self.assign_request()
+        elif "close" in self.switches:
+            self.close_request()
         else:
             self.caller.msg("Invalid switch. See help +request for usage.")
 
     def list_requests(self):
-        requests = Request.objects.filter(requester=self.caller.account)
+        if self.caller.check_permstring("Admin"):
+            requests = Request.objects.all().order_by('-date_created')
+        else:
+            requests = Request.objects.filter(requester=self.caller.account)
+
         if not requests:
             self.caller.msg("You have no open requests.")
             return
@@ -84,7 +99,10 @@ class CmdRequests(MuxCommand):
     def view_request(self):
         try:
             req_id = int(self.args)
-            request = Request.objects.get(id=req_id, requester=self.caller.account)
+            if self.caller.check_permstring("Admin"):
+                request = Request.objects.get(id=req_id)
+            else:
+                request = Request.objects.get(id=req_id, requester=self.caller.account)
         except (ValueError, Request.DoesNotExist):
             self.caller.msg("Request not found.")
             return
@@ -195,96 +213,13 @@ class CmdRequests(MuxCommand):
 
         self.caller.msg(f"Player {player.name} added to request #{req_id}.")
 
-
-class CmdStaffRequest(Command):
-    """
-    Staff command to view all requests.
-
-    Usage:
-      staffrequest
-
-    """
-    key = "staffrequest"
-    aliases = ["managerequest", "managerequests"]
-    locks = "cmd:perm(Admin)"
-    help_category = "Admin"
-    """
-    def func(self):
-        if not self.args and not self.switches:
-            self.list_all_requests()
-        elif self.args and not self.switches:
-            self.view_request()
-        elif "assign" in self.switches:
-            self.assign_request()
-        elif "comment" in self.switches:
-            self.add_comment()
-        elif "close" in self.switches:
-            self.close_request()
-        else:
-            self.caller.msg("Invalid switch. See help +requests for usage.")
-"""
-    def func(self):
-        requests = Request.objects.all().order_by('-date_created')
-        if not requests:
-            self.caller.msg("There are no open requests.")
+    def assign_request(self):
+        if not self.caller.check_permstring("Admin"):
+            self.caller.msg("You don't have permission to assign requests.")
             return
 
-        table = EvTable("ID", "Category", "Title", "Requester", "Status", border="cells")
-        for req in requests:
-            table.add_row(req.id, req.category, crop(req.title, width=30), req.requester.username, req.status)
-        
-        self.caller.msg(str(table))
-
-class CmdStaffRequestView(Command):
-    """
-    View a request by ID number.
-
-    Usage:
-      staffrequest/view <#>
-
-    """
-    key = "staffrequest/view"
-    aliases = ["managerequest/view", "managerequests/view"]
-    locks = "cmd:perm(Admin)"
-    help_category = "Admin"
-
-    def func(self):
-        try:
-            req_id = int(self.args)
-            request = Request.objects.get(id=req_id)
-        except (ValueError, Request.DoesNotExist):
-            self.caller.msg("Request not found.")
-            return
-
-        self.caller.msg(f"Request #{request.id}: {request.title}")
-        self.caller.msg(f"Category: {request.category}")
-        self.caller.msg(f"Status: {request.status}")
-        self.caller.msg(f"Requester: {request.requester.username}")
-        self.caller.msg(f"Handler: {request.handler.username if request.handler else 'Unassigned'}")
-        self.caller.msg(f"Created: {request.date_created.strftime('%Y-%m-%d %H:%M:%S')}")
-        self.caller.msg(f"Text: {request.text}")
-
-        comments = request.comments.all().order_by('date_posted')
-        if comments:
-            self.caller.msg("\nComments:")
-            for comment in comments:
-                self.caller.msg(f"{comment.author.username} ({comment.date_posted.strftime('%Y-%m-%d %H:%M')}): {comment.text}")
-
-class CmdStaffRequestAssign(Command):
-    """
-    Assign a request to a staff member
-    
-    Usage:
-      staffrequest/assign <#>=<staff>
-    """
-    key = "staffrequest/assign"
-    aliases = ["managerequest/assign", "managerequests/assign"]
-    locks = "cmd:perm(Admin)"
-    help_category = "Admin"
-
-    def func(self):
         if not self.args or "=" not in self.args:
-            self.caller.msg("Usage: +requests/assign <#>=<staff>")
+            self.caller.msg("Usage: +request/assign <#>=<staff>")
             return
 
         req_id, staff_name = self.args.split("=", 1)
@@ -312,54 +247,11 @@ class CmdStaffRequestAssign(Command):
 
         self.caller.msg(f"Request #{req_id} assigned to {staff.name}.")
 
-class CmdStaffRequestComment(Command):
-    """
-    Comment on a request.
-
-    Usage:
-      staffrequest/comment <#>=<text>
-
-    """
-    key = "staffrequest/comment"
-    aliases = ["managerequest/comment", "managerequests/comment"]
-    locks = "cmd:perm(Admin)"
-    help_category = "Admin"
-
-    def func(self):
-        if not self.args or "=" not in self.args:
-            self.caller.msg("Usage: staffrequest/comment <#>=<text>")
+    def close_request(self):
+        if not self.caller.check_permstring("Admin"):
+            self.caller.msg("You don't have permission to close requests.")
             return
 
-        req_id, comment_text = self.args.split("=", 1)
-        
-        try:
-            req_id = int(req_id)
-            request = Request.objects.get(id=req_id)
-        except (ValueError, Request.DoesNotExist):
-            self.caller.msg("Request not found.")
-            return
-
-        Comment.objects.create(
-            request=request,
-            author=self.caller.account,
-            text=comment_text.strip()
-        )
-
-        self.caller.msg(f"Comment added to request #{req_id}.")
-
-class CmdStaffRequestClose(Command):
-    """
-     Close a request
-
-    Usage:
-      staffrequest/close <#>
-    """
-    key = "staffrequest/close"
-    aliases = ["managerequest/close", "managerequests/close"]
-    locks = "cmd:perm(Admin)"
-    help_category = "Admin"
-
-    def func(self):
         try:
             req_id = int(self.args)
             request = Request.objects.get(id=req_id)

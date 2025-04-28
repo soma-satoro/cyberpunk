@@ -1,18 +1,16 @@
-from django.core.exceptions import ObjectDoesNotExist
-from django.db import IntegrityError
-from evennia import Command, CmdSet, search_object
+import traceback
+from django.conf import settings
+from evennia import Command, CmdSet
+from world.languages.language_dictionary import LANGUAGES
+from world.languages.models import Language
+from world.utils.character_utils import ALL_ATTRIBUTES, SKILL_MAPPING, STAT_MAPPING, get_full_attribute_name
 from world.cyberpunk_sheets.models import CharacterSheet
+from evennia.utils import evmenu
 from world.cyberpunk_sheets.edgerunner import EdgerunnerChargen
-from world.inventory.models import Inventory, Weapon, Armor, Gear
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils import logger
-from evennia.utils.create import create_object
-from world.utils.calculation_utils import get_remaining_points, calculate_points_spent
-import random, traceback
 from typeclasses.chargen import ChargenRoom
-from django import apps
 from evennia.utils.utils import class_from_module
-from django.conf import settings
 
 def get_character_model():
     return class_from_module(settings.BASE_CHARACTER_TYPECLASS)
@@ -79,8 +77,8 @@ class ChargenManager:
             sheet.skill_points -= 2
 
         # Add Streetslang as a default language
-        sheet.add_language("Streetslang", 2)
-        sheet.skill_points -= 2
+        sheet.add_language("Streetslang", 4)
+        sheet.skill_points -= 4
 
         sheet.save()
 
@@ -193,6 +191,15 @@ class CmdChargen(MuxCommand):
                 char.save()
                 logger.info(f"Updated character name to {full_name}")
 
+            # Associate the sheet ID with the character
+            char.db.character_sheet_id = sheet.id
+            char.save()
+
+            # After creating the sheet, set a default gender if not already set
+            if not sheet.gender:
+                sheet.gender = "Other"  # Or you could prompt the user to choose a gender
+                sheet.save()
+
             result = EdgerunnerChargen.create_character(sheet, role, method, full_name)
 
             self.caller.msg(result)
@@ -289,7 +296,7 @@ class CmdChargenFinish(Command):
         total_remaining_points = remaining_stat_points + remaining_skill_points
 
         if total_remaining_points > 0:
-            self.caller.msg(f"You still have {total_remaining_points} points to spend ({remaining_stat_points} stat points and {remaining_skill_points} skill points). Use 'setstat' to allocate them before finishing.")
+            self.caller.msg(f"You still have {total_remaining_points} points to spend ({remaining_stat_points} stat points and {remaining_skill_points} skill points). Use 'selfstat' to allocate them before finishing.")
             return
 
         sheet.is_complete = True
@@ -364,8 +371,227 @@ class CmdListCharacterSheets(Command):
                 self.caller.msg(f"Sheet ID: {sheet.id}, Role: {sheet.role}")
         else:
             self.caller.msg("You don't have any character sheets.")
-            
 
+from world.utils.character_utils import get_pronouns
+
+class CmdSetStat(MuxCommand):
+    """
+    Set a stat, skill, or topsheet attribute for your character.
+
+    Usage:
+      selfstat <attribute>=<value>
+
+    Examples:
+      selfstat INT=5
+      selfstat AUTO=3
+      selfstat HANDLE=CoolRunner
+      selfstat AGE=25
+      selfstat charismatic impact=6
+    """
+
+    key = "selfstat"
+    locks = "cmd:all()"
+
+    def func(self):
+        if not isinstance(self.caller.location, ChargenRoom):
+            self.caller.msg("You can only use this command in a character generation room.")
+            return
+
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: selfstat <attribute>=<value>")
+            return
+
+        # First, try to find the equals sign in the args
+        attr_and_value = self.args.split("=", 1)
+        
+        if len(attr_and_value) != 2:
+            self.caller.msg("Usage: selfstat <attribute>=<value>")
+            return
+            
+        attr = attr_and_value[0].strip()
+        value = attr_and_value[1].strip()
+        
+        # If the attribute name contains spaces, try joining with underscores
+        if " " in attr:
+            attr = attr.replace(" ", "_")
+
+        full_attr_name = get_full_attribute_name(attr)
+        if not full_attr_name:
+            self.caller.msg(f"Invalid attribute name. Choose from: {', '.join(ALL_ATTRIBUTES.values())}")
+            return
+
+        sheet = self.caller.character_sheet
+        if not sheet:
+            self.caller.msg("You don't have a character sheet.")
+            return
+
+        if full_attr_name in STAT_MAPPING.values():
+            try:
+                value = int(value)
+                if value < 0 or value > 10:
+                    self.caller.msg("Stat value must be between 0 and 10.")
+                    return
+            except ValueError:
+                self.caller.msg("You must specify an integer value for stats.")
+                return
+
+            current_value = getattr(sheet, full_attr_name)
+            points_needed = value - current_value
+            remaining_stat_points, _ = sheet.get_remaining_points()
+
+            if points_needed > remaining_stat_points:
+                self.caller.msg(f"Not enough stat points. You need {points_needed} but only have {remaining_stat_points}.")
+                return
+
+        elif full_attr_name in SKILL_MAPPING.values():
+            try:
+                value = int(value)
+                if value < 0 or value > 10:
+                    self.caller.msg("Skill value must be between 0 and 10.")
+                    return
+            except ValueError:
+                self.caller.msg("You must specify an integer value for skills.")
+                return
+
+            current_value = getattr(sheet, full_attr_name)
+            points_needed = value - current_value
+            is_double_cost = full_attr_name in ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
+            actual_points_needed = points_needed * 2 if is_double_cost else points_needed
+
+            _, remaining_skill_points = sheet.get_remaining_points()
+
+            if actual_points_needed > remaining_skill_points:
+                self.caller.msg(f"Not enough skill points. You need {actual_points_needed} but only have {remaining_skill_points}.")
+                return
+
+        # For topsheet attributes, we don't need to check points
+        setattr(sheet, full_attr_name, value)
+
+        # If the attribute being set is Body, update hit points
+        if full_attr_name == 'body':
+            new_max_hp = 10 + (5 * int(value))  # Calculate new max HP
+            sheet._max_hp = new_max_hp
+            sheet._current_hp = new_max_hp  # Set current HP to max
+            self.caller.msg(f"Hit Points updated to {new_max_hp}/{new_max_hp}")
+
+        sheet.save()
+
+        pronouns = get_pronouns(sheet.gender)
+
+        self.caller.msg(f"Set {full_attr_name} to {value}.")
+        
+        if full_attr_name in STAT_MAPPING.values() or full_attr_name in SKILL_MAPPING.values():
+            new_remaining_stat_points, new_remaining_skill_points = sheet.get_remaining_points()
+            self.caller.msg(f"You have {new_remaining_stat_points} stat points and {new_remaining_skill_points} skill points remaining to spend.")
+
+        # Update the room's display
+        if isinstance(self.caller.location, ChargenRoom):
+            self.caller.location.update_remaining_points(self.caller)
+            self.caller.location.msg_contents(f"{self.caller.name} has updated {pronouns['possessive']} stats. Remaining points have been updated.", exclude=[self.caller])
+
+    def get_derived_stats(self, sheet):
+        return {
+            "Max HP": sheet._max_hp,
+            "Current HP": sheet._current_hp,
+            "Death Save": sheet.death_save,
+            "Serious Wounds": sheet.serious_wounds,
+            "Humanity": sheet.humanity
+        }
+
+class CmdSetLanguage(MuxCommand):
+    """
+    Set a language skill for your character.
+
+    Usage:
+      setlanguage <language name> <level>
+      setlanguage/remove <language name>
+      setlanguage/list
+
+    Examples:
+      setlanguage Streetslang 3
+      setlanguage/remove Streetslang
+      setlanguage/list
+
+    This command allows you to add, update, remove, or list language skills.
+    The level should be between 1 and 10.
+    """
+    key = "setlanguage"
+    locks = "cmd:all()"
+    help_category = "Character"
+
+    def func(self):
+        if not hasattr(self.caller, 'character_sheet'):
+            self.caller.msg("You don't have a character sheet!")
+            return
+
+        sheet = self.caller.character_sheet
+
+        if "list" in self.switches:
+            languages = sheet.character_languages.all()
+            if languages:
+                self.caller.msg("Your languages:")
+                for lang in languages:
+                    self.caller.msg(f"{lang.language} (Level {lang.level})")
+            else:
+                self.caller.msg("You don't know any languages.")
+            return
+
+        if "remove" in self.switches:
+            if not self.args:
+                self.caller.msg("Usage: setlanguage/remove <language name>")
+                return
+            language_name = self.args.strip()
+            sheet.remove_language(language_name)
+            self.caller.msg(f"Removed {language_name} from your languages.")
+            return
+
+        if not self.args or len(self.args.split()) < 2:
+            self.caller.msg("Usage: setlanguage <language name> <level>")
+            return
+
+        try:
+            language_name, level = self.args.rsplit(None, 1)
+            level = int(level)
+            if not 1 <= level <= 10:
+                raise ValueError
+        except ValueError:
+            self.caller.msg("Please provide a valid language name and level (1-10).")
+            return
+
+        language_info = next((lang for lang in LANGUAGES if lang["name"].lower() == language_name.lower()), None)
+
+        if language_info:
+            sheet.add_language(language_info["name"], level)
+            self.caller.msg(f"Added {language_info['name']} at level {level} to your character sheet.")
+        else:
+            # If not found in LANGUAGES, try to get it from the database
+            try:
+                language_obj = Language.objects.get(name__iexact=language_name)
+                sheet.add_language(language_obj.name, level)
+                self.caller.msg(f"Added {language_obj.name} at level {level} to your character sheet.")
+            except Language.DoesNotExist:
+                self.caller.msg(f"Language '{language_name}' not found. Please check the spelling and try again.")
+
+class CmdLifepath(Command):
+    """
+    Start the lifepath creation process.
+
+    Usage:
+      lifepath
+    """
+    key = "lifepath"
+    locks = "cmd:all()"
+    help_category = "Character"
+
+    def func(self):
+       evmenu.EvMenu(self.caller, 
+               "commands.lifepath_functions",
+               startnode="start_lifepath",
+               cmdset_mergetype="Replace",
+               cmdset_priority=1,
+               auto_quit=True,
+               cmd_on_exit=None)
+       
 """
 class CmdChargenReset(Command):
 """
@@ -428,7 +654,7 @@ class CmdChargenReset(Command):
             self.caller.tags.clear(category="approval")
             
             self.caller.msg("Your character sheet has been reset. Use the 'sheet' command to view it.")
-            self.caller.msg("Remember to set your stats and skills using the 'setstat' command.")
+            self.caller.msg("Remember to set your stats and skills using the 'selfstat' command.")
             self.caller.msg("Your character is now unapproved and will need to be approved by an admin.")
             logger.log_info(f"Character sheet reset for {self.caller.key} and marked as unapproved.")
         except Exception as e:
