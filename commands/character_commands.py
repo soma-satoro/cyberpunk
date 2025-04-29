@@ -24,9 +24,12 @@ class CmdSheet(MuxCommand):
     Usage:
       sheet
       sheet/lifepath
+      sheet <character name>
 
     Switches:
       lifepath - Show detailed lifepath information
+
+    Staff members can view the character sheet of other characters by specifying their name.
     """
 
     key = "sheet"
@@ -38,21 +41,54 @@ class CmdSheet(MuxCommand):
         """Safely get an attribute value, returning 'N/A' if it doesn't exist."""
         return getattr(obj, attr, 'N/A')
 
+    def parse(self):
+        """Parse command arguments."""
+        super().parse()
+
+        if not self.args or self.args in self.switches:
+            self.target_name = None
+        else:
+            self.target_name = self.args.strip()
+
     def func(self):
         if "lifepath" in self.switches:
             self.view_lifepath()
         else:
             self.view_sheet()
 
+    def get_target_character(self):
+        """Get the target character based on user input."""
+        caller = self.caller
+        
+        if not self.target_name:
+            return caller
+        
+        # Check if the caller has staff permissions
+        if not caller.check_permstring("builders") and not caller.check_permstring("wizards"):
+            caller.msg("|rYou don't have permission to view other character sheets.|n")
+            return None
+        
+        # Search for the target character
+        target = caller.search(self.target_name)
+        if not target:
+            # caller.search already sends a message if no match found
+            return None
+            
+        return target
+
     def view_lifepath(self):
+        target = self.get_target_character()
+        if not target:
+            return
+            
         try:
-            cs = self.caller.character_sheet
+            cs = target.character_sheet
         except AttributeError:
-            self.caller.msg("You don't have a character sheet yet. Use the 'lifepath' command to create one.")
+            self.caller.msg(f"{target.name} doesn't have a character sheet yet.")
             return
 
         if not cs:
-            self.caller.msg("You don't have a character sheet yet. Use the 'lifepath' command to create one.")
+            self.caller.msg(f"{target.name} doesn't have a character sheet yet.")
             return
 
         width = 80
@@ -187,9 +223,13 @@ class CmdSheet(MuxCommand):
         return output
     
     def view_sheet(self):
-        cs = self.caller.character_sheet
+        target = self.get_target_character()
+        if not target:
+            return
+            
+        cs = target.character_sheet
         if not cs:
-            self.caller.msg("You don't have a character sheet.")
+            self.caller.msg(f"{target.name} doesn't have a character sheet.")
             return
 
         # Main header
@@ -243,7 +283,7 @@ class CmdSheet(MuxCommand):
         except Inventory.DoesNotExist:
             output += "None\n"
         except Exception as e:
-            logger.log_err(f"Error retrieving inventory for {self.caller}: {str(e)}")
+            logger.log_err(f"Error retrieving inventory for {target}: {str(e)}")
             output += "Error retrieving inventory\n"
         else:
             weapons = inv.weapons.all()
@@ -391,87 +431,6 @@ class CmdShortDesc(Command):
             caller.db.shortdesc = self.shortdesc
             caller.msg("Short description set to '|w%s|n'." % self.shortdesc)
 
-class CmdEquipWeapon(Command):
-    """
-    Equip a weapon from your inventory.
-
-    Usage:
-      equip <weapon name>
-
-    This command allows you to equip a weapon from your inventory.
-    The equipped weapon will be used for attacks.
-    """
-
-    key = "equip"
-    aliases = ["wield"]
-    locks = "cmd:all()"
-    help_category = "Combat"
-
-    def func(self):
-        if not self.args:
-            self.caller.msg("Usage: equip <weapon name>")
-            return
-
-        weapon_name = self.args.strip().lower()
-
-        if not hasattr(self.caller, 'character_sheet'):
-            self.caller.msg("You don't have a character sheet.")
-            return
-
-        sheet = self.caller.character_sheet
-        
-        if not hasattr(sheet, 'inventory'):
-            self.caller.msg("You don't have an inventory.")
-            return
-
-        inventory = sheet.inventory
-
-        try:
-            weapon = inventory.weapons.get(name__iexact=weapon_name)
-        except Weapon.DoesNotExist:
-            self.caller.msg(f"You don't have a weapon named '{weapon_name}' in your inventory.")
-            return
-        except Weapon.MultipleObjectsReturned:
-            self.caller.msg(f"You have multiple weapons named '{weapon_name}'. Please be more specific.")
-            return
-
-        sheet.eqweapon = weapon
-        sheet.save()
-
-        self.caller.msg(f"You have equipped {weapon.name}.")
-
-class CmdUnequipWeapon(Command):
-    """
-    Unequip your currently equipped weapon.
-
-    Usage:
-      unequip
-
-    This command removes your currently equipped weapon, if any.
-    """
-
-    key = "unequip"
-    aliases = ["unwield"]
-    locks = "cmd:all()"
-    help_category = "Combat"
-
-    def func(self):
-        if not hasattr(self.caller, 'character_sheet'):
-            self.caller.msg("You don't have a character sheet.")
-            return
-
-        sheet = self.caller.character_sheet
-        
-        if not sheet.eqweapon:
-            self.caller.msg("You don't have any weapon equipped.")
-            return
-
-        weapon_name = sheet.eqweapon.name
-        sheet.eqweapon = None
-        sheet.save()
-
-        self.caller.msg(f"You have unequipped your {weapon_name}.")
-
 class CmdChargenDelete(Command):
     """
     Delete the character sheet for a character.
@@ -564,14 +523,14 @@ class CmdRole(Command):
         self.caller.character_sheet.save()
         self.caller.msg(f"Your role has been set to {role}.")
 
-class CmdSpendLuck(Command):
+class CmdLuck(Command):
     """
     Spend a luck point.
 
     Usage:
-      luck
+      luck -     This command spends one luck point if you have any available.
+      luck/gain <amount> - This command allows you to regain luck points up to your maximum.
 
-    This command spends one luck point if you have any available.
     """
 
     key = "luck"
@@ -585,6 +544,10 @@ class CmdSpendLuck(Command):
 
         sheet = self.caller.character_sheet
         
+        if self.args == "gain":
+            self.gain_luck()
+            return
+        
         def spend_luck(sheet):
             if sheet.current_luck > 0:
                 sheet.current_luck -= 1
@@ -596,24 +559,10 @@ class CmdSpendLuck(Command):
             self.caller.msg(f"You spend a luck point. Remaining luck: {sheet.current_luck}/{sheet.luck}")
         else:
             self.caller.msg("You don't have any luck points to spend!")
-
-class CmdGainLuck(Command):
-    """
-    Regain luck points.
-
-    Usage:
-      gainluck <amount>
-
-    This command allows you to regain luck points up to your maximum.
-    """
-
-    key = "gainluck"
-    locks = "cmd:all()"
-    help_category = "Roleplay Utilities"
-
-    def func(self):
+        
+    def gain_luck(self):
         if not self.args:
-            self.caller.msg("Usage: gainluck <amount>")
+            self.caller.msg("Usage: luck/gain <amount>")
             return
 
         try:
@@ -621,7 +570,7 @@ class CmdGainLuck(Command):
         except ValueError:
             self.caller.msg("Please provide a valid number.")
             return
-
+        
         if amount <= 0:
             self.caller.msg("Please provide a positive number.")
             return
@@ -629,16 +578,20 @@ class CmdGainLuck(Command):
         if not hasattr(self.caller, 'character_sheet'):
             self.caller.msg("You don't have a character sheet!")
             return
-
+        
         sheet = self.caller.character_sheet
-        
-        def gain_luck(sheet, amount):
-            sheet.current_luck = min(sheet.current_luck + amount, sheet.luck)
-            sheet.save()
-            return sheet.current_luck
-        
-        new_luck = gain_luck(sheet, amount)
-        self.caller.msg(f"You regained luck points. Current luck: {new_luck}/{sheet.luck}")
+        current_luck = sheet.current_luck
+        max_luck = sheet.luck
+
+        if current_luck >= max_luck:
+            self.caller.msg("You already have the maximum number of luck points.")
+            return
+
+        new_luck = min(current_luck + amount, max_luck)
+        sheet.current_luck = new_luck
+        sheet.save()
+
+        self.caller.msg(f"You regained {amount} luck points. Current luck: {new_luck}/{max_luck}")
 
 class CmdOOC(MuxCommand):
     """
@@ -673,7 +626,7 @@ class CmdOOC(MuxCommand):
         if ooc_message.startswith(':'):
             pose = ooc_message[1:].strip()  # Remove the ':' and any following space
             message = f"<|mOOC|n> {self.caller.name} {pose}"
-            self_message = f"<|mOOC|n> {self.caller.name} {pose}"
+            self_message = f"<|mOOC|n> You say, \"{ooc_message}\""
         else:
             message = f"<|mOOC|n> {self.caller.name} says, \"{ooc_message}\""
             self_message = f"<|mOOC|n> You say, \"{ooc_message}\""

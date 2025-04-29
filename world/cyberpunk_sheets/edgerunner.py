@@ -57,8 +57,9 @@ class EdgerunnerChargen:
             final_message = (
                 f"Character created using the Edgerunner method for role: {role}.\n"
                 f"You have {remaining_stat_points} stat points and {remaining_skill_points} skill points left to allocate.\n"
-                f"500 Eurodollars have been added to your account.\n"
-                f"Use 'sheet' to view your full character details and 'balance' to check your money."
+                f"500 Eurodollars have been added to your account and default inventory has been set.\n"
+                f"Use 'sheet' to view your full character details, 'inv' to view your inventory"
+                f"and 'inv/balance' to check your money."
             )
             
             return final_message

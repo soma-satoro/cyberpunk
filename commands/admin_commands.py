@@ -20,6 +20,68 @@ from evennia.utils.utils import inherits_from
 from world.utils.ansi_utils import wrap_ansi
 import re
 
+
+class CmdPopulate(AdminCommand):
+    """
+    Populate the database with equipment from Cyberpunk RED.
+
+    Usage:
+      populate[/switch]
+
+    Switches:
+      /weapons   - Populate weapon database
+      /armor     - Populate armor database
+      /gear      - Populate gear database
+      /all       - Populate all equipment types
+      /cleanup   - Clean up duplicate gear items
+
+    This command initializes the database with equipment from Cyberpunk RED.
+    Use the appropriate switch to populate specific types of equipment or all at once.
+    The cleanup switch can be used to remove duplicate gear entries.
+    """
+
+    key = "populate"
+    aliases = ["populate_equipment"]
+    locks = "cmd:perm(Admin)"
+    help_category = "Admin"
+
+    def func(self):
+        if not self.switches:
+            self.caller.msg("You must specify a switch. See 'help populate' for options.")
+            return
+
+        if "weapons" in self.switches:
+            populate_weapons()
+            self.caller.msg("Weapon database populated successfully.")
+        
+        elif "armor" in self.switches:
+            populate_armor()
+            self.caller.msg("Armor database populated successfully.")
+        
+        elif "gear" in self.switches:
+            populate_gear()
+            self.caller.msg("Gear database populated successfully.")
+        
+        elif "all" in self.switches:
+            populate_all_equipment()
+            self.caller.msg("All equipment databases populated successfully.")
+        
+        elif "cleanup" in self.switches:
+            duplicates = Gear.objects.values('name').annotate(name_count=Count('id')).filter(name_count__gt=1)
+            
+            for duplicate in duplicates:
+                name = duplicate['name']
+                items = Gear.objects.filter(name=name).order_by('id')
+                primary_item = items.first()
+                for item in items[1:]:
+                    item.delete()
+                self.caller.msg(f"Cleaned up duplicate gear: {name}")
+            
+            self.caller.msg("Duplicate gear cleanup completed.")
+        
+        else:
+            self.caller.msg("Invalid switch. See 'help populate' for options.")
+
 class AdminCommand(MuxCommand):
     """
     Base class for admin commands.
@@ -42,102 +104,6 @@ class AdminCommand(MuxCommand):
         
         # If still not found, return None
         return None
-
-class CmdCleanupDuplicateGear(Command):
-    """
-    Admin command to clean up duplicate gear items.
-
-    Usage:
-      cleanup_gear
-    """
-
-    key = "cleanup_gear"
-    locks = "cmd:perm(Admin)"
-
-    def func(self):
-        duplicates = Gear.objects.values('name').annotate(name_count=Count('id')).filter(name_count__gt=1)
-        
-        for duplicate in duplicates:
-            name = duplicate['name']
-            items = Gear.objects.filter(name=name).order_by('id')
-            primary_item = items.first()
-            for item in items[1:]:
-                item.delete()
-            self.caller.msg(f"Cleaned up duplicate gear: {name}")
-        
-        self.caller.msg("Duplicate gear cleanup completed.")
-
-class CmdPopulateWeapons(Command):
-    """
-    Populate the database with weapons from Cyberpunk RED.
-
-    Usage:
-      populate_weapons
-
-    This command should only be run once to initialize the weapon database.
-    """
-
-    key = "populate_weapons"
-    locks = "cmd:perm(Admin)"
-    help_category = "Admin"
-
-    def func(self):
-        populate_weapons()
-        self.caller.msg("Weapon database populated successfully.")
-
-class CmdPopulateArmor(Command):
-    """
-    Populate the database with armor from Cyberpunk RED.
-
-    Usage:
-      populate_armor
-
-    This command should only be run once to initialize the armor database.
-    """
-
-    key = "populate_armor"
-    locks = "cmd:perm(Admin)"
-    help_category = "Admin"
-
-    def func(self):
-        populate_armor()
-        self.caller.msg("Armor database populated successfully.")
-
-class CmdPopulateGear(Command):
-    """
-    Populate the database with gear from Cyberpunk RED.
-
-    Usage:
-      populate_gear
-
-    This command should only be run once to initialize the gear database.
-    """
-
-    key = "populate_gear"
-    locks = "cmd:perm(Admin)"
-    help_category = "Admin"
-
-    def func(self):
-        populate_gear()
-        self.caller.msg("Gear database populated successfully.")
-
-class CmdPopulateAllEquipment(Command):
-    """
-    Populate the database with all equipment from Cyberpunk RED.
-
-    Usage:
-      populate_all_equipment
-
-    This command should only be run once to initialize the entire equipment database.
-    """
-
-    key = "populate_all_equipment"
-    locks = "cmd:perm(Admin)"
-    help_category = "Admin"
-
-    def func(self):
-        populate_all_equipment()
-        self.caller.msg("All equipment databases populated successfully.")
 
 class CmdStat(AdminCommand):
     """
@@ -481,234 +447,6 @@ class CmdUnapprove(AdminCommand):
 
         self.caller.msg(f"You have unapproved {target.name}.")
         target.msg("Your character has been unapproved. You may now use chargen commands again.")
-
-class CmdAdminViewSheet(AdminCommand):
-    """
-    View a character's sheet or lifepath as an admin.
-
-    Usage:
-      adminsheet <character_name>
-      adminsheet/lifepath <character_name>
-
-    Switches:
-      lifepath - Show detailed lifepath information
-
-    This command allows admins to view the complete character sheet
-    or lifepath details of any character in the game.
-    """
-    key = "adminsheet"
-    aliases = ["adminview", "adminlifepath"]
-    locks = "cmd:perm(Admin)"
-    help_category = "Admin"
-
-    def func(self):
-        if not self.args:
-            self.caller.msg("Usage: adminsheet <character_name>")
-            return
-
-        target = self.caller.search(self.args.strip())
-        if not target:
-            return
-
-        try:
-            cs = target.character_sheet
-        except AttributeError:
-            self.caller.msg(f"{target.name} doesn't have a character sheet.")
-            return
-
-        if "lifepath" in self.switches or self.cmdstring == "adminlifepath":
-            self.view_lifepath(target, cs)
-        else:
-            self.view_sheet(target, cs)
-
-    def header(self, text, width=78, fillchar="-"):
-        """Create a header."""
-        return f"|044{text.center(width, fillchar)}|n"
-
-    def divider(self, text, width=78, fillchar="-"):
-        """Create a divider with text."""
-        return f"|044{text.center(width, fillchar)}|n"
-
-    def footer(self, width=78, fillchar="-"):
-        """Create a footer."""
-        return f"|044{fillchar * width}|n"
-
-    def safe_get_attr(self, obj, attr):
-        """Safely get an attribute value, returning 'N/A' if it doesn't exist."""
-        return getattr(obj, attr, 'N/A')
-
-    def view_sheet(self, target, cs):
-        # Main header
-        output = self.header(f"Character Sheet for {cs.full_name} (Admin View)", width=80) + "\n"
-
-        # Basic Information
-        output += self.divider("Basic Information", width=80) + "\n"
-        basic_info = [
-            ("Full Name:", self.safe_get_attr(cs, 'full_name'), "Gender:", self.safe_get_attr(cs, 'gender')),
-            ("Handle:", self.safe_get_attr(cs, 'handle'), "Age:", self.safe_get_attr(cs, 'age')),
-            ("Hometown:", self.safe_get_attr(cs, 'hometown'), "Height:", f"{self.safe_get_attr(cs, 'height')} cm"),
-            ("Night City Rep:", self.safe_get_attr(cs, 'reputation'), "Weight:", f"{self.safe_get_attr(cs, 'weight')} kg"),
-            ("Role:", self.safe_get_attr(cs, 'role'), "Luck:", f"{self.safe_get_attr(cs, 'current_luck')}/{self.safe_get_attr(cs, 'luck')}")
-        ]
-        for row in basic_info:
-            output += f"|c{row[0]:<20}|n {row[1]:<20} |c{row[2]:<15}|n {row[3]:<20}\n"
-
-        # Stats
-        output += self.divider("STATS", width=80) + "\n"
-        stats = [
-            ("Intelligence:", cs.intelligence, "Technology:", cs.technology, "Move:", cs.move),
-            ("Reflexes:", cs.reflexes, "Cool:", cs.cool, "Body:", cs.body),
-            ("Dexterity:", cs.dexterity, "Willpower:", cs.willpower, "Empathy:", cs.empathy)
-        ]
-        for row in stats:
-            output += "".join(f"|c{label:<13}|n {value:<8}" for label, value in zip(row[::2], row[1::2])) + "\n"
-        output += "\n"
-
-        # Skills
-        output += self.divider("SKILLS", width=80) + "\n"
-        # Add skill logic here
-
-        # Derived Stats
-        output += self.divider("Derived Statistics", width=80) + "\n"
-        derived_stats = [
-            ("Hit Points:", f"{cs._current_hp}/{cs._max_hp}", "Death Save:", cs.death_save),
-            ("Serious Wounds:", cs.serious_wounds, "Humanity:", cs.humanity)
-        ]
-        for row in derived_stats:
-            output += "".join(f"|c{label:<16}|n {value:<18}" for label, value in zip(row[::2], row[1::2])) + "\n"
-        output += "\n"
-
-        # Equipment
-        output += self.divider("Equipment", width=80) + "\n"
-        # Add equipment logic here
-
-        # Languages
-        output += self.divider("Languages", width=80) + "\n"
-        languages = cs.character_languages.all()
-        if languages:
-            for lang in languages:
-                output += f"- {lang.language} (Level {lang.level})\n"
-        else:
-            output += "None\n"
-
-        output += self.footer(width=80)
-        self.caller.msg(output)
-
-    def view_lifepath(self, target, cs):
-        # Main header
-        header = f"Lifepath for {cs.full_name} (Admin View)"
-        self.caller.msg(self.header(header, width=78))
-
-        # Create the main table
-        table = EvTable(border="table", table_pad=2)
-        table.add_column("|cBasic Information|n", align="l", width=30)
-        table.add_column("", align="l", width=50)
-
-        # Add general lifepath information
-        general_fields = [
-            ("Cultural Origin", "cultural_origin"),
-            ("Personality", "personality"),
-            ("Clothing Style", "clothing_style"),
-            ("Hairstyle", "hairstyle"),
-            ("Affectation", "affectation"),
-            ("Motivation", "motivation"),
-            ("Life Goal", "life_goal"),
-            ("Most Valued Person", "valued_person"),
-            ("Valued Possession", "valued_possession"),
-            ("Family Background", "family_background"),
-            ("Origin Environment", "environment"),
-            ("Family Crisis", "family_crisis")
-        ]
-        for title, field in general_fields:
-            value = getattr(cs, field, "Not set")
-            table.add_row(title, value)
-
-        # Add role-specific information
-        if cs.role:
-            table.add_row("", "")  # Empty row for separation
-            table.add_row(f"|c{cs.role}-specific Lifepath|n", "")
-
-            role_specific_fields = {
-                "Rockerboy": [
-                    "what_kind_of_rockerboy_are_you",
-                    "whos_gunning_for_you_your_group",
-                    "where_do_you_perform"
-                ],
-                "Solo": [
-                    "what_kind_of_solo_are_you",
-                    "whats_your_moral_compass_like",
-                    "whos_gunning_for_you",
-                    "whats_your_operational_territory"
-                ],
-                "Netrunner": [
-                    "what_kind_of_runner_are_you",
-                    "who_are_some_of_your_other_clients",
-                    "where_do_you_get_your_programs",
-                    "whos_gunning_for_you"
-                ],
-                "Tech": [
-                    "what_kind_of_tech_are_you",
-                    "whats_your_workspace_like",
-                    "who_are_your_main_clients",
-                    "where_do_you_get_your_supplies"
-                ],
-                "Medtech": [
-                    "what_kind_of_medtech_are_you",
-                    "who_are_your_main_clients",
-                    "where_do_you_get_your_supplies"
-                ],
-                "Media": [
-                    "what_kind_of_media_are_you",
-                    "how_does_your_work_reach_the_public",
-                    "how_ethical_are_you",
-                    "what_types_of_stories_do_you_want_to_tell"
-                ],
-                "Exec": [
-                    "what_kind_of_corp_do_you_work_for",
-                    "what_division_do_you_work_in",
-                    "how_good_bad_is_your_corp",
-                    "where_is_your_corp_based",
-                    "current_state_with_your_boss"
-                ],
-                "Lawman": [
-                    "what_is_your_position_on_the_force",
-                    "how_wide_is_your_groups_jurisdiction",
-                    "how_corrupt_is_your_group",
-                    "who_is_your_groups_major_target"
-                ],
-                "Fixer": [
-                    "what_kind_of_fixer_are_you",
-                    "who_are_your_side_clients",
-                    "whos_gunning_for_you"
-                ],
-                "Nomad": [
-                    "how_big_is_your_pack",
-                    "what_do_you_do_for_your_pack",
-                    "whats_your_packs_overall_philosophy",
-                    "is_your_pack_based_on_land_air_or_sea"
-                ]
-            }
-
-            for field in role_specific_fields.get(cs.role, []):
-                value = getattr(cs, field, None)
-                if value:
-                    title = field.replace('_', ' ').title()
-                    table.add_row(title, value)
-
-        # Send the formatted table to the caller
-        self.caller.msg(table)
-
-class CmdFixSheet(Command):
-    help = 'Check and fix character sheet associations'
-
-    def handle(self, *args, **options):
-        characters = ObjectDB.objects.filter(db_typeclass_path__contains='characters')
-        for char in characters:
-            sheet, created = CharacterSheet.objects.get_or_create(db_object=char)
-            if created:
-                self.stdout.write(self.style.SUCCESS(f'Created sheet for {char}'))
-            else:
-                self.stdout.write(f'Sheet already exists for {char}')
 
 class CmdSpawnRipperdoc(Command):
     """

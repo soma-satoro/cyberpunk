@@ -205,8 +205,6 @@ class RentableRoom(Room):
             else:
                 string += "|wStatus:|n Available for rent\n"
 
-        # ... (rest of the appearance code, such as listing characters, objects, and exits)
-
         string += footer(width=78, fillchar=ANSIString("|m-|n"))
 
         return string

@@ -1,5 +1,6 @@
 from evennia import Command
 from evennia.utils.ansi import ANSIString
+from evennia.commands.default.muxcommand import MuxCommand
 from world.inventory.models import Weapon, Armor, Gear, Inventory, Ammunition
 from world.cyberpunk_sheets.services import CharacterSheetMoneyService
 from world.utils.formatting import header, footer, divider
@@ -8,13 +9,15 @@ import logging
 
 logger = logging.getLogger('cyberpunk.inventory')
 
-class CmdInventory(Command):
+class CmdInventory(MuxCommand):
     """
     Show character inventory
 
     Usage:
-      inventory
-      inv
+      <inv>entory - shows your inventory
+      inv <character> - shows another character's inventory (staff/GM only)
+      inv/equip - equips an item
+      inv/unequip - unequips an item
 
     This command displays your character's inventory, including weapons, armor, and gear.
     """
@@ -31,6 +34,13 @@ class CmdInventory(Command):
             logger.warning(f"No character sheet found for {self.caller.name}")
             self.caller.msg("You don't have a character sheet. Please create one using the 'chargen' command.")
             return
+
+        if self.switches.get("equip"):
+            self.equip_item()
+        elif self.switches.get("unequip"):
+            self.unequip_item()
+        else:
+            self.show_inventory()
 
         inv = character_sheet.inventory
 
@@ -90,23 +100,53 @@ class CmdInventory(Command):
 
         output += footer(width=78, fillchar="|m-|n")
         self.caller.msg(output)
+        
+    def equip_item(self):
+        if not self.args:
+            self.caller.msg("Usage: equip <weapon name>")
+            return
 
-class CmdEquipment(Command):
-    """
-    Show character equipment
+        weapon_name = self.args.strip().lower()
 
-    Usage:
-      equipment
-      eq
+        if not hasattr(self.caller, 'character_sheet'):
+            self.caller.msg("You don't have a character sheet.")
+            return
 
-    This command displays your character's equipped weapons, armor, and gear.
-    """
+        sheet = self.caller.character_sheet
+        
+        if not hasattr(sheet, 'inventory'):
+            self.caller.msg("You don't have an inventory.")
+            return
 
-    key = "equipment"
-    aliases = ["eq"]
-    lock = "cmd:all()"
-    help_category = "Inventory"
+        inventory = sheet.inventory
 
-    def func(self):
-        # Implementation similar to CmdInventory, but focusing on equipped items
-        pass
+        try:
+            weapon = inventory.weapons.get(name__iexact=weapon_name)
+        except Weapon.DoesNotExist:
+            self.caller.msg(f"You don't have a weapon named '{weapon_name}' in your inventory.")
+            return
+        except Weapon.MultipleObjectsReturned:
+            self.caller.msg(f"You have multiple weapons named '{weapon_name}'. Please be more specific.")
+            return
+
+        sheet.eqweapon = weapon
+        sheet.save()
+
+        self.caller.msg(f"You have equipped {weapon.name}.")
+
+    def unequip_item(self):
+        if not hasattr(self.caller, 'character_sheet'):
+            self.caller.msg("You don't have a character sheet.")
+            return
+
+        sheet = self.caller.character_sheet
+        
+        if not sheet.eqweapon:
+            self.caller.msg("You don't have any weapon equipped.")
+            return
+
+        weapon_name = sheet.eqweapon.name
+        sheet.eqweapon = None
+        sheet.save()
+
+        self.caller.msg(f"You have unequipped your {weapon_name}.")
