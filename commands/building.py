@@ -83,3 +83,4 @@ class CmdCreateRentableRoom(MuxCommand):
 class BuildingCmdSet(CmdSet):
     def at_cmdset_creation(self):
         self.add(CmdCreateRentableRoom())
+

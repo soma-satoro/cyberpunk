@@ -93,3 +93,100 @@ class GroupInfo(TypedObject):
 
     def __str__(self):
         return f"Group Info for {self.db_character}"
+    
+from django.contrib.auth.models import User
+from django.db import models
+from django.conf import settings
+
+class Roster(models.Model):
+    """Model for managing character rosters."""
+    ROSTER_CHOICES = [
+        ('ganger', 'Ganger'),
+        ('nomad', 'Nomad'),
+        ('corporate', 'Corporate'),
+        ('mercenary', 'Mercenary'),
+        ('other', 'Other')
+    ]
+    
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    roster_type = models.CharField(max_length=50, choices=ROSTER_CHOICES, default='other')
+    website = models.URLField(blank=True)
+    admins = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name='administered_rosters',
+        blank=True
+    )
+    managers = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name='managed_rosters',
+        blank=True
+    )
+    hangouts = models.ManyToManyField(
+        'objects.ObjectDB',
+        related_name='roster_hangouts',
+        blank=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'cyberpunk'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+    def get_members(self):
+        """Get all approved members of this roster."""
+        return self.members.filter(approved=True)
+
+    def get_online_members(self):
+        """Get all online approved members of this roster."""
+        return self.members.filter(
+            approved=True,
+            character__db_account__db_is_connected=True
+        )
+
+    def can_manage(self, account):
+        """Check if an account can manage this roster."""
+        if not account:
+            return False
+        return (
+            account.is_staff or 
+            self.admins.filter(id=account.id).exists() or 
+            self.managers.filter(id=account.id).exists()
+        )
+
+class RosterMember(models.Model):
+    """Model for tracking character membership in rosters."""
+    roster = models.ForeignKey(
+        Roster,
+        on_delete=models.CASCADE,
+        related_name='members'
+    )
+    character = models.ForeignKey(
+        'objects.ObjectDB',
+        on_delete=models.CASCADE,
+        related_name='roster_memberships'
+    )
+    title = models.CharField(max_length=255, blank=True)
+    approved = models.BooleanField(default=False)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='approved_roster_members'
+    )
+    approved_date = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'cyberpunk'
+        unique_together = ('roster', 'character')
+        ordering = ['character__db_key']
+
+    def __str__(self):
+        return f"{self.character} in {self.roster}" 

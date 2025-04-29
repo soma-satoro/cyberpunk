@@ -24,20 +24,43 @@ from .equipment_commands import CmdAddWeapon, CmdAddArmor, CmdAddGear, CmdPopula
 from .economy import CmdAdminMoney, CmdGiveMoney, CmdBalance, CmdRentRoom, CmdLeaveRental
 from world.cyberpunk_sheets.commerce import CmdBuy, CmdSellItem, CmdHaggle, CmdAddItem, CmdRemItem, CmdListItems
 from .mission_commands import CmdListMissions, CmdAcceptMission, CmdCompleteMission, CmdMissionStatus, CmdCreateMission, CmdListEvents, CmdCreateEvent, CmdEventInfo, CmdJoinEvent, CmdLeaveEvent, CmdStartEvent, CmdCompleteEvent
-from .bulletin_commands import CmdBoardList, CmdBoardRead, CmdBoardPost, CmdBoardDelete, CmdBoardEdit
+from .bbs.bbs_all_commands import CmdBoardList, CmdBoardRead, CmdBoardPost, CmdBoardDelete, CmdBoardEdit
 from .hustle_commands import CmdHustle, CmdDebugHustle, CmdClearHustleAttempt, CmdRegenerateHustles
 from .faction_commands import CmdCreateFaction, CmdFactionInfo, CmdFactionRep, CmdModifyFactionRep, CmdCreateGroup, CmdJoinGroup, CmdLeaveGroup, CmdGroupInfo, CmdFactionInfluence, CmdCreateGroupRole, CmdAssignGroupRole, CmdGroupChat, CmdFactionMission, CmdListGroupsAndFactions, CmdApproveJoin, CmdFactionDesc, CmdGroupDesc, CmdSetGroupLeader
 from world.mail.commands import CmdMail, CmdMailbox, CmdMailDelete
-from .request_commands import CmdRequests
+from .jobs.jobs_commands import CmdJobs
 from .cyberware_commands import CmdCyberware, CmdActivateCyberware
-from .netrun_commands import CmdNetrun, CmdInstallProgram, CmdListPrograms, CmdListNetArchitectures
-from .netrun_admin_commands import CmdCreateNetArchitecture
+from .netrun_commands import CmdNet
+from .netrun_admin_commands import CmdArchitecture
 from .combat_system import CombatStartCommand, CombatCommand, CmdReload, CmdJoinCombat
 from .language_commands import CmdLanguage, CmdMaskedSay, CmdMaskedEmit, CmdMaskedPose
 from .building import CmdCreateRentableRoom
 from .notes import CmdNotes
 from evennia.contrib.base_systems.mux_comms_cmds import CmdSetLegacyComms
 from evennia import default_cmds
+from .CmdAlts import CmdAlts
+from .CmdEmit import CmdEmit
+from .CmdPose import CmdPose
+from .CmdSay import CmdSay
+from .CmdHangouts import CmdHangout
+from .CmdPlots import CmdPlots
+from .CmdWatch import CmdWatch
+from .CmdWeather import CmdWeather
+from .CmdMultidesc import CmdMultidesc
+from .CmdFinger import CmdFinger
+from .CmdGradient import CmdGradientName
+
+
+from commands.bbs.bbs_admin_commands import CmdResetBBS
+
+from commands.bbs.bbs_all_commands import (
+    CmdBBS
+)
+
+from commands.bbs.bbs_builder_commands import (
+    CmdCreateBoard,CmdDeleteBoard, CmdRevokeAccess, CmdListAccess, 
+    CmdLockBoard, CmdPinPost, CmdUnpinPost, CmdEditBoard, CmdGrantAccess
+)
 # from typeclasses.characters import CharacterCmdSet as BaseCharacterCmdSet
 
 class CharacterCmdSet(default_cmds.CharacterCmdSet):
@@ -74,6 +97,17 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CombatCommand())
         self.add(CmdReload())
         self.add(CmdJoinCombat())
+        self.add(CmdAlts())
+        self.add(CmdEmit())
+        self.add(CmdPose())
+        self.add(CmdSay())
+        self.add(CmdHangout())
+        self.add(CmdPlots())
+        self.add(CmdWatch())
+        self.add(CmdWeather())
+        self.add(CmdMultidesc())
+        self.add(CmdFinger())
+        self.add(CmdGradientName())
         self.add(CmdBalance())
         self.add(CmdGiveMoney())
         self.add(CmdBuy())
@@ -93,11 +127,6 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdLeaveEvent())
         self.add(CmdStartEvent())
         self.add(CmdCompleteEvent())
-        self.add(CmdBoardList())
-        self.add(CmdBoardRead())
-        self.add(CmdBoardPost())
-        self.add(CmdBoardDelete())
-        self.add(CmdBoardEdit())
         self.add(CmdHustle())
         self.add(CmdFactionInfo())
         self.add(CmdGroupInfo())
@@ -116,15 +145,13 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdMailbox())
         self.add(CmdMailDelete())
         self.add(CmdGroupDesc())
-        self.add(CmdRequests())
+        self.add(CmdJobs())
         self.add(CmdShortDesc())
         self.add(CmdSetLanguage())
         self.add(CmdCyberware())
         self.add(CmdActivateCyberware())
-        self.add(CmdNetrun())
-        self.add(CmdInstallProgram())
-        self.add(CmdListPrograms())
-        self.add(CmdListNetArchitectures())
+        self.add(CmdNet())
+        self.add(CmdArchitecture())
         self.add(CmdLanguage())
         self.add(CmdMaskedSay())
         self.add(CmdMaskedPose())
@@ -136,6 +163,17 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdPlusIc())
         self.add(CmdMeet())
         self.add(CmdNotes())
+        self.add(CmdBBS())
+        self.add(CmdResetBBS())
+        self.add(CmdCreateBoard())
+        self.add(CmdDeleteBoard())
+        self.add(CmdRevokeAccess())
+        self.add(CmdListAccess())
+        self.add(CmdLockBoard())
+        self.add(CmdPinPost())
+        self.add(CmdUnpinPost())
+        self.add(CmdEditBoard())
+        self.add(CmdGrantAccess())
 
 class AccountCmdSet(default_cmds.AccountCmdSet):
     """
@@ -184,7 +222,6 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdFactionDesc())
         self.add(CmdSetGroupLeader())
         self.add(CmdGradientName())
-        self.add(CmdCreateNetArchitecture())
         self.add(CmdClearAllStates())
         self.add(CmdListCharacterSheets())
         self.add(CmdCleanupDuplicateGear())

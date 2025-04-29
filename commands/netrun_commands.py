@@ -1,6 +1,6 @@
 # commands/netrun_commands.py
 
-from evennia import Command
+from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils.evmenu import EvMenu
 from world.netrunning.models import Cyberdeck, NetArchitecture, NetrunSession, Node, Program, ICE, BlackICE
 from world.cyberpunk_sheets.models import CharacterSheet
@@ -9,22 +9,48 @@ from world.netrunning.interface import NetrunnerActions, NetCombat
 from evennia import DefaultCharacter
 from typeclasses.net_architecture import NetArchitecture  # Adjust import path as needed
 
-class CmdNetrun(Command):
+class CmdNet(MuxCommand):
     """
-    Start a netrun.
+    Command for netrunning operations.
 
     Usage:
-      netrun <architecture>
+      net/run <architecture>      - Initiate a netrun against an architecture
+      net/install <program>       - Install a program on your cyberdeck
+      net/programs                - List installed programs on your cyberdeck
+      net/list                    - List all available net architectures
 
-    This command initiates a netrun against the specified architecture.
+    Examples:
+      net/run Arasaka             - Start a netrun against Arasaka architecture
+      net/install Sword           - Install the Sword program
+      net/programs                - Show all programs installed on your cyberdeck
+      net/list                    - Display all available architectures
     """
-    key = "netrun"
+    key = "net"
     locks = "cmd:all()"
     help_category = "Netrunning"
+    switch_options = ("run", "install", "programs", "list")
 
     def func(self):
+        if not self.switches:
+            self.caller.msg(self.__doc__)
+            return
+
+        # Handle different switches
+        if "run" in self.switches:
+            self.cmd_run()
+        elif "install" in self.switches:
+            self.cmd_install()
+        elif "programs" in self.switches:
+            self.cmd_programs()
+        elif "list" in self.switches:
+            self.cmd_list()
+        else:
+            self.caller.msg(f"Unknown switch. Use one of: {', '.join(self.switch_options)}")
+
+    def cmd_run(self):
+        """Initiate a netrun against an architecture."""
         if not self.args:
-            self.caller.msg("Usage: netrun <architecture>")
+            self.caller.msg("Usage: net/run <architecture>")
             return
 
         # Check if the character is a Netrunner
@@ -198,27 +224,49 @@ class CmdNetrun(Command):
                auto_look=False,
                auto_help=False,
                cmd_on_exit="look",
-               persistent=False,
-               cmd_class=Command)
-        
-class CmdInstallProgram(Command):
-    key = "install"
-    locks = "cmd:all()"
-    help_category = "Netrunning"
+               persistent=False)
 
-    def func(self):
+    def cmd_install(self):
+        """Install a program on your cyberdeck."""
         if not self.args:
-            self.caller.msg("Usage: install <program>")
+            self.caller.msg("Usage: net/install <program>")
             return
 
         program_name = self.args.strip()
         try:
-            program = program.objects.get(name__iexact=program_name)
-        except program.DoesNotExist:
+            program = Program.objects.get(name__iexact=program_name)
+        except Program.DoesNotExist:
             self.caller.msg(f"Program '{program_name}' not found.")
             return
 
-        cyberdeck = self.caller.db.cyberdeck
+        # Check if the character has a Cyberdeck
+        try:
+            char_sheet = CharacterSheet.objects.get(character=self.caller)
+        except CharacterSheet.DoesNotExist:
+            self.caller.msg("You don't have a character sheet.")
+            return
+
+        # Try to get cyberdeck (from gear or cyberware)
+        cyberdeck = None
+        try:
+            inventory = Inventory.objects.get(character=char_sheet)
+            gear_cyberdeck = next((gear for gear in inventory.gear.all() if gear.is_cyberdeck), None)
+        except Inventory.DoesNotExist:
+            gear_cyberdeck = None
+
+        cyberware_cyberdeck = next((cw for cw in char_sheet.cyberware_instances.filter(installed=True) if cw.is_cyberdeck), None)
+
+        if gear_cyberdeck:
+            cyberdeck, created = Cyberdeck.objects.get_or_create(
+                gear=gear_cyberdeck,
+                defaults={'name': gear_cyberdeck.name, 'owner': char_sheet}
+            )
+        elif cyberware_cyberdeck:
+            cyberdeck, created = Cyberdeck.objects.get_or_create(
+                cyberware=cyberware_cyberdeck,
+                defaults={'name': cyberware_cyberdeck.cyberware.name, 'owner': char_sheet}
+            )
+
         if not cyberdeck:
             self.caller.msg("You don't have a Cyberdeck installed.")
             return
@@ -229,13 +277,36 @@ class CmdInstallProgram(Command):
         else:
             self.caller.msg("Your Cyberdeck has no available slots for new programs.")
 
-class CmdListPrograms(Command):
-    key = "programs"
-    locks = "cmd:all()"
-    help_category = "Netrunning"
+    def cmd_programs(self):
+        """List all programs installed on your cyberdeck."""
+        # Check if the character has a Cyberdeck
+        try:
+            char_sheet = CharacterSheet.objects.get(character=self.caller)
+        except CharacterSheet.DoesNotExist:
+            self.caller.msg("You don't have a character sheet.")
+            return
 
-    def func(self):
-        cyberdeck = self.caller.db.cyberdeck
+        # Try to get cyberdeck (from gear or cyberware)
+        cyberdeck = None
+        try:
+            inventory = Inventory.objects.get(character=char_sheet)
+            gear_cyberdeck = next((gear for gear in inventory.gear.all() if gear.is_cyberdeck), None)
+        except Inventory.DoesNotExist:
+            gear_cyberdeck = None
+
+        cyberware_cyberdeck = next((cw for cw in char_sheet.cyberware_instances.filter(installed=True) if cw.is_cyberdeck), None)
+
+        if gear_cyberdeck:
+            cyberdeck, created = Cyberdeck.objects.get_or_create(
+                gear=gear_cyberdeck,
+                defaults={'name': gear_cyberdeck.name, 'owner': char_sheet}
+            )
+        elif cyberware_cyberdeck:
+            cyberdeck, created = Cyberdeck.objects.get_or_create(
+                cyberware=cyberware_cyberdeck,
+                defaults={'name': cyberware_cyberdeck.cyberware.name, 'owner': char_sheet}
+            )
+
         if not cyberdeck:
             self.caller.msg("You don't have a Cyberdeck installed.")
             return
@@ -248,22 +319,8 @@ class CmdListPrograms(Command):
             for program in installed_programs:
                 self.caller.msg(f"- {program.name}: {program.description}")
 
-class CmdListNetArchitectures(Command):
-    """
-    List all available Net Architectures.
-
-    Usage:
-      listnetarch
-
-    This command shows all Net Architectures that have been created,
-    along with their difficulty level and number of nodes.
-    """
-    key = "listnetarch"
-    aliases = ["listarch", "architectures"]
-    lock = "cmd:all()"  # Allows all characters to use this command
-    help_category = "Netrunning"
-
-    def func(self):
+    def cmd_list(self):
+        """List all available Net Architectures."""
         architectures = NetArchitecture.objects.all().order_by('db_tags__db_key')
         
         if not architectures:
