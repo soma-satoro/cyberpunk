@@ -678,8 +678,6 @@ class CharacterSheet(SharedMemoryModel):
         # Ensure _current_hp is never negative   
         self._current_hp = max(0, self._current_hp)
 
-    # ... rest of the model ...
-
 @property
 def max_hp(self):
         return self._max_hp
