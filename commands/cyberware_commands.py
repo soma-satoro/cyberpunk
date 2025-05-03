@@ -13,10 +13,12 @@ class CmdCyberware(MuxCommand):
     Usage:
       cyberware
       cyberware <name>
+      cyberware/activate <name>
 
     Examples:
       cyberware
       cyberware Neural Link
+      cyberware/activate Neural Link
     """
 
     key = "cyberware"
@@ -83,44 +85,17 @@ class CmdCyberware(MuxCommand):
         output += footer(width=78, fillchar="|m-|n")
         
         self.caller.msg(output)
-
-class CmdActivateCyberware(Command):
-    """
-    Activate a cyberware weapon.
-
-    Usage:
-      activate <cyberware_name>
-
-    This command activates a cyberware weapon, modifying your unarmed strike damage.
-    Only one cyberware weapon can be active at a time.
-    """
-
-    key = "activate"
-    locks = "cmd:all()"
-    help_category = "Cyberware"
-
-    def func(self):
-        if not self.args:
-            self.caller.msg("Usage: activate <cyberware_name>")
-            return
-
-        cyberware_name = self.args.strip().lower()
-
+    def activate_cyberware(self, character_sheet, cyberware_name):
+        cyberware_name = cyberware_name.strip()  # Remove leading/trailing whitespace
         try:
-            character_sheet = self.caller.character_sheet
-        except AttributeError:
-            self.caller.msg("You don't have a character sheet.")
+            cyberware_instance = CyberwareInstance.objects.get(
+                character=character_sheet,
+                cyberware__name__iexact=cyberware_name,
+                installed=True
+            )
+        except CyberwareInstance.DoesNotExist:
+            self.caller.msg(f"You don't have a piece of cyberware named '{cyberware_name}' installed.")
             return
-
-        # Debug: Print all installed cyberware
-        installed_cyberware = CyberwareInstance.objects.filter(
-            character=character_sheet,
-            installed=True
-        )
-        self.caller.msg("Installed cyberware:")
-        for cw in installed_cyberware:
-            self.caller.msg(f"- {cw.cyberware.name} (is_weapon: {cw.cyberware.is_weapon}, damage_dice: {cw.cyberware.damage_dice}, damage_die_type: {cw.cyberware.damage_die_type}, rate_of_fire: {cw.cyberware.rate_of_fire})")
-
         # Attempt to find the cyberware
         try:
             cyberware = CyberwareInstance.objects.filter(
@@ -138,12 +113,6 @@ class CmdActivateCyberware(Command):
         except CyberwareInstance.DoesNotExist:
             self.caller.msg(f"You don't have an installed cyberware weapon named '{cyberware_name}'.")
             return
-
-        # Debug: Print found cyberware details
-        self.caller.msg(f"Found cyberware: {cyberware.cyberware.name}")
-        self.caller.msg(f"Is weapon: {cyberware.cyberware.is_weapon}")
-        self.caller.msg(f"Damage: {cyberware.cyberware.damage_dice}d{cyberware.cyberware.damage_die_type}")
-        self.caller.msg(f"Rate of fire: {cyberware.cyberware.rate_of_fire}")
 
         # Deactivate any previously activated cyberware
         CyberwareInstance.objects.filter(character=character_sheet, active=True).update(active=False)

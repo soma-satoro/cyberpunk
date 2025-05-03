@@ -140,3 +140,11 @@ def get_character_sheet(character):
         return CharacterSheet.objects.get(character=character)
     except CharacterSheet.DoesNotExist:
         return None
+
+def get_pronouns(gender):
+    if gender == "male":
+        return "he", "him", "his"
+    elif gender == "female":
+        return "she", "her", "her"
+    else:
+        return "they", "them", "their"

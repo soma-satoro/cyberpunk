@@ -1,14 +1,18 @@
 from django.db import models
 from evennia.utils.idmapper.models import SharedMemoryModel
-from world.cyberpunk_sheets.models import CharacterSheet
 from evennia.typeclasses.models import TypedObject
+from evennia.objects.models import ObjectDB
 from evennia.utils import logger
+from django.conf import settings
+from django.db.models import JSONField
+
+from world.factions.faction_types import FACTION_TYPES
 
 class Group(SharedMemoryModel):
     name = models.CharField(max_length=255, unique=True)
     description = models.TextField(blank=True)
     ic_description = models.TextField(blank=True)
-    leader = models.ForeignKey(CharacterSheet, on_delete=models.SET_NULL, null=True, related_name='led_groups')
+    leader = models.ForeignKey(ObjectDB, on_delete=models.SET_NULL, null=True, related_name='led_groups')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -21,9 +25,22 @@ class Group(SharedMemoryModel):
         logger.log_info(f"Group saved. Leader after save: {self.leader}")
 
     @property
-    def leader_object(self):
-        """Returns the leader's db_object if it exists, otherwise None."""
-        return self.leader.db_object if self.leader else None
+    def leader_display_name(self):
+        """Returns the leader's full name if it exists, otherwise their key."""
+        if not self.leader:
+            return "None"
+            
+        # Try to get the full name directly from the typeclass
+        if hasattr(self.leader.db, 'full_name') and self.leader.db.full_name:
+            return self.leader.db.full_name
+        
+        # Fallback to character sheet for backward compatibility
+        if hasattr(self.leader, 'character_sheet') and self.leader.character_sheet:
+            if hasattr(self.leader.character_sheet, 'full_name') and self.leader.character_sheet.full_name:
+                return self.leader.character_sheet.full_name
+                
+        # Fall back to the object key
+        return self.leader.key
 
 class GroupRole(SharedMemoryModel):
     name = models.CharField(max_length=50)
@@ -37,7 +54,7 @@ class GroupRole(SharedMemoryModel):
         return f"{self.name} - {self.group.name}"
 
 class GroupMembership(SharedMemoryModel):
-    character = models.ForeignKey(CharacterSheet, on_delete=models.CASCADE)
+    character = models.ForeignKey(ObjectDB, on_delete=models.CASCADE)
     group = models.ForeignKey(Group, on_delete=models.CASCADE)
     role = models.ForeignKey(GroupRole, on_delete=models.SET_NULL, null=True, blank=True)
 
@@ -45,10 +62,25 @@ class GroupMembership(SharedMemoryModel):
         unique_together = ('character', 'group')
 
     def __str__(self):
-        return f"{self.character.full_name} - {self.group.name} ({self.role.name if self.role else 'No Role'})"
+        character_name = self._get_character_name()
+        return f"{character_name} - {self.group.name} ({self.role.name if self.role else 'No Role'})"
+    
+    def _get_character_name(self):
+        """Get the character's name, either from typeclass or character sheet."""
+        # First try to get from typeclass
+        if hasattr(self.character.db, 'full_name') and self.character.db.full_name:
+            return self.character.db.full_name
+        
+        # Try character sheet as fallback
+        if hasattr(self.character, 'character_sheet') and self.character.character_sheet:
+            if hasattr(self.character.character_sheet, 'full_name') and self.character.character_sheet.full_name:
+                return self.character.character_sheet.full_name
+        
+        # Default to character key
+        return self.character.key
 
 class GroupJoinRequest(SharedMemoryModel):
-    character = models.ForeignKey(CharacterSheet, on_delete=models.CASCADE, related_name='join_requests')
+    character = models.ForeignKey(ObjectDB, on_delete=models.CASCADE, related_name='join_requests')
     group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name='join_requests')
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -56,20 +88,45 @@ class GroupJoinRequest(SharedMemoryModel):
         unique_together = ('character', 'group')
 
     def __str__(self):
-        return f"{self.character.full_name} - {self.group.name}"
+        character_name = self._get_character_name()
+        return f"{character_name} - {self.group.name}"
+    
+    def _get_character_name(self):
+        """Get the character's name, either from typeclass or character sheet."""
+        # First try to get from typeclass
+        if hasattr(self.character.db, 'full_name') and self.character.db.full_name:
+            return self.character.db.full_name
+        
+        # Try character sheet as fallback
+        if hasattr(self.character, 'character_sheet') and self.character.character_sheet:
+            if hasattr(self.character.character_sheet, 'full_name') and self.character.character_sheet.full_name:
+                return self.character.character_sheet.full_name
+        
+        # Default to character key
+        return self.character.key
 
 class Faction(SharedMemoryModel):
     name = models.CharField(max_length=255, unique=True)
     description = models.TextField(blank=True)
     ic_description = models.TextField(blank=True)
     influence = models.IntegerField(default=0)
+    faction_type = JSONField(default=list)
+    leader = models.ForeignKey(ObjectDB, on_delete=models.SET_NULL, null=True, related_name='led_factions')
+    coleader = models.ForeignKey(ObjectDB, on_delete=models.SET_NULL, null=True, related_name='co_led_factions')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return self.name
 
+    @property
+    def faction_types_display(self):
+        """Return a string representation of faction types."""
+        if isinstance(self.faction_type, list):
+            return ", ".join(self.faction_type)
+        return str(self.faction_type)
+
 class FactionReputation(SharedMemoryModel):
-    character = models.ForeignKey(CharacterSheet, on_delete=models.CASCADE)
+    character = models.ForeignKey(ObjectDB, on_delete=models.CASCADE)
     faction = models.ForeignKey(Faction, on_delete=models.CASCADE)
     reputation = models.IntegerField(default=0)
 
@@ -77,7 +134,22 @@ class FactionReputation(SharedMemoryModel):
         unique_together = ('character', 'faction')
 
     def __str__(self):
-        return f"{self.character} - {self.faction}: {self.reputation}"
+        character_name = self._get_character_name()
+        return f"{character_name} - {self.faction}: {self.reputation}"
+    
+    def _get_character_name(self):
+        """Get the character's name, either from typeclass or character sheet."""
+        # First try to get from typeclass
+        if hasattr(self.character.db, 'full_name') and self.character.db.full_name:
+            return self.character.db.full_name
+        
+        # Try character sheet as fallback
+        if hasattr(self.character, 'character_sheet') and self.character.character_sheet:
+            if hasattr(self.character.character_sheet, 'full_name') and self.character.character_sheet.full_name:
+                return self.character.character_sheet.full_name
+        
+        # Default to character key
+        return self.character.key
 
 class GroupInfo(TypedObject):
     """
@@ -93,10 +165,6 @@ class GroupInfo(TypedObject):
 
     def __str__(self):
         return f"Group Info for {self.db_character}"
-    
-from django.contrib.auth.models import User
-from django.db import models
-from django.conf import settings
 
 class Roster(models.Model):
     """Model for managing character rosters."""

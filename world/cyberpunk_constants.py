@@ -434,10 +434,4 @@ LANGUAGES = [
 ]
 
 # You can add more constants as needed
-print("STATS constant:", STATS)
-print("LANGUAGES constant:", LANGUAGES)
-print("ROLE_CYBERWARE constant:", ROLE_CYBERWARE)
-print("EQUIPMENT constant:", EQUIPMENT)
-print("ROLE_SKILLS constant:", ROLE_SKILLS)
-print("ROLE_STAT_TABLES constant:", ROLE_STAT_TABLES)
-print("ROLES constant:", ROLES)
+

@@ -4,12 +4,12 @@ import pytz
 import ephem
 from evennia.utils.ansi import ANSIString
 from evennia import default_cmds
-from world.wod20th.utils import ansi_utils
+from world.utils import ansi_utils
 import re
 
 class CmdWeather(default_cmds.MuxCommand):
     """
-    Get the current time, weather, moon phase, and tide information for San Diego.
+    Get the current time, weather, moon phase, and tide information for Morro Bay.
     Admins can set a custom weather description for special events.
 
     Usage:
@@ -120,11 +120,11 @@ class CmdWeather(default_cmds.MuxCommand):
         # Check for custom weather override
         custom_weather = self.caller.db.custom_weather
 
-        # Set the timezone for San Diego
-        san_diego_tz = pytz.timezone('America/Los_Angeles')
+        # Set the timezone for Morro Bay
+        night_city_tz = pytz.timezone('America/Los_Angeles')
         
-        # Get current date and time in San Diego
-        now = datetime.now(san_diego_tz)
+        # Get current date and time in Morro Bay
+        now = datetime.now(night_city_tz)
         current_date = now.strftime("%A, %B %d, %Y")
         current_time = now.strftime("%I:%M %p")
 
@@ -141,7 +141,7 @@ class CmdWeather(default_cmds.MuxCommand):
         else:
             # OpenWeatherMap API call
             api_key = "549ac137ad7db9fb5d6f68b590d488a6"
-            city_id = "5391811"  # San Diego city ID
+            city_id = "5374920"  # Morro Bay ID
             url = f"http://api.openweathermap.org/data/2.5/weather?id={city_id}&appid={api_key}&units=imperial"
             forecast_url = f"http://api.openweathermap.org/data/2.5/forecast?id={city_id}&appid={api_key}&units=imperial"
             
@@ -161,8 +161,8 @@ class CmdWeather(default_cmds.MuxCommand):
                     wind_dir = self.get_wind_direction(wind_deg)
                     
                     # Convert sunrise and sunset to local time
-                    sunrise = datetime.fromtimestamp(data['sys']['sunrise'], san_diego_tz).strftime("%I:%M %p")
-                    sunset = datetime.fromtimestamp(data['sys']['sunset'], san_diego_tz).strftime("%I:%M %p")
+                    sunrise = datetime.fromtimestamp(data['sys']['sunrise'], night_city_tz).strftime("%I:%M %p")
+                    sunset = datetime.fromtimestamp(data['sys']['sunset'], night_city_tz).strftime("%I:%M %p")
                     
                     # Get moon phase
                     moon_phase = self.get_moon_phase()

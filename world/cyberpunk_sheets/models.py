@@ -7,7 +7,6 @@ from django.apps import apps
 from evennia.utils import logger
 from world.languages.models import Language, CharacterLanguage
 from world.languages.language_dictionary import LANGUAGES
-from world.inventory.models import CyberwareInstance, Inventory
 from world.utils.calculation_utils import calculate_points_spent
 
 class CharacterSheet(SharedMemoryModel):
@@ -101,6 +100,8 @@ class CharacterSheet(SharedMemoryModel):
     @classmethod
     def create_character_sheet(cls, account):
         character_sheet = cls.objects.create(account=account)
+        # Use lazy import to avoid circular dependency
+        Inventory = apps.get_model('inventory', 'Inventory')
         Inventory.objects.get_or_create(character=character_sheet)
         return character_sheet
 
@@ -499,7 +500,8 @@ class CharacterSheet(SharedMemoryModel):
 
     def calculate_humanity_loss(self):
         logger.info("Starting calculate_humanity_loss in CharacterSheet")
-        from world.inventory.models import CyberwareInstance
+        # Use lazy import to avoid circular dependency
+        CyberwareInstance = apps.get_model('inventory', 'CyberwareInstance')
         installed_cyberware = CyberwareInstance.objects.filter(character=self, installed=True)
         total_cyberware_hl = sum(cw.cyberware.humanity_loss for cw in installed_cyberware)
         
@@ -547,7 +549,8 @@ class CharacterSheet(SharedMemoryModel):
         self.save(skip_recalculation=True)
 
     def calculate_total_cyberware_hl(self):
-        from world.inventory.models import CyberwareInstance
+        # Use lazy import to avoid circular dependency
+        CyberwareInstance = apps.get_model('inventory', 'CyberwareInstance')
         installed_cyberware = CyberwareInstance.objects.filter(character=self, installed=True)
         return sum(cw.cyberware.humanity_loss for cw in installed_cyberware)
 
@@ -621,7 +624,8 @@ class CharacterSheet(SharedMemoryModel):
         self.body = 1
         self.is_approved = False
         
-        # Clear existing cyberware
+        # Clear existing cyberware - Use lazy import to avoid circular dependency
+        CyberwareInstance = apps.get_model('inventory', 'CyberwareInstance')
         CyberwareInstance.objects.filter(character=self).delete()
         
         # Clear existing languages
@@ -636,6 +640,8 @@ class CharacterSheet(SharedMemoryModel):
             self.inventory.armor.clear()
             self.inventory.gear.clear()
         else:
+            # Use lazy import to avoid circular dependency
+            Inventory = apps.get_model('inventory', 'Inventory')
             Inventory.objects.create(character=self)
         
         self.save()

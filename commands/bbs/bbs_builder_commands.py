@@ -4,7 +4,7 @@
 from evennia import default_cmds
 from evennia import create_object
 from typeclasses.bbs_controller import BBSController
-from world.wod20th.models import Roster, RosterMember
+from world.factions.models import Roster, RosterMember
 
 class CmdCreateBoard(default_cmds.MuxCommand):
     """

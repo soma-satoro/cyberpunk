@@ -1,7 +1,7 @@
 from evennia import DefaultObject, evennia
 from evennia.utils.utils import datetime_format
 from datetime import datetime
-from world.wod20th.models import RosterMember
+from world.factions.models import RosterMember
 
 class BBSController(DefaultObject):
     """
@@ -403,7 +403,7 @@ class BBSController(DefaultObject):
             return "Board not found"
             
         # Verify roster exists
-        from world.wod20th.models import Roster
+        from world.factions.models import Roster
         try:
             Roster.objects.get(name=roster_name)
         except Roster.DoesNotExist:

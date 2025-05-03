@@ -2,6 +2,7 @@ from evennia import DefaultScript
 from evennia.utils import gametime, create
 from evennia.scripts.models import ScriptDB
 from evennia.utils import logger
+from world.cyberpunk_sheets.services import CharacterMoneyService
 import random
 
 class Mission(DefaultScript):
@@ -54,10 +55,37 @@ class Mission(DefaultScript):
         self.db.status = "completed"
         for character in self.db.assigned_to:
             character.msg(f"You have completed the mission: {self.db.title}")
-            if hasattr(character, 'character_sheet'):
-                cs = character.character_sheet
-                cs.add_money(self.db.reward)
-                cs.add_reputation(self.db.difficulty * 10)
+            
+            # Add money and reputation
+            CharacterMoneyService.add_money(character, self.db.reward)
+            self.add_character_reputation(character, self.db.difficulty * 10)
+
+    def add_character_reputation(self, character, rep_amount):
+        """Add reputation to a character, checking typeclass first then falling back to character sheet"""
+        if hasattr(character, 'db'):
+            # Check if reputation attributes exist, create if they don't
+            if not hasattr(character.db, 'reputation_points'):
+                character.db.reputation_points = 0
+            if not hasattr(character.db, 'rep'):
+                character.db.rep = 0
+                
+            # Add reputation points
+            character.db.reputation_points += rep_amount
+            
+            # Update rep level (every 100 points = 1 level, max 10)
+            new_rep = min(character.db.reputation_points // 100, 10)
+            if new_rep != character.db.rep:
+                character.db.rep = new_rep
+                character.msg(f"Your reputation has increased to {new_rep}!")
+                
+            # Also update character sheet if it exists (for backwards compatibility)
+            if hasattr(character, 'character_sheet') and character.character_sheet:
+                character.character_sheet.reputation_points = character.db.reputation_points
+                character.character_sheet.rep = character.db.rep
+                character.character_sheet.save()
+        # Fall back to character sheet if db attributes not found
+        elif hasattr(character, 'character_sheet') and character.character_sheet:
+            character.character_sheet.add_reputation(rep_amount)
 
     def fail_mission(self):
         """
@@ -97,10 +125,19 @@ class MissionBoard(DefaultScript):
         """
         Get all available missions for a character based on their reputation.
         """
-        if hasattr(character, 'character_sheet'):
-            reputation = character.character_sheet.rep
-            return [m for m in self.db.missions if m.db.status == "available" and m.db.reputation_requirement <= reputation]
-        return []
+        reputation = self.get_character_reputation(character)
+        return [m for m in self.db.missions if m.db.status == "available" and m.db.reputation_requirement <= reputation]
+
+    def get_character_reputation(self, character):
+        """Get a character's reputation, checking typeclass first then character sheet"""
+        # Check typeclass DB attributes
+        if hasattr(character, 'db') and hasattr(character.db, 'rep'):
+            return character.db.rep
+        # Fall back to character sheet
+        elif hasattr(character, 'character_sheet') and character.character_sheet:
+            return character.character_sheet.rep
+        # Default value
+        return 0
 
     def get_mission_by_id(self, mission_id):
         """

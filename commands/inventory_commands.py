@@ -1,6 +1,7 @@
 from evennia import Command
 from evennia.utils.ansi import ANSIString
 from evennia.commands.default.muxcommand import MuxCommand
+from world.cyberpunk_sheets.models import CharacterSheet
 from world.inventory.models import Weapon, Armor, Gear, Inventory, Ammunition
 from world.cyberpunk_sheets.services import CharacterSheetMoneyService
 from world.utils.formatting import header, footer, divider
@@ -18,6 +19,7 @@ class CmdInventory(MuxCommand):
       inv <character> - shows another character's inventory (staff/GM only)
       inv/equip - equips an item
       inv/unequip - unequips an item
+      inv/balance - shows your Eurodollars and Night City Reputation
 
     This command displays your character's inventory, including weapons, armor, and gear.
     """
@@ -150,3 +152,172 @@ class CmdInventory(MuxCommand):
         sheet.save()
 
         self.caller.msg(f"You have unequipped your {weapon_name}.")
+
+class CmdEquip(Command):
+    """
+    Admin equipment commands.
+
+    Usage:
+      equip/add <player>=<item> - Give a player an item from the database
+      equip/remove <player>=<item> - Remove an item from a player's inventory
+
+    """
+
+    key = "equip"
+    aliases = ["equipment"]
+    locks = "cmd:perm(Admin)"
+    help_category = "Admin"
+
+    def func(self):
+        if not self.args:
+            self.caller.msg("Usage: equip/add <player>=<item> or equip/remove <player>=<item>")
+            return
+
+        if "add" in self.args:
+            self.add_item()
+        elif "remove" in self.args:
+            self.remove_item()
+    
+    def add_item(self):
+        if not self.args or len(self.args.split()) < 2:
+            self.caller.msg("Usage: equip/add <player>=<item>")
+            return
+        
+        player_name, item_name = self.args.split(None, 1)
+        player = self.caller.search(player_name)
+        if not player:
+            return
+
+        item = self.caller.search(item_name)
+        if not item:
+            self.caller.msg(f"Item '{item_name}' does not exist.")
+            return
+        
+        if item.type == "weapon":
+            self.add_weapon()
+        elif item.type == "armor":
+            self.add_armor()
+        elif item.type == "gear":
+            self.add_gear()
+        else:
+            self.caller.msg(f"Item '{item_name}' is not a valid weapon, armor, or gear.")
+            return
+
+        try:
+            character_sheet = CharacterSheet.objects.get(account=player.account)
+        except CharacterSheet.DoesNotExist:
+            self.caller.msg(f"{player.name} doesn't have a character sheet.")
+            return
+        
+        inventory, created = Inventory.objects.get_or_create(character=character_sheet)
+        inventory.weapons.add(item)
+        self.caller.msg(f"Added {item.name} to {player.name}'s inventory.")
+        player.msg(f"A {item.name} has been added to your inventory.")
+
+    def remove_item(self):
+        if not self.args or len(self.args.split()) < 2:
+            self.caller.msg("Usage: equip/remove <player>=<item>")
+            return
+
+        player_name, item_name = self.args.split(None, 1)
+        player = self.caller.search(player_name)
+        if not player:
+            return
+        
+        try:
+            item = Weapon.objects.get(name__iexact=item_name.strip('"'))
+        except Weapon.DoesNotExist:
+            self.caller.msg(f"Weapon '{item_name}' does not exist.")
+            return
+        
+        try:
+            character_sheet = CharacterSheet.objects.get(account=player.account)
+        except CharacterSheet.DoesNotExist:
+            self.caller.msg(f"{player.name} doesn't have a character sheet.")
+            return
+        
+        inventory, created = Inventory.objects.get_or_create(character=character_sheet)
+        inventory.weapons.remove(item)
+        self.caller.msg(f"Removed {item.name} from {player.name}'s inventory.")
+        player.msg(f"A {item.name} has been removed from your inventory.")
+
+    def add_weapon(self):
+        if not self.args or len(self.args.split()) < 2:
+            self.caller.msg("Usage: addweapon <player> <weapon_name>")
+            return
+
+        player_name, weapon_name = self.args.split(None, 1)
+        player = self.caller.search(player_name)
+        if not player:
+            return
+
+        try:
+            weapon = Weapon.objects.get(name__iexact=weapon_name.strip('"'))
+        except Weapon.DoesNotExist:
+            self.caller.msg(f"Weapon '{weapon_name}' does not exist.")
+            return
+
+        try:
+            character_sheet = CharacterSheet.objects.get(account=player.account)
+        except CharacterSheet.DoesNotExist:
+            self.caller.msg(f"{player.name} doesn't have a character sheet.")
+            return
+
+        inventory, created = Inventory.objects.get_or_create(character=character_sheet)
+        inventory.weapons.add(weapon)
+        self.caller.msg(f"Added {weapon.name} to {player.name}'s inventory.")
+        player.msg(f"A {weapon.name} has been added to your inventory.")
+
+    def add_armor(self):
+        if not self.args or len(self.args.split()) < 2:
+            self.caller.msg("Usage: addarmor <player> <armor_name>")
+            return
+
+        player_name, armor_name = self.args.split(None, 1)
+        player = self.caller.search(player_name)
+        if not player:
+            return
+
+        try:
+            armor = Armor.objects.get(name__iexact=armor_name.strip('"'))
+        except Armor.DoesNotExist:
+            self.caller.msg(f"Armor '{armor_name}' does not exist.")
+            return
+
+        try:
+            character_sheet = CharacterSheet.objects.get(account=player.account)
+        except CharacterSheet.DoesNotExist:
+            self.caller.msg(f"{player.name} doesn't have a character sheet.")
+            return
+
+        inventory, created = Inventory.objects.get_or_create(character=character_sheet)
+        inventory.armor.add(armor)
+        self.caller.msg(f"Added {armor.name} to {player.name}'s inventory.")
+        player.msg(f"A {armor.name} has been added to your inventory.")
+
+    def add_gear(self):
+        if not self.args or len(self.args.split()) < 2:
+            self.caller.msg("Usage: addgear <player> <gear_name>")
+            return
+
+        player_name, gear_name = self.args.split(None, 1)
+        player = self.caller.search(player_name)
+        if not player:
+            return
+
+        try:
+            gear = Gear.objects.get(name__iexact=gear_name.strip('"'))
+        except Gear.DoesNotExist:
+            self.caller.msg(f"Gear '{gear_name}' does not exist.")
+            return
+
+        try:
+            character_sheet = CharacterSheet.objects.get(account=player.account)
+        except CharacterSheet.DoesNotExist:
+            self.caller.msg(f"{player.name} doesn't have a character sheet.")
+            return
+
+        inventory, created = Inventory.objects.get_or_create(character=character_sheet)
+        inventory.gear.add(gear)
+        self.caller.msg(f"Added {gear.name} to {player.name}'s inventory.")
+        player.msg(f"A {gear.name} has been added to your inventory.")

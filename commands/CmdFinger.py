@@ -1,8 +1,8 @@
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils.ansi import ANSIString
 from evennia.utils.utils import crop, time_format
-from world.wod20th.utils.formatting import header, footer, divider
-from world.wod20th.utils.time_utils import TIME_MANAGER
+from world.utils.formatting import header, footer, divider
+from world.utils.time_utils import TIME_MANAGER
 from evennia.utils.search import search_object
 from time import time
 import datetime
@@ -34,7 +34,7 @@ class CmdFinger(MuxCommand):
       +finger/set online_times=8:30 or 9pm PDT Sunday-Saturday
       +finger/set pronouns=She/They
       +finger/set alias=Nic
-      +finger/set rumors=Apparently has connections to the Prince
+      +finger/set rumors=Apparently has connections to a prince
       +finger/set ic_job=Owner of The Lost and Found
       
     Timezone Settings:

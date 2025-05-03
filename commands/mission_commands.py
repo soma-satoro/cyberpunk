@@ -1,9 +1,51 @@
 from evennia import Command
+from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils.evtable import EvTable
 from world.missions import get_or_create_mission_board
 from world.events import get_or_create_event_scheduler
 from evennia.utils import gametime, logger
 from datetime import datetime
+
+class CmdMission(MuxCommand):
+    """
+    Base command for missions and events.
+    Usage:
+      mission -
+      mission/list -
+      mission/accept <mission_id> -
+      mission/complete <mission_id> -
+      mission/status -
+      mission/create <title> = <description>/<difficulty>/<reward>/<max_players>/<deadline>/<reputation_requirement> -
+      mission/events -
+      mission/createevent <title> = <description>/<date_time>/<associated_mission_id> -
+      mission/eventinfo <event_id> -
+      mission/joinevent <event_id> -
+      mission/leaveevent <event_id> -
+      mission/startevent <event_id> -
+      mission/completeevent <event_id> -
+    """
+    key = "mission"
+    aliases = ["missions", "event", "events"]
+    locks = "cmd:all()"
+
+    def func(self):
+        pass
+
+        if self.args == "list":
+            return CmdListMissions().func(self)
+        elif self.args == "accept":
+            return CmdAcceptMission().func(self)
+        elif self.args == "complete":
+            return CmdCompleteMission().func(self)
+        elif self.args == "status":
+            return CmdMissionStatus().func(self)
+        elif self.args == "create":
+            return CmdCreateMission().func(self)
+        elif self.args == "events":
+            return CmdListEvents().func(self)
+        elif self.args == "createevent":
+            return CmdCreateEvent().func(self)
+            
 
 class CmdListMissions(Command):
     """

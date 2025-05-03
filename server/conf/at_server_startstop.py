@@ -15,6 +15,7 @@ from typeclasses.scripts import RentCollectionScript
 from typeclasses.rental import RentableRoom
 from world.equipment_data import initialize_weapons, initialize_armor, initialize_gear, initialize_ammunition
 from world.cyberware.cyberware_data import initialize_cyberware
+from typeclasses.factions import Faction
 
 
 import traceback
@@ -24,6 +25,56 @@ def at_server_start():
     This is called every time the server starts up, regardless of
     how it was shut down.
     """
+    # Initialize the faction system
+    logger.log_info("Initializing the faction system...")
+    
+    storage = Faction.get_faction_storage()
+    if not storage:
+        logger.log_err("Failed to initialize faction system: Could not create faction storage room")
+        return
+        
+    # Check if we have a master faction object
+    master = Faction.objects.filter(db_key="FactionMaster").first()
+    if not master:
+        from evennia import create_object
+        master = create_object(
+            "typeclasses.factions.Faction",
+            key="FactionMaster",
+            location=storage
+        )
+        logger.log_info("Created FactionMaster object")
+    
+    # Ensure default factions exist
+    from typeclasses.factions import DEFAULT_FACTIONS, FactionModel
+    created_count = 0
+    
+    for name, data in DEFAULT_FACTIONS.items():
+        if not FactionModel.objects.filter(name=name).exists():
+            try:
+                faction_model = FactionModel.objects.create(
+                    name=name,
+                    description=data["description"],
+                    ic_description=data["ic_description"],
+                    influence=data["influence"]
+                )
+                
+                faction_obj = create_object(
+                    "typeclasses.factions.Faction",
+                    key=name,
+                    location=storage
+                )
+                
+                faction_obj.db.faction_type = data["type"]
+                faction_obj.link_to_model(faction_model.id)
+                created_count += 1
+                logger.log_info(f"Created default faction: {name}")
+            except Exception as e:
+                logger.log_err(f"Error creating default faction {name}: {e}")
+    
+    if created_count > 0:
+        logger.log_info(f"Created {created_count} default factions")
+    logger.log_info("Faction system initialization complete")
+
     # Start the WorldScript
     if not WorldScript.objects.filter(db_key="WorldScript").exists():
         create_script(WorldScript)
@@ -62,9 +113,15 @@ def at_server_stop():
 
     logger.log_info("Custom server shutdown complete")
 
-def at_server_reload_start():
+def at_server_reload_start(account_sessions=None):
     """
     This is called only when server starts back up after a reload.
+
+    account_sessions is a list of account sessions connected to the
+    server before the reload. These will be reconnected unless they
+    have been disconnected. It is not guaranteed that the Players in
+    this list will be the same as the connected ones.
+
     """
     pass
 

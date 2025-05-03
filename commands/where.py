@@ -1,7 +1,7 @@
 from evennia import default_cmds
 from evennia.server.sessionhandler import SESSIONS
 from evennia.utils.ansi import ANSIString
-from world.wod20th.utils.formatting import header, footer, divider
+from world.utils.formatting import header, footer, divider
 from evennia.utils.evtable import EvTable
 from collections import defaultdict
 
@@ -81,18 +81,14 @@ class CmdWhere(default_cmds.MuxCommand):
         name = puppet.name
         
         # Add state indicators
-        if puppet.tags.has("in_umbra", category="state"):
-            name = f"@{name}"
         if puppet.db.lfrp:
             name = f"${name}"
-        if puppet.check_permstring("builders"):
+        if puppet.check_permstring("builders", "admin", "staff", "developer"):
             name = f"*{name}"
         if puppet.db.afk:
             name = f"^{name}"
             
         # Apply colors
-        if puppet.tags.has("in_umbra", category="state"):
-            name = f"|b{name}|n"
         if puppet.db.lfrp:
             name = f"|y{name}|n"
             
@@ -102,7 +98,7 @@ class CmdWhere(default_cmds.MuxCommand):
         """Implement the command"""
         caller = self.caller
         session_list = SESSIONS.get_sessions()
-        is_staff = caller.check_permstring("builders")
+        is_staff = caller.check_permstring("builders", "admin", "staff", "developer")
         
         # Group characters by area
         areas = defaultdict(list)
@@ -167,7 +163,7 @@ class CmdWhere(default_cmds.MuxCommand):
 
         # Legend
         string += "\n|r" + "-" * 78 + "|n"
-        string += "\n|yLegend: ^ = AFK, * = Staff, |yYellow/$ = Looking for RP|n, |bBlue/@ = In Umbra|n"
+        string += "\n|yLegend: ^ = AFK, * = Staff, |yYellow/$ = Looking for RP|n"
         string += "\n|r" + "-" * 78 + "|n\n"
 
         string += footer(width=78)

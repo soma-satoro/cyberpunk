@@ -86,3 +86,88 @@ class Merchant(DefaultObject):
         # Ensure the merchant is properly set up
         if not hasattr(self.db, 'merchant_type') or self.db.merchant_type == "general":
             self.setup_merchant("general")
+    
+    def get_character_trading_skill(self, character):
+        """
+        Get a character's trading skill level, checking typeclass first, then sheet.
+        
+        Args:
+            character: The character to check
+            
+        Returns:
+            int: The trading skill level
+        """
+        # First check typeclass attributes
+        if hasattr(character, 'db'):
+            # Check skills dictionary if it exists
+            if hasattr(character.db, 'skills') and character.db.skills:
+                return character.db.skills.get('trading', 0)
+            # Check for direct attribute
+            if hasattr(character.db, 'trading'):
+                return character.db.trading
+                
+        # Fall back to character sheet
+        if hasattr(character, 'character_sheet') and character.character_sheet:
+            return getattr(character.character_sheet, 'trading', 0)
+            
+        # Default value if not found
+        return 0
+    
+    def get_character_cool(self, character):
+        """
+        Get a character's cool stat, checking typeclass first, then sheet.
+        
+        Args:
+            character: The character to check
+            
+        Returns:
+            int: The cool stat value
+        """
+        # First check typeclass attributes
+        if hasattr(character, 'db') and hasattr(character.db, 'cool'):
+            return character.db.cool
+                
+        # Fall back to character sheet
+        if hasattr(character, 'character_sheet') and character.character_sheet:
+            return getattr(character.character_sheet, 'cool', 0)
+            
+        # Default value if not found
+        return 0
+
+def create_cyberware_merchant(location):
+    """
+    Create a Ripperdoc (cyberware merchant) at the specified location.
+    
+    Args:
+        location: The location where the Ripperdoc should be created
+        
+    Returns:
+        Merchant: The created Ripperdoc merchant object
+    """
+    from evennia import create_object
+    from world.cyberware.utils import get_all_cyberware
+    
+    # Create the merchant object
+    ripperdoc = create_object(
+        "world.cyberpunk_sheets.merchants.Merchant",
+        key="Ripperdoc",
+        location=location
+    )
+    
+    # Set up custom attributes for the Ripperdoc
+    ripperdoc.db.merchant_type = "ripperdoc"
+    ripperdoc.db.description = "A skilled cyberware surgeon who sells and installs various cybernetic enhancements."
+    
+    # Get cyberware inventory from cyberware utils
+    try:
+        ripperdoc.db.inventory = get_all_cyberware()
+    except Exception as e:
+        # Fall back to empty inventory if there's an error
+        ripperdoc.db.inventory = []
+        ripperdoc.db.error_msg = str(e)
+    
+    # Add additional attributes specific to Ripperdoc
+    ripperdoc.db.surgery_fee = 100  # Base fee for cyberware installation
+    ripperdoc.db.reputation = 3     # On a scale of 1-10
+    
+    return ripperdoc

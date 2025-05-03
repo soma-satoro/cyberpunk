@@ -39,6 +39,8 @@ class CmdSheet(MuxCommand):
 
     def safe_get_attr(self, obj, attr):
         """Safely get an attribute value, returning 'N/A' if it doesn't exist."""
+        if hasattr(obj, "db") and obj.attributes.has(attr):
+            return obj.db.get(attr, 'N/A')
         return getattr(obj, attr, 'N/A')
 
     def parse(self):
@@ -81,22 +83,13 @@ class CmdSheet(MuxCommand):
         if not target:
             return
             
-        try:
-            cs = target.character_sheet
-        except AttributeError:
-            self.caller.msg(f"{target.name} doesn't have a character sheet yet.")
-            return
-
-        if not cs:
-            self.caller.msg(f"{target.name} doesn't have a character sheet yet.")
-            return
-
+        # Use character object directly instead of character_sheet
         width = 80
         title_width = 30
         output = ""
 
         # Main header
-        output += header(f"Lifepath for {cs.full_name}", width=width, fillchar="|m-|n") + "\n"
+        output += header(f"Lifepath for {target.db.full_name}", width=width, fillchar="|m-|n") + "\n"
 
         # Present Section
         output += divider("|yPresent|n", width=width, fillchar="|m=|n") + "\n"
@@ -111,7 +104,7 @@ class CmdSheet(MuxCommand):
             ("Most Valued Person", "valued_person"),
         ]
         for title, field in present_fields:
-            value = getattr(cs, field, "Not set")
+            value = target.db.get(field, "Not set")
             output += self.wrap_field(title, value, width, title_width)
         output += "\n"
 
@@ -124,13 +117,13 @@ class CmdSheet(MuxCommand):
             ("Family Crisis", "family_crisis")
         ]
         for title, field in past_fields:
-            value = getattr(cs, field, "Not set")
+            value = target.db.get(field, "Not set")
             output += self.wrap_field(title, value, width, title_width)
         output += "\n"
 
         # Role Section
-        if cs.role:
-            output += divider(f"|yRole: {cs.role}|n", width=width, fillchar="|m=|n") + "\n"
+        if target.db.role:
+            output += divider(f"|yRole: {target.db.role}|n", width=width, fillchar="|m=|n") + "\n"
             role_specific_fields = {
                 "Rockerboy": [
                     "what_kind_of_rockerboy_are_you",
@@ -191,8 +184,8 @@ class CmdSheet(MuxCommand):
                     "is_your_pack_based_on_land_air_or_sea"
                 ]
             }
-            for field in role_specific_fields.get(cs.role, []):
-                value = getattr(cs, field, None)
+            for field in role_specific_fields.get(target.db.role, []):
+                value = target.db.get(field, None)
                 if value:
                     title = field.replace('_', ' ').title()
                     output += self.wrap_field(title, value, width, title_width)
@@ -227,22 +220,17 @@ class CmdSheet(MuxCommand):
         if not target:
             return
             
-        cs = target.character_sheet
-        if not cs:
-            self.caller.msg(f"{target.name} doesn't have a character sheet.")
-            return
-
         # Main header
-        output = header(f"Character Sheet for {cs.full_name}", width=80, fillchar="|m-|n") + "\n"
+        output = header(f"Character Sheet for {target.db.full_name}", width=80, fillchar="|m-|n") + "\n"
 
         # Basic Information
         output += divider("Basic Information", width=80, fillchar="|m-|n") + "\n"
         basic_info = [
-            ("Full Name:", self.safe_get_attr(cs, 'full_name'), "Gender:", self.safe_get_attr(cs, 'gender')),
-            ("Handle:", self.safe_get_attr(cs, 'handle'), "Age:", self.safe_get_attr(cs, 'age')),
-            ("Hometown:", self.safe_get_attr(cs, 'hometown'), "Height:", f"{self.safe_get_attr(cs, 'height')} cm"),
-            ("Night City Rep:", self.safe_get_attr(cs, 'reputation'), "Weight:", f"{self.safe_get_attr(cs, 'weight')} kg"),
-            ("Role:", self.safe_get_attr(cs, 'role'), "Luck:", f"{self.safe_get_attr(cs, 'current_luck')}/{self.safe_get_attr(cs, 'luck')}")
+            ("Full Name:", target.db.full_name, "Gender:", target.db.gender),
+            ("Handle:", target.db.handle, "Age:", target.db.age),
+            ("Hometown:", target.db.hometown, "Height:", f"{target.db.height} cm"),
+            ("Night City Rep:", target.db.rep, "Weight:", f"{target.db.weight} kg"),
+            ("Role:", target.db.role, "Luck:", f"{target.db.current_luck}/{target.db.luck}")
         ]
         for row in basic_info:
             output += f"|c{row[0]:<20}|n {row[1]:<20} |c{row[2]:<15}|n {row[3]:<20}\n"
@@ -250,9 +238,9 @@ class CmdSheet(MuxCommand):
         # Stats
         output += divider("STATS", width=80, fillchar="|m-|n") + "\n"
         stats = [
-            ("Intelligence:", cs.intelligence, "Technology:", cs.technology, "Move:", cs.move),
-            ("Reflexes:", cs.reflexes, "Cool:", cs.cool, "Body:", cs.body),
-            ("Dexterity:", cs.dexterity, "Willpower:", cs.willpower, "Empathy:", cs.empathy)
+            ("Intelligence:", target.db.intelligence, "Technology:", target.db.technology, "Move:", target.db.move),
+            ("Reflexes:", target.db.reflexes, "Cool:", target.db.cool, "Body:", target.db.body),
+            ("Dexterity:", target.db.dexterity, "Willpower:", target.db.willpower, "Empathy:", target.db.empathy)
         ]
         for row in stats:
             output += "".join(f"|c{label:<13}|n {value:<8}" for label, value in zip(row[::2], row[1::2])) + "\n"
@@ -260,7 +248,7 @@ class CmdSheet(MuxCommand):
 
         # Skills
         output += divider("SKILLS", width=80, fillchar="|m-|n") + "\n"
-        active_skills = self.get_active_skills(cs)
+        active_skills = self.get_active_skills(target)
         for i in range(0, len(active_skills), 3):
             row = active_skills[i:i+3]
             output += "".join(f"|c{skill:<20}|n {value:<5}" for skill, value in row).ljust(80) + "\n"
@@ -269,8 +257,8 @@ class CmdSheet(MuxCommand):
         # Derived Stats
         output += divider("Derived Statistics", width=80, fillchar="|m-|n") + "\n"
         derived_stats = [
-            ("Hit Points:", f"{cs._current_hp}/{cs._max_hp}", "Death Save:", cs.death_save),
-            ("Serious Wounds:", cs.serious_wounds, "Humanity:", cs.humanity)
+            ("Hit Points:", f"{target.db.current_hp}/{target.db.max_hp}", "Death Save:", target.db.death_save),
+            ("Serious Wounds:", target.db.serious_wounds, "Humanity:", target.db.humanity)
         ]
         for row in derived_stats:
             output += "".join(f"|c{label:<16}|n {value:<18}" for label, value in zip(row[::2], row[1::2])) + "\n"
@@ -279,14 +267,18 @@ class CmdSheet(MuxCommand):
         # Equipment
         output += divider("Equipment", width=80, fillchar="|m-|n") + "\n"
         try:
-            inv = Inventory.objects.get(character=cs)
-        except Inventory.DoesNotExist:
-            output += "None\n"
+            # First try to get inventory directly from character if possible
+            if hasattr(target, 'inventory') and target.inventory:
+                inv = target.inventory
+            else:
+                # Fall back to model if needed
+                from world.inventory.models import Inventory
+                inv = Inventory.objects.get(character_object=target)
         except Exception as e:
             logger.log_err(f"Error retrieving inventory for {target}: {str(e)}")
             output += "Error retrieving inventory\n"
         else:
-            weapons = inv.weapons.all()
+            weapons = inv.weapons.all() if hasattr(inv, 'weapons') else []
             if weapons:
                 output += "|cWeapons:|n\n"
                 for weapon in weapons:
@@ -297,7 +289,7 @@ class CmdSheet(MuxCommand):
             else:
                 output += "Weapons: None\n"
 
-            armor = inv.armor.all()
+            armor = inv.armor.all() if hasattr(inv, 'armor') else []
             if armor:
                 output += "|cArmor:|n\n"
                 for piece in armor:
@@ -305,7 +297,7 @@ class CmdSheet(MuxCommand):
             else:
                 output += "Armor: None\n"
 
-            gear = inv.gear.all()
+            gear = inv.gear.all() if hasattr(inv, 'gear') else []
             if gear:
                 output += "|cGear:|n\n"
                 gear_list = [f"- {item.name}" for item in gear]
@@ -323,51 +315,58 @@ class CmdSheet(MuxCommand):
 
         # Languages
         output += divider("Languages", width=80, fillchar="|m-|n") + "\n"
-        languages = cs.character_languages.all()
-        if languages:
-            for lang in languages:
-                output += f"- {lang.language} (Level {lang.level})\n"
+        if hasattr(target, 'languages') and target.languages:
+            for lang_name, level in target.languages.items():
+                output += f"- {lang_name} (Level {level})\n"
         else:
             output += "None\n"
 
         output += footer(width=80, fillchar="|m-|n")
         self.caller.msg(output)
 
-    def get_active_skills(self, cs):
+    def get_active_skills(self, char):
         """
-        Get a list of active skills (skills with value > 0).
+        Get a list of active skills (skills with value > 0) directly from the character.
         """
         skill_list = []
-        excluded_fields = ['id', 'age', 'height', 'weight', 'hometown', 'account', 'total_cyberware_humanity_loss', 
-                        'rep', 'full_name', 'handle', 'gender', 'unarmed_damage_die_type', 'unarmed_damage_dice', 
-                        'current_luck', '_max_hp', '_current_hp', 'humanity', 'death_save', 'serious_wounds', 
-                        'eurodollars', 'role', 'eqweapon', 'eqarmor', 'humanity_loss', 'is_complete']
-        excluded_prefixes = ('intelligence', 'reflexes', 'dexterity', 'technology', 'cool', 
-                            'willpower', 'luck', 'move', 'body', 'empathy')
         
-        added_skills = set()
-        
-        for field in cs._meta.get_fields():
-            if (field.name not in excluded_fields and 
-                not field.name.startswith(excluded_prefixes) and
-                not field.is_relation):  # This line excludes relation fields
-                value = getattr(cs, field.name, 0)
-                if isinstance(value, int) and value > 0:
-                    skill_name = field.name.replace('_', ' ').title()
-                    if skill_name not in added_skills:
-                        skill_list.append([skill_name, value])
-                        added_skills.add(skill_name)
+        # Get skills from character's skills dictionary
+        if hasattr(char, 'db') and char.db.skills:
+            for skill_name, value in char.db.skills.items():
+                if value > 0:
+                    skill_name = skill_name.replace('_', ' ').title()
+                    skill_list.append([skill_name, value])
         
         # Add role abilities
-        role_abilities = ['charismatic_impact', 'combat_awareness', 'interface', 'maker', 
-                        'medicine', 'credibility', 'teamwork', 'backup', 'operator', 'moto']
-        for ability in role_abilities:
-            value = getattr(cs, ability, 0)
-            if value > 0:
-                ability_name = ability.replace('_', ' ').title()
-                if ability_name not in added_skills:
+        role_abilities = {
+            'charismatic_impact': 'Charismatic Impact',
+            'combat_awareness': 'Combat Awareness',
+            'interface': 'Interface',
+            'maker': 'Maker',
+            'medicine': 'Medicine',
+            'credibility': 'Credibility',
+            'teamwork': 'Teamwork',
+            'backup': 'Backup',
+            'operator': 'Operator',
+            'moto': 'Moto'
+        }
+        
+        for ability_key, ability_name in role_abilities.items():
+            if char.db.skills and ability_key in char.db.skills:
+                value = char.db.skills[ability_key]
+                if value > 0:
                     skill_list.append([ability_name, value])
-                    added_skills.add(ability_name)
+        
+        # Add skill instances from character typeclass
+        if hasattr(char, 'db') and char.db.skill_instances:
+            for skill_key, value in char.db.skill_instances.items():
+                if value > 0 and "(" in skill_key and ")" in skill_key:
+                    # Extract the base name and instance from the key (format: "base_skill(instance)")
+                    base_name, instance = skill_key.split("(", 1)
+                    instance = instance.rstrip(")")
+                    # Format as "Base Skill (Instance)"
+                    formatted_name = f"{base_name.replace('_', ' ').title()} ({instance})"
+                    skill_list.append([formatted_name, value])
         
         skill_list.sort(key=lambda x: (-x[1], x[0]))
         return skill_list
@@ -431,28 +430,6 @@ class CmdShortDesc(Command):
             caller.db.shortdesc = self.shortdesc
             caller.msg("Short description set to '|w%s|n'." % self.shortdesc)
 
-class CmdChargenDelete(Command):
-    """
-    Delete the character sheet for a character.
-
-    Usage:
-      chargen/delete
-
-    This command deletes the character sheet associated with your character.
-    """
-
-    key = "chargen/delete"
-    locks = "cmd:all()"
-    help_category = "Character"
-
-    def func(self):
-        sheet = self.caller.character_sheet
-        if sheet:
-            sheet.delete()
-            self.caller.msg("Your character sheet has been deleted.")
-        else:
-            self.caller.msg("You don't have a character sheet to delete.")
-
 class CmdRoll(Command):
     """
     Roll a skill check.
@@ -474,7 +451,6 @@ class CmdRoll(Command):
 
         attr, skill = self.args.split()
         char = self.caller
-        sheet = char.character_sheet
 
         full_attr_name = get_full_attribute_name(attr)
         full_skill_name = get_full_attribute_name(skill)
@@ -487,8 +463,12 @@ class CmdRoll(Command):
             self.caller.msg(f"Invalid skill. Choose from: {', '.join(SKILL_MAPPING.values())}")
             return
 
-        attr_value = getattr(sheet, full_attr_name, 0)
-        skill_value = getattr(sheet, full_skill_name, 0)
+        # Get attribute value directly from character
+        attr_value = char.db.get(full_attr_name, 0)
+        
+        # Get skill value from character's skills dictionary
+        skill_key = full_skill_name.lower().replace(' ', '_')
+        skill_value = char.db.skills.get(skill_key, 0) if char.db.skills else 0
 
         dice_roll = random.randint(1, 10)
         total = attr_value + skill_value + dice_roll
@@ -496,41 +476,13 @@ class CmdRoll(Command):
         self.caller.msg(f"Rolling {full_attr_name.capitalize()} + {full_skill_name.capitalize()} + 1d10")
         self.caller.msg(f"Result: {attr_value} + {skill_value} + {dice_roll} = {total}")
 
-class CmdRole(Command):
-    """
-    Select your character's role.
-
-    Usage:
-      role <role>
-
-    Available roles: Rockerboy, Solo, Netrunner, Tech, Medtech, Media, Exec, Lawman, Fixer, Nomad
-    """
-    locks = "cmd:all()"
-
-    def func(self):
-        if not self.args:
-            self.caller.msg("Usage: role <role>")
-            return
-
-        role = self.args.strip().capitalize()
-        valid_roles = ['Rockerboy', 'Solo', 'Netrunner', 'Tech', 'Medtech', 'Media', 'Exec', 'Lawman', 'Fixer', 'Nomad']
-
-        if role not in valid_roles:
-            self.caller.msg(f"Invalid role. Choose from: {', '.join(valid_roles)}")
-            return
-
-        self.caller.character_sheet.role = role
-        self.caller.character_sheet.save()
-        self.caller.msg(f"Your role has been set to {role}.")
-
 class CmdLuck(Command):
     """
     Spend a luck point.
 
     Usage:
-      luck -     This command spends one luck point if you have any available.
-      luck/gain <amount> - This command allows you to regain luck points up to your maximum.
-
+      luck        - Spend one luck point if you have any available.
+      luck/gain <amount> - Regain luck points up to your maximum.
     """
 
     key = "luck"
@@ -538,29 +490,29 @@ class CmdLuck(Command):
     help_category = "Roleplay Utilities"
 
     def func(self):
-        if not hasattr(self.caller, 'character_sheet'):
-            self.caller.msg("You don't have a character sheet!")
-            return
-
-        sheet = self.caller.character_sheet
+        char = self.caller
         
-        if self.args == "gain":
+        # Handle the gain switch
+        if "gain" in self.switches:
             self.gain_luck()
             return
         
-        def spend_luck(sheet):
-            if sheet.current_luck > 0:
-                sheet.current_luck -= 1
-                sheet.save()
-                return True
-            return False
+        # Handle spending luck
+        current_luck = char.db.current_luck
+        max_luck = char.db.luck
         
-        if spend_luck(sheet):
-            self.caller.msg(f"You spend a luck point. Remaining luck: {sheet.current_luck}/{sheet.luck}")
+        if current_luck is None or max_luck is None:
+            self.caller.msg("Your luck attributes aren't properly set up.")
+            return
+            
+        if current_luck > 0:
+            char.db.current_luck = current_luck - 1
+            self.caller.msg(f"You spend a luck point. Remaining luck: {char.db.current_luck}/{max_luck}")
         else:
             self.caller.msg("You don't have any luck points to spend!")
         
     def gain_luck(self):
+        """Handle gaining luck points."""
         if not self.args:
             self.caller.msg("Usage: luck/gain <amount>")
             return
@@ -575,22 +527,20 @@ class CmdLuck(Command):
             self.caller.msg("Please provide a positive number.")
             return
 
-        if not hasattr(self.caller, 'character_sheet'):
-            self.caller.msg("You don't have a character sheet!")
-            return
+        char = self.caller
+        current_luck = char.db.current_luck
+        max_luck = char.db.luck
         
-        sheet = self.caller.character_sheet
-        current_luck = sheet.current_luck
-        max_luck = sheet.luck
+        if current_luck is None or max_luck is None:
+            self.caller.msg("Your luck attributes aren't properly set up.")
+            return
 
         if current_luck >= max_luck:
             self.caller.msg("You already have the maximum number of luck points.")
             return
 
         new_luck = min(current_luck + amount, max_luck)
-        sheet.current_luck = new_luck
-        sheet.save()
-
+        char.db.current_luck = new_luck
         self.caller.msg(f"You regained {amount} luck points. Current luck: {new_luck}/{max_luck}")
 
 class CmdOOC(MuxCommand):

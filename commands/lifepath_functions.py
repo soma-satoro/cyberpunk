@@ -255,3 +255,16 @@ def set_role_helper(caller, raw_string, **kwargs):
     
     # Return to the main menu
     return start_lifepath(caller)
+
+def save_lifepath_choice(caller, key, value):
+    """Save a lifepath choice to the character's DB attributes."""
+    caller.db[key] = value
+    
+    # For backward compatibility, also update character sheet
+    if hasattr(caller, 'character_sheet') and caller.character_sheet:
+        sheet = caller.character_sheet
+        if hasattr(sheet, key):
+            setattr(sheet, key, value)
+            sheet.save(skip_recalculation=True)
+    
+    return f"You have chosen {value}."

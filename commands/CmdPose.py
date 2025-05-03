@@ -104,7 +104,7 @@ class CmdPose(PoseBreakMixin, default_cmds.MuxCommand):
         if "~" in self.args:
             speaking_language = caller.get_speaking_language()
             if not speaking_language:
-                caller.msg("You need to set a speaking language first with +language <language>")
+                caller.msg("You need to set a speaking language first with language <language>")
                 return
 
         # Send pose break before processing the message
@@ -168,6 +168,3 @@ class CmdPose(PoseBreakMixin, default_cmds.MuxCommand):
             else:
                 # No language-tagged speech, send normal pose
                 receiver.msg(f"{poser_name} {processed_args}")
-
-        # Record scene activity
-        caller.record_scene_activity()

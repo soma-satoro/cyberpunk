@@ -1,0 +1,111 @@
+/* ANSI Color Codes */
+.ansi-white { color: #FFFFFF !important; }
+.ansi-red { color: #FF0000 !important; }
+.ansi-green { color: #00FF00 !important; }
+.ansi-blue { color: #0000FF !important; }
+.ansi-yellow { color: #FFFF00 !important; }
+.ansi-cyan { color: #00FFFF !important; }
+.ansi-magenta { color: #FF00FF !important; }
+
+/* Job Comments Styling */
+.job-comments {
+    font-family: 'Courier New', monospace;
+    background: #1a1a1a;
+    color: #d4d4d4;
+    padding: 20px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+}
+
+.comment-box {
+    background: #2d2d2d;
+    border: 1px solid #3d3d3d;
+    border-radius: 4px;
+    margin-bottom: 15px;
+    padding: 15px;
+}
+
+.comment-header {
+    font-weight: bold;
+    color: #e6e6e6;
+    border-bottom: 1px solid #3d3d3d;
+    padding-bottom: 5px;
+    margin-bottom: 10px;
+}
+
+.comment-meta {
+    font-style: italic;
+    color: #888;
+    margin-bottom: 10px;
+    font-size: 0.9em;
+}
+
+.comment-text {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    line-height: 1.4;
+}
+
+/* New Comment Form */
+.new-comment-form {
+    margin-top: 20px;
+    padding: 15px;
+    background: #2d2d2d;
+    border-radius: 4px;
+}
+
+.new-comment-form textarea {
+    width: 100%;
+    background: #1a1a1a;
+    color: #d4d4d4;
+    border: 1px solid #3d3d3d;
+    padding: 10px;
+    font-family: 'Courier New', monospace;
+    margin-bottom: 10px;
+}
+
+.new-comment-form textarea:focus {
+    outline: none;
+    border-color: #4d4d4d;
+}
+
+/* Roll Results Styling */
+.roll-result {
+    font-family: 'Courier New', monospace;
+    background: #2d2d2d;
+    padding: 5px 10px;
+    border-radius: 3px;
+    display: inline-block;
+    margin: 2px 0;
+}
+
+.success { color: #00ff00; }
+.failure { color: #ff0000; }
+.neutral { color: #ffffff; }
+
+/* Warning Messages */
+.warning-message {
+    color: #ff6b6b;
+    font-style: italic;
+    margin: 5px 0;
+}
+
+/* Dark Mode Overrides for Django Admin */
+.module {
+    background: #2d2d2d !important;
+    color: #d4d4d4 !important;
+}
+
+.module h2 {
+    background: #1a1a1a !important;
+    color: #e6e6e6 !important;
+}
+
+/* Ensure ANSI colors are visible on dark background */
+.dark-theme .ansi-white { color: #FFFFFF !important; }
+.dark-theme .ansi-red { color: #ff6b6b !important; }
+.dark-theme .ansi-green { color: #87c38f !important; }
+.dark-theme .ansi-blue { color: #7aa6da !important; }
+.dark-theme .ansi-yellow { color: #e7c547 !important; }
+.dark-theme .ansi-cyan { color: #70c0b1 !important; }
+.dark-theme .ansi-magenta { color: #c397d8 !important; } 
