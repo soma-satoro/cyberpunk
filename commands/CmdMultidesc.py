@@ -9,7 +9,7 @@ from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils import evtable
 from evennia.utils.utils import crop
 from evennia.utils.ansi import ANSIString
-from world.wod20th.utils.formatting import header, footer, divider
+from world.utils.formatting import header, footer, divider
 
 class CmdMultidesc(MuxCommand):
     """

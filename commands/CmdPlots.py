@@ -4,7 +4,7 @@ from evennia.utils.utils import crop, list_to_string
 from django.utils import timezone
 from datetime import datetime, timedelta
 import pytz
-from world.wod20th.utils.time_utils import TIME_MANAGER
+from world.utils.time_utils import TIME_MANAGER
 
 class CmdPlots(MuxCommand):
     """

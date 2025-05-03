@@ -34,7 +34,7 @@ from evennia.contrib.base_systems import color_markups
 ######################################################################
 
 # This is the name of your game. Make it catchy!
-SERVERNAME = "cyberpunk"
+SERVERNAME = "Night City MUSH"
 DEBUG = True
 SITE_ID = 1
 DEFAULT_CMDSETS = [
@@ -97,10 +97,6 @@ TELNET_INTERFACES = ['0.0.0.0']
 WEBSERVER_INTERFACES = ['0.0.0.0']
 WEBSOCKET_CLIENT_INTERFACE = '0.0.0.0'
 
-# Port configuration
-TELNET_PORTS = [4201]
-WEBSERVER_PORTS = [(4200, 4005)]
-
 # Web client settings
 WEBCLIENT_MAX_MESSAGE_LENGTH = 100000 # This is the maximum number of characters that can be sent in a single message.
 WEBCLIENT_RECONNECT_DELAY = 2000 # This is the delay in milliseconds between reconnect attempts.
@@ -153,10 +149,7 @@ COLOR_ANSI_XTERM256_BRIGHT_BG_EXTRA_MAP = color_markups.MUX_COLOR_ANSI_XTERM256_
 
 # ANSI constants (copied from evennia.utils.ansi to avoid import)
 
-_ANSI_BEEP = "\07"
-_ANSI_ESCAPE = "\033"
 _ANSI_NORMAL = "\033[0m"
-
 _ANSI_UNDERLINE = "\033[4m"
 _ANSI_HILITE = "\033[1m"
 _ANSI_UNHILITE = "\033[22m"

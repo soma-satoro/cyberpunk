@@ -1,5 +1,6 @@
 from evennia.utils.idmapper.models import SharedMemoryModel
 from django.db import models
+from evennia.objects.models import ObjectDB
 
 class Cyberware(SharedMemoryModel):
     name = models.CharField(max_length=100, unique=True)
@@ -15,6 +16,78 @@ class Cyberware(SharedMemoryModel):
 
     def __str__(self):
         return self.name
+
+# Add CyberwareInstance class to link cyberware to characters
+class CyberwareInstance(SharedMemoryModel):
+    cyberware = models.ForeignKey(Cyberware, on_delete=models.CASCADE, related_name='cyberware_app_instances')
+    # For backward compatibility with CharacterSheet
+    character_sheet = models.ForeignKey(
+        'cyberpunk_sheets.CharacterSheet', 
+        related_name='cyberware_instances_old',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True
+    )
+    # New direct link to character object
+    character_object = models.ForeignKey(
+        ObjectDB,
+        related_name='cyberware_instances',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True
+    )
+    installed = models.BooleanField(default=False)
+    active = models.BooleanField(default=False)
+    
+    class Meta:
+        # Ensure at least one character field is populated
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(character_object__isnull=False) | models.Q(character_sheet__isnull=False),
+                name='cyberware_app_instance_has_character'
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.cyberware.name} - {self.get_character_name()}"
+        
+    def get_character_name(self):
+        """Get the character's name from typeclass or sheet"""
+        # Try character typeclass first
+        if self.character_object:
+            if hasattr(self.character_object.db, 'full_name') and self.character_object.db.full_name:
+                return self.character_object.db.full_name
+            return self.character_object.key
+            
+        # Fall back to character sheet
+        if self.character_sheet:
+            if hasattr(self.character_sheet, 'full_name') and self.character_sheet.full_name:
+                return self.character_sheet.full_name
+            return f"Character #{self.character_sheet.id}"
+            
+        return "Unknown Character"
+
+    @property
+    def is_cyberdeck(self):
+        return 'cyberdeck' in self.cyberware.name.lower()
+        
+    @classmethod
+    def get_installed_for_character(cls, character):
+        """Get all installed cyberware for a character"""
+        # Check for direct link to character object
+        character_instances = cls.objects.filter(
+            character_object=character,
+            installed=True
+        )
+        
+        # Check for link via character sheet
+        if not character_instances.exists() and hasattr(character, 'character_sheet'):
+            character_instances = cls.objects.filter(
+                character_sheet=character.character_sheet,
+                installed=True
+            )
+            
+        return character_instances
     
 CYBERWARE_HUMANITY_LOSS = {
     "Audio Recorder": 2,

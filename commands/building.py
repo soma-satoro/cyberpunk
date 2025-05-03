@@ -3,86 +3,9 @@ from evennia import create_object
 from typeclasses.rental import RentableRoom
 from evennia.utils import search, delay
 from evennia import Command
+from world.utils.formatting import divider, footer, format_stat, header 
 from evennia.commands.default.muxcommand import MuxCommand
-
-class CmdCreateRentableRoom(MuxCommand):
-    """
-    Create a rentable room or building
-    
-    Usage:
-      @digrent[/temp] <room name> = <rental_type>, <exit name>;<exit alias>
-    
-    Switches:
-      /temp - Create a temporary unit that will be destroyed when not in use
-    
-    Creates a new rentable room or building of the specified type with a custom exit.
-    Available rental types:
-      Cube Hotel, Cargo Container, Studio Apartment, Two-Bedroom Apartment,
-      Corporate Conapt, Upscale Conapt, Luxury Penthouse
-    
-    Example:
-      @digrent/temp Luxury Suite 42 = Luxury Penthouse, Grand Entrance;suite
-    """
-
-    key = "@digrent"
-    locks = "cmd:perm(Builder)"
-    help_category = "Building"
-
-    def func(self):
-        caller = self.caller
-        
-        is_temporary = 'temp' in self.switches
-        
-        if not self.args or "=" not in self.args:
-            caller.msg("Usage: @digrent[/temp] <room name> = <rental_type>, <exit name>;<exit alias>")
-            return
-        
-        name, rest = [part.strip() for part in self.args.split("=")]
-        if not name or "," not in rest:
-            caller.msg("You must specify a name, rental type, and exit information.")
-            return
-        
-        rental_type, exit_info = [part.strip() for part in rest.split(",", 1)]
-        
-        if ";" in exit_info:
-            exit_name, exit_alias = [part.strip() for part in exit_info.split(";")]
-        else:
-            exit_name = exit_info.strip()
-            exit_alias = exit_name.lower()
-        
-        if rental_type not in RentableRoom.RENTAL_TYPES:
-            caller.msg(f"Invalid rental type. Choose from: {', '.join(RentableRoom.RENTAL_TYPES.keys())}")
-            return
-        
-        # Create the main rentable room
-        new_room = create_object(RentableRoom, key=name, location=caller.location)
-        new_room.set_rental_type(rental_type, is_temporary=is_temporary)
-        
-        # Set up exits
-        exit_to_new = create_object("evennia.objects.objects.DefaultExit", key=exit_name, aliases=[exit_alias], location=caller.location, destination=new_room)
-        exit_back = create_object("evennia.objects.objects.DefaultExit", key="Out", aliases=["o"], location=new_room, destination=caller.location)
-        
-        caller.msg(f"Created rentable {rental_type} '{name}' with {len(new_room.db.child_rooms) + 1} rooms.")
-        caller.msg(f"Created exit '{exit_name}' (alias: {exit_alias}) to the new room.")
-        
-        # If it's a multi-room rental, create exits between rooms
-        if new_room.db.child_rooms:
-            for i, child_room in enumerate(new_room.db.child_rooms, start=2):
-                create_object("evennia.objects.objects.DefaultExit", key=f"Room {i}", location=new_room, destination=child_room)
-                create_object("evennia.objects.objects.DefaultExit", key="Main Room", location=child_room, destination=new_room)
-            
-            caller.msg(f"Created exits between all {len(new_room.db.child_rooms) + 1} rooms.")
-
-        if is_temporary:
-            caller.msg(f"Created temporary rentable {rental_type} '{name}'. It will be destroyed when not in use.")
-            # Schedule the first check for destruction
-            delay(3600, new_room.check_and_destroy)
-        else:
-            caller.msg(f"Created permanent rentable {rental_type} '{name}'.")
-
-class BuildingCmdSet(CmdSet):
-    def at_cmdset_creation(self):
-        self.add(CmdCreateRentableRoom())
+from evennia.utils.evtable import EvTable
 
 class CmdRoom(MuxCommand):
     """
@@ -162,45 +85,6 @@ class CmdRoom(MuxCommand):
             room.db.unfindable = (setting == "on")
             self.caller.msg(f"{room.get_display_name(self.caller)} is now {'unfindable' if setting == 'on' else 'findable'}.")
 
-class CmdDesc(MuxCommand):
-    """
-    describe yourself or another object
-
-    Usage:
-      @desc <description>
-      @desc me=<description>
-      @desc here=<description>
-      @desc <obj> = <description>
-      @desc/edit [<obj>]        - Edit description in a line editor
-
-    Sets the "desc" attribute on an object. If no object is given,
-    describe yourself. You can always describe yourself, but need
-    appropriate permissions to describe other objects.
-
-    Special characters:
-      %r or %R - New line
-      %t or %T - Tab
-    """
-
-    key = "@desc"
-    aliases = ["@desc/edit", "desc", "@describe", "describe"]
-    switch_options = ("edit",)
-    locks = "cmd:all()" 
-    help_category = "Building and Housing"
-    account_caller = True  # This ensures it works at account level
-
-    def parse(self):
-        """
-        Handle parsing of the command
-        """
-        super().parse()
-        self.target_is_self = False
-        if self.args:
-            if self.lhs and self.lhs.lower() in ["me", "here"]:
-                self.target_is_self = True
-            elif not "=" in self.args:
-                self.target_is_self = True
-
     def access(self, srcobj, access_type="cmd", default=False):
         """
         Override the access check. Allow if:
@@ -212,124 +96,6 @@ class CmdDesc(MuxCommand):
             
         # Always allow access - we'll do specific permission checks in func()
         return True
-
-    def edit_handler(self):
-        if self.rhs:
-            self.msg("|rYou may specify a value, or use the edit switch, but not both.|n")
-            return
-
-        # Get the current puppet
-        puppet = None
-        if self.session:
-            puppet = self.caller.get_puppet(self.session)
-        if not puppet:
-            puppet = self.caller.puppet
-
-        if not puppet:
-            self.caller.msg("You must have a character puppet to edit descriptions.")
-            return
-
-        if self.args:
-            obj = self.caller.search(self.args)
-        else:
-            obj = puppet.location or self.msg("|rYou can't describe oblivion.|n")
-        if not obj:
-            return
-
-        # Check if object is a room - require builder permissions
-        if obj.is_typeclass("typeclasses.rooms.Room") or obj.is_typeclass("typeclasses.rooms.RoomParent"):
-            if not self.caller.check_permstring("Builder"):
-                self.msg("You must be a Builder or higher to edit room descriptions.")
-                return
-
-        if not (obj.access(self.caller, "control") or obj.access(self.caller, "edit")):
-            self.msg(f"You don't have permission to edit the description of {obj.key}.")
-            return
-
-        self.caller.db.evmenu_target = obj
-        # launch the editor
-        EvEditor(
-            self.caller,
-            loadfunc=_desc_load,
-            savefunc=_desc_save,
-            quitfunc=_desc_quit,
-            key="desc",
-            persistent=True,
-        )
-        return
-
-    def func(self):
-        """Define command"""
-        caller = self.caller
-        
-        if not self.args and "edit" not in self.switches:
-            caller.msg("Usage: @desc [<obj> =] <description>")
-            return
-
-        if "edit" in self.switches:
-            self.edit_handler()
-            return
-
-        # Get the current puppet
-        puppet = None
-        if self.session:
-            puppet = caller.get_puppet(self.session)
-        if not puppet:
-            puppet = caller.puppet
-
-        if not puppet:
-            caller.msg("You must have a character puppet to set descriptions.")
-            return
-
-        if "=" in self.args:
-            # We have an =
-            obj_name = self.lhs.strip().lower()
-            # Handle special keywords
-            if obj_name == "me":
-                if puppet:
-                    obj = puppet
-                else:
-                    caller.msg("You must have a character puppet to set its description.")
-                    return
-            elif obj_name == "here":
-                obj = puppet.location
-                if not obj:
-                    caller.msg("You don't have a location to describe.")
-                    return
-            else:
-                obj = caller.search(self.lhs)
-            if not obj:
-                return
-            desc = self.rhs or ""
-        else:
-            # No = means we're trying to desc ourselves
-            if puppet:
-                obj = puppet
-            else:
-                caller.msg("You must have a character puppet to set its description.")
-                return
-            desc = self.args
-            
-        # Process special characters
-        desc = desc.replace("%r", "\n").replace("%R", "\n")
-        desc = desc.replace("%t", "\t").replace("%T", "\t")
-            
-        # Check if object is a room - require builder permissions
-        if obj.is_typeclass("typeclasses.rooms.Room") or obj.is_typeclass("typeclasses.rooms.RoomParent"):
-            if not caller.check_permstring("Builder"):
-                caller.msg("You must be a Builder or higher to edit room descriptions.")
-                return
-            # If they are a builder, allow them to edit the room
-            obj.db.desc = desc
-            caller.msg(f"The description was set on {obj.get_display_name(caller)}.")
-            return
-                
-        # For non-room objects, use standard permission checks
-        if obj == puppet or obj.access(caller, "control") or obj.access(caller, "edit"):
-            obj.db.desc = desc
-            caller.msg(f"The description was set on {obj.get_display_name(caller)}.")
-        else:
-            caller.msg(f"You don't have permission to edit the description of {obj.key}.")
 
 class CmdView(MuxCommand):
     """
@@ -643,22 +409,16 @@ class CmdManageBuilding(MuxCommand):
         +manage/apartments/search=<text>  - Search apartments by name/desc
         +manage/apartments/floor=<number>  - List apartments on specific floor
         
-        +manage/splats            - Show allowed splats for current building
-        +manage/splats <splat1>,<splat2>,...  - Set allowed splats
-        +manage/splats/clear  - Clear all allowed splats
-
         +manage/sethousing/apartment <resources> [max_units] - Apartment building
         +manage/sethousing/motel <resources> [max_units]    - Motel
         +manage/sethousing/residential <resources> [max_units] - Residential area
         +manage/sethousing/encampment <resources> [max_units] - Encampment area
-        +manage/sethousing/splat [max_units]  - Splat-specific housing (free)
         +manage/sethousing/clear              - Clear housing settings
         
     Example:
         +manage/setlobby
         +manage/addtype Studio
         +manage/addtype "Two-Bedroom"
-        +manage/splats Vampire,Werewolf,Mage
         +manage/sethousing/apartment 2 20
     """
     
@@ -766,7 +526,7 @@ class CmdManageBuilding(MuxCommand):
         if switch == "types":
             try:
                 # Show available apartment types from CmdRent
-                from commands.housing import CmdRent
+                from commands.economy import CmdRent
                 from evennia.utils.evtable import EvTable
                 table = EvTable(
                     "|wType|n",
@@ -820,7 +580,7 @@ class CmdManageBuilding(MuxCommand):
                 return
                 
             try:
-                from commands.housing import CmdRent
+                from commands.economy import CmdRent
                 apt_type = self.args.strip()
                 if apt_type not in CmdRent.APARTMENT_TYPES and apt_type not in CmdRent.RESIDENTIAL_TYPES:
                     self.caller.msg(f"Invalid type. Use +manage/types to see available types.")
@@ -945,16 +705,6 @@ class CmdManageBuilding(MuxCommand):
                     output.append(", ".join(types))
                 else:
                     output.append("None")
-                
-                # Allowed Splats
-                splats = sorted(location.db.housing_data.get('allowed_splats', set()))
-                output.append(divider("Allowed Splats"))
-                if splats:
-                    output.append(", ".join(splats))
-                else:
-                    output.append("None")
-                
-                output.append(footer())
                 
                 # Send the formatted output to the caller
                 self.caller.msg("\n".join(output))
@@ -1111,54 +861,6 @@ class CmdManageBuilding(MuxCommand):
                 )
             self.caller.msg(table)
 
-        elif switch == "splats":
-            if not location.db.housing_data.get('is_lobby'):
-                lobby = self.find_lobby(location)
-                if not lobby:
-                    self.caller.msg("You must be in a building lobby.")
-                    return
-                location = lobby
-
-            if "add" in self.switches:
-                if not self.rhs:
-                    self.caller.msg("Usage: +manage/splats/add=<splat>")
-                    return
-                splat = self.rhs.strip().title()
-                if 'allowed_splats' not in location.db.housing_data:
-                    location.db.housing_data['allowed_splats'] = set()
-                location.db.housing_data['allowed_splats'].add(splat)
-                self.caller.msg(f"Added {splat} to allowed splats.")
-
-            elif "remove" in self.switches:
-                if not self.rhs:
-                    self.caller.msg("Usage: +manage/splats/remove=<splat>")
-                    return
-                splat = self.rhs.strip().title()
-                if splat in location.db.housing_data.get('allowed_splats', set()):
-                    location.db.housing_data['allowed_splats'].remove(splat)
-                    self.caller.msg(f"Removed {splat} from allowed splats.")
-                else:
-                    self.caller.msg(f"{splat} is not in the allowed splats list.")
-
-            elif "clear" in self.switches:
-                location.db.housing_data['allowed_splats'] = set()
-                self.caller.msg("Cleared all allowed splats.")
-
-            elif self.args and "=" not in self.args:
-                # Set entire list of splats
-                splats = {s.strip().title() for s in self.args.split(',')}
-                location.db.housing_data['allowed_splats'] = splats
-                self.caller.msg(f"Set allowed splats to: {', '.join(sorted(splats))}")
-
-            else:
-                # Show current allowed splats
-                splats = location.db.housing_data.get('allowed_splats', set())
-                if splats:
-                    self.caller.msg("Allowed splats in this building:")
-                    self.caller.msg(", ".join(sorted(splats)))
-                else:
-                    self.caller.msg("No splat restrictions set for this building.")
-
         elif switch == "sethousing":
             # Handle sethousing functionality
             if not self.switches[1:]:  # No sub-switch provided
@@ -1198,24 +900,7 @@ class CmdManageBuilding(MuxCommand):
                 location.at_object_creation()
                 
                 self.caller.msg("Cleared housing settings for this room.")
-                return
 
-            # Special handling for splat housing which doesn't need resources
-            if sub_switch == "splat":
-                try:
-                    if self.args:
-                        max_units = int(self.args)
-                    else:
-                        max_units = 20  # Default to 20 if not specified
-                    
-                    if max_units < 1:
-                        self.caller.msg("Maximum units must be at least 1.")
-                        return
-                        
-                except ValueError:
-                    self.caller.msg("Usage: +manage/sethousing/splat [max_units]")
-                    return
-                    
                 # Set up basic room configuration first
                 location.db.roomtype = "Splat Housing"
                 location.db.resources = 0  # Splat housing is free
@@ -1407,29 +1092,9 @@ class CmdSetLock(MuxCommand):
         +setlock/clear <target>         - Clear all locks
         
     Lock Types:
-        splat:<type>      - Restrict to specific splat (Vampire, Werewolf, etc)
-        type:<type>       - Restrict to specific type (Garou, Kinfolk, Familiar, Fomori, etc)
-        talent:<name>     - Require specific talent
-        skill:<name>      - Require specific skill
-        knowledge:<name>  - Require specific knowledge
-        merit:<name>      - Require specific merit
-        clan:<name>       - Restrict to specific vampire clan
-        tribe:<name>      - Restrict to specific werewolf tribe
-        auspice:<name>    - Restrict to specific werewolf auspice
-        tradition:<name>  - Restrict to specific mage tradition
-        affiliation:<name> - Restrict to specific mage faction
-        convention:<name> - Restrict to specific Technocratic convention
-        nephandi_faction:<name> - Restrict to specific Nephandi faction
-        court:<name>      - Restrict to specific changeling court
-        kith:<name>       - Restrict to specific changeling kith
-        wyrm:<on/off>     - Restrict based on wyrm taint status
 
     Examples:
-        +setlock door=type:Garou                    - Only Garou can pass
-        +setlock door=type:Garou,type:Kinfolk      - Both Garou AND Kinfolk must pass
-        +setlock door=type:Garou;type:Kinfolk      - Either Garou OR Kinfolk can pass
-        +setlock/view door=type:Garou;type:Kinfolk - Either Garou OR Kinfolk can view
-        +setlock door=wyrm:on                       - Only wyrm-tainted beings can pass
+        +setlock door=
     """
     
     key = "+setlock"
@@ -1530,36 +1195,7 @@ class CmdSetLock(MuxCommand):
                     locktype = locktype.strip().lower()
                     value = value.strip().lower()
                     
-                    # Create the appropriate lock string based on type
-                    if locktype == "splat":
-                        lock_str = f'has_splat({value.strip()})'
-                    elif locktype == "type":
-                        lock_str = f'has_type({value.strip()})'
-                    elif locktype == "wyrm":
-                        if value not in ("on", "off"):
-                            self.caller.msg("Wyrm lock value must be either 'on' or 'off'.")
-                            return
-                        lock_str = f'has_wyrm_taint()' if value == "on" else f'not has_wyrm_taint()'
-                    elif locktype in ["talent", "skill", "knowledge", "secondary_talent", "secondary_skill", "secondary_knowledge"]:
-                        if ">" in value:
-                            ability, level = value.split(">")
-                            lock_str = f"has_{locktype}({ability.strip()}, {level.strip()})"
-                        else:
-                            lock_str = f"has_{locktype}({value.strip()})"
-                    elif locktype == "merit":
-                        if ">" in value:
-                            merit, level = value.split(">")
-                            lock_str = f'has_merit({merit.strip()}, {level.strip()})'
-                        else:
-                            lock_str = f'has_merit({value.strip()})'
-                    elif locktype in ["clan", "tribe", "auspice", "tradition", "convention","affiliation", "kith", "court"]:
-                        lock_str = f'has_{locktype}({value.strip()})'
-                    else:
-                        self.caller.msg(f"Invalid lock type.")
-                        return
-                        
-                    and_lock_defs.append(lock_str)
-                    
+                   
                 except ValueError:
                     self.caller.msg(f"Invalid lock format: {lock_part}")
                     return
@@ -1626,6 +1262,5 @@ class BuildingCmdSet(CmdSet):
         self.add(CmdRoom())  # Add the new unified room command
         self.add(CmdManageBuilding())  # Includes +manage/updateapts, +manage/apartments, +manage/splats
         self.add(CmdSetLock())
-        self.add(CmdDesc())
         self.add(CmdView())
         self.add(CmdPlaces())

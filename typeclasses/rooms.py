@@ -412,11 +412,19 @@ class Room(DefaultRoom):
         self.ensure_housing_data()  # Ensure housing data exists
         return (hasattr(self.db, 'roomtype') and 
                 self.db.roomtype in [
-                    "Apartment Building", "Apartments", 
-                    "Condos", "Condominiums",
-                    "Residential Area", "Residential Neighborhood", 
-                    "Neighborhood", "Splat Housing", "Motel",
-                    "Encampment"  # Add Encampment to valid housing types
+                "Cube Hotel",
+                "Hotel",
+                "Cargo Container",
+                "Studio Apartment",
+                "Two-Bedroom Apartment",
+                "Corporate Conapt",
+                "Upscale Conapt",
+                "Luxury Penthouse",
+                "Encampment",
+                "Motel",
+                "Apartment Building",
+                "Residential Area",
+                "Neighborhood"
                 ])
 
     def is_apartment_building(self):
@@ -424,9 +432,8 @@ class Room(DefaultRoom):
         self.ensure_housing_data()
         return (hasattr(self.db, 'roomtype') and 
                 self.db.roomtype in [
-                    "Apartment Building", "Apartments", 
-                    "Condos", "Condominiums",
-                    "Splat Housing"  # Add Splat Housing to apartment-style buildings
+                "Hotel",
+                "Apartment Building",
                 ])
 
     def is_residential_area(self):
@@ -435,7 +442,7 @@ class Room(DefaultRoom):
         return (hasattr(self.db, 'roomtype') and 
                 self.db.roomtype in [
                     "Residential Area", "Residential Neighborhood", 
-                    "Neighborhood", "Encampment"  # Add Encampment to residential areas
+                    "Neighborhood", "Encampment" 
                 ])
 
     def setup_housing(self, housing_type="Apartment Building", max_units=20):
@@ -448,10 +455,10 @@ class Room(DefaultRoom):
         
         # Set initial available types based on housing type
         initial_types = []
-        if housing_type == "Splat Housing":
-            initial_types = ["Splat Housing"]
+        if housing_type == "Hotel":
+            initial_types = ["Cube Hotel"]
         elif housing_type == "Motel":
-            initial_types = ["Motel Room"]
+            initial_types = ["Cube Hotel"]
         
         housing_data.update({
             'is_housing': True,
@@ -464,47 +471,15 @@ class Room(DefaultRoom):
             'connected_rooms': {self.dbref}  # Initialize connected rooms with self
         })
 
-        # For splat housing, modify any existing exits to use initials
-        if housing_type == "Splat Housing":
-            for exit in self.exits:
-                if exit.destination:
-                    # Get the destination room's name and create initials
-                    room_name = exit.destination.key
-                    # Split on spaces and get first letter of each word
-                    initials = ''.join(word[0].lower() for word in room_name.split())
-                    # Update exit key and add original name as alias
-                    original_key = exit.key
-                    exit.key = initials
-                    if original_key != initials:
-                        exit.aliases.add(original_key)
-                    
-                    # Set up the destination room as a splat residence
-                    dest = exit.destination
-                    if dest:
-                        # Determine splat type from room name if possible
-                        room_name = dest.key.lower()
-                        if "mage" in room_name:
-                            splat_type = "Mage"
-                        elif "vampire" in room_name:
-                            splat_type = "Vampire"
-                        elif "werewolf" in room_name:
-                            splat_type = "Werewolf"
-                        elif "changeling" in room_name:
-                            splat_type = "Changeling"
-                        else:
-                            splat_type = "Splat"  # Generic if can't determine
-                            
-                        dest.setup_splat_room(splat_type, self)
-        
         # Force room appearance update
         self.at_object_creation()
 
     def get_available_housing_types(self):
         """Get available housing types based on area type."""
         self.ensure_housing_data()  # Ensure housing data exists
-        from commands.housing import CmdRent
+        from commands.economy import CmdRent
         if self.db.roomtype == "Motel":
-            return {"Motel Room": CmdRent.APARTMENT_TYPES["Motel Room"]}
+            return {"Cube Hotel": CmdRent.APARTMENT_TYPES["Cube Hotel"]}
         elif self.db.roomtype == "Encampment":
             return {"Encampment": CmdRent.RESIDENTIAL_TYPES["Encampment"]}
         elif self.is_apartment_building():

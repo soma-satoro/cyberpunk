@@ -257,20 +257,6 @@ class CmdDepopulateAllEquipment(Command):
         # Set the confirmation time
         self.caller.attributes.add("confirm_depopulate_time", now)
 
-class CmdYes(Command):
-    """
-    Confirm an action that requires confirmation.
-    """
-
-    key = "yes"
-    locks = "cmd:all()"
-
-    def func(self):
-        if self.caller.db.confirm_depopulate:
-            self.caller.db.confirm_depopulate(self.caller, "yes", "yes")
-            del self.caller.db.confirm_depopulate
-        else:
-            self.caller.msg("There's nothing to confirm right now.")
 
 class CmdPopulateCyberware(Command):
     """

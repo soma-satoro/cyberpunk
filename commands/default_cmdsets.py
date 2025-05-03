@@ -16,25 +16,26 @@ own cmdsets by inheriting from them or directly from `evennia.CmdSet`.
 """
 
 from evennia import default_cmds, CmdSet
-from .character_commands import CmdSheet, CmdRoll, CmdRole, CmdSpendLuck, CmdGainLuck, CmdEquipWeapon, CmdUnequipWeapon, CmdShortDesc, CmdOOC, CmdPlusOoc, CmdPlusIc, CmdMeet
-from .chargen import CmdChargen, CmdChargenFinish, CmdClearSheet, CmdListCharacterSheets, CmdLifepath, CmdSetStat, CmdSetLanguage
-from .admin_commands import CmdStat, CmdHeal, CmdApprove, CmdUnapprove, CmdAdminViewSheet, CmdFixSheet, CmdSpawnRipperdoc, CmdGradientName, CmdClearAllStates, CmdCleanupDuplicateGear, CmdClearRental, CmdCleanupDuplicates, CmdExamine, CmdAssociateAllCharacterSheets, CmdViewCharacterSheetID, CmdSetCharacterSheetID, CmdAllSheets, CmdViewSheetAttributes, CmdSyncLanguages, CmdJoin, CmdSummon
-from .inventory_commands import CmdInventory, CmdEquipment
+from .character_commands import CmdSheet, CmdRoll, CmdLuck, CmdShortDesc, CmdOOC, CmdPlusOoc, CmdPlusIc, CmdMeet
+from .chargen import CmdChargen, CmdListCharacterSheets, CmdLifepath, CmdSelfStat, CmdSetLanguage
+from .admin_commands import CmdStat, CmdHeal, CmdApprove, CmdUnapprove, CmdSpawnRipperdoc, CmdGradientName, CmdClearAllStates, CmdClearRental, CmdCleanupDuplicates, CmdExamine, CmdAssociateAllCharacterSheets, CmdViewCharacterSheetID, CmdSetCharacterSheetID, CmdAllSheets, CmdViewSheetAttributes, CmdSyncLanguages, CmdJoin, CmdSummon
+from .inventory_commands import CmdInventory
 from .equipment_commands import CmdAddWeapon, CmdAddArmor, CmdAddGear, CmdPopulateWeapons, CmdPopulateArmor, CmdPopulateGear, CmdViewEquipment, CmdPopulateAllEquipment, CmdRemoveEquipment, CmdPopulateCyberware, CmdDepopulateAllEquipment, CmdYes
 from .economy import CmdAdminMoney, CmdGiveMoney, CmdBalance, CmdRentRoom, CmdLeaveRental
-from world.cyberpunk_sheets.commerce import CmdBuy, CmdSellItem, CmdHaggle, CmdAddItem, CmdRemItem, CmdListItems
 from .mission_commands import CmdListMissions, CmdAcceptMission, CmdCompleteMission, CmdMissionStatus, CmdCreateMission, CmdListEvents, CmdCreateEvent, CmdEventInfo, CmdJoinEvent, CmdLeaveEvent, CmdStartEvent, CmdCompleteEvent
-from .bbs.bbs_all_commands import CmdBoardList, CmdBoardRead, CmdBoardPost, CmdBoardDelete, CmdBoardEdit
+from .bbs.bbs_all_commands import CmdBBS, CmdBBPost, CmdBBRead
 from .hustle_commands import CmdHustle, CmdDebugHustle, CmdClearHustleAttempt, CmdRegenerateHustles
-from .faction_commands import CmdCreateFaction, CmdFactionInfo, CmdFactionRep, CmdModifyFactionRep, CmdCreateGroup, CmdJoinGroup, CmdLeaveGroup, CmdGroupInfo, CmdFactionInfluence, CmdCreateGroupRole, CmdAssignGroupRole, CmdGroupChat, CmdFactionMission, CmdListGroupsAndFactions, CmdApproveJoin, CmdFactionDesc, CmdGroupDesc, CmdSetGroupLeader
+from .faction_commands import (
+    CmdFaction, CmdGroup, CmdInitFactions
+)
 from world.mail.commands import CmdMail, CmdMailbox, CmdMailDelete
 from .jobs.jobs_commands import CmdJobs
-from .cyberware_commands import CmdCyberware, CmdActivateCyberware
+from .cyberware_commands import CmdCyberware
 from .netrun_commands import CmdNet
 from .netrun_admin_commands import CmdArchitecture
-from .combat_system import CombatStartCommand, CombatCommand, CmdReload, CmdJoinCombat
+from .combat_system import CmdCombat
 from .language_commands import CmdLanguage, CmdMaskedSay, CmdMaskedEmit, CmdMaskedPose
-from .building import CmdCreateRentableRoom
+from .building import CmdManageBuilding
 from .notes import CmdNotes
 from evennia.contrib.base_systems.mux_comms_cmds import CmdSetLegacyComms
 from evennia import default_cmds
@@ -49,7 +50,8 @@ from .CmdWeather import CmdWeather
 from .CmdMultidesc import CmdMultidesc
 from .CmdFinger import CmdFinger
 from .CmdGradient import CmdGradientName
-
+from .where import CmdWhere
+from .CmdWho import CmdWho
 
 from commands.bbs.bbs_admin_commands import CmdResetBBS
 
@@ -80,28 +82,22 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         
         self.add(CmdSetLegacyComms())
         self.add(CmdSheet())
-        self.add(CmdSetStat())
+        self.add(CmdSelfStat())
         self.add(CmdRoll())
-        self.add(CmdRole())
         self.add(CmdLifepath())
-        self.add(CmdSpendLuck())
-        self.add(CmdGainLuck())
+        self.add(CmdLuck())
         self.add(CmdInventory())
-        self.add(CmdEquipment())
         self.add(CmdViewEquipment())
-        self.add(CmdEquipWeapon())
         self.add(CmdChargen())
-        self.add(CmdClearSheet())
-        self.add(CmdChargenFinish())
-        self.add(CombatStartCommand())
-        self.add(CombatCommand())
-        self.add(CmdReload())
-        self.add(CmdJoinCombat())
+        self.add(CmdManageBuilding())
+        self.add(CmdCombat())
         self.add(CmdAlts())
         self.add(CmdEmit())
         self.add(CmdPose())
         self.add(CmdSay())
         self.add(CmdHangout())
+        self.add(CmdWho())
+        self.add(CmdWhere())
         self.add(CmdPlots())
         self.add(CmdWatch())
         self.add(CmdWeather())
@@ -110,11 +106,6 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdGradientName())
         self.add(CmdBalance())
         self.add(CmdGiveMoney())
-        self.add(CmdBuy())
-        self.add(CmdSellItem())
-        self.add(CmdListItems())
-        self.add(CmdHaggle())
-        self.add(CmdUnequipWeapon())
         self.add(CmdListMissions())
         self.add(CmdAcceptMission())
         self.add(CmdCompleteMission())
@@ -128,28 +119,19 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdStartEvent())
         self.add(CmdCompleteEvent())
         self.add(CmdHustle())
-        self.add(CmdFactionInfo())
-        self.add(CmdGroupInfo())
-        self.add(CmdJoinGroup())
-        self.add(CmdLeaveGroup())
-        self.add(CmdFactionInfo())
-        self.add(CmdFactionRep())
-        self.add(CmdFactionInfluence())
-        self.add(CmdFactionMission())
-        self.add(CmdAssignGroupRole())
-        self.add(CmdCreateGroupRole())
-        self.add(CmdGroupChat())
-        self.add(CmdListGroupsAndFactions())
-        self.add(CmdApproveJoin())
+        
+        # Add faction and group commands
+        self.add(CmdFaction())
+        self.add(CmdGroup())
+        
+        # Continue with other commands
         self.add(CmdMail())
         self.add(CmdMailbox())
         self.add(CmdMailDelete())
-        self.add(CmdGroupDesc())
         self.add(CmdJobs())
         self.add(CmdShortDesc())
         self.add(CmdSetLanguage())
         self.add(CmdCyberware())
-        self.add(CmdActivateCyberware())
         self.add(CmdNet())
         self.add(CmdArchitecture())
         self.add(CmdLanguage())
@@ -206,27 +188,20 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdRemoveEquipment())
         self.add(CmdApprove())
         self.add(CmdUnapprove())
-        self.add(CmdAdminViewSheet())
-        self.add(CmdFixSheet())
         self.add(CmdPopulateCyberware())
         self.add(CmdAdminMoney())
-        self.add(CmdAddItem())
-        self.add(CmdRemItem())
         self.add(CmdSpawnRipperdoc())
         self.add(CmdClearHustleAttempt())
         self.add(CmdDebugHustle())
         self.add(CmdRegenerateHustles())
-        self.add(CmdCreateFaction())
-        self.add(CmdCreateGroup())
-        self.add(CmdModifyFactionRep())
-        self.add(CmdFactionDesc())
-        self.add(CmdSetGroupLeader())
+        
+        # Add admin faction commands
+        self.add(CmdInitFactions())
+        
         self.add(CmdGradientName())
         self.add(CmdClearAllStates())
         self.add(CmdListCharacterSheets())
-        self.add(CmdCleanupDuplicateGear())
         self.add(CmdHeal())
-        self.add(CmdCreateRentableRoom())
         self.add(CmdClearRental())
         self.add(CmdCleanupDuplicates())
         self.add(CmdExamine())

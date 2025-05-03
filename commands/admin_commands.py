@@ -1,8 +1,9 @@
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Count
 from evennia import Command
+from world.cyberware.utils import populate_cyberware
 from world.cyberpunk_sheets.models import CharacterSheet
-from evennia import EvTable
+from evennia.utils.evtable import EvTable
 from .character_commands import CmdSheet
 from evennia.utils.search import search_object
 from evennia.objects.models import ObjectDB
@@ -13,7 +14,7 @@ from evennia.utils import logger
 from world.inventory.models import Gear
 from world.equipment_data import populate_weapons, populate_armor, populate_gear, populate_all_equipment
 from world.cyberpunk_sheets.models import CharacterSheet
-from world.cyberware.npcs import create_cyberware_merchant
+from world.cyberpunk_sheets.merchants import create_cyberware_merchant
 from typeclasses.rental import RentableRoom
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils.utils import inherits_from
@@ -21,7 +22,7 @@ from world.utils.ansi_utils import wrap_ansi
 import re
 
 
-class CmdPopulate(AdminCommand):
+class CmdPopulate(MuxCommand):
     """
     Populate the database with equipment from Cyberpunk RED.
 
@@ -32,6 +33,7 @@ class CmdPopulate(AdminCommand):
       /weapons   - Populate weapon database
       /armor     - Populate armor database
       /gear      - Populate gear database
+      /cyberware - Populate cyberware database
       /all       - Populate all equipment types
       /cleanup   - Clean up duplicate gear items
 
@@ -61,6 +63,10 @@ class CmdPopulate(AdminCommand):
         elif "gear" in self.switches:
             populate_gear()
             self.caller.msg("Gear database populated successfully.")
+        
+        elif "cyberware" in self.switches:
+            populate_cyberware()
+            self.caller.msg("Cyberware database populated successfully.")
         
         elif "all" in self.switches:
             populate_all_equipment()

@@ -2,7 +2,7 @@ import random
 from evennia import Command
 from evennia.utils.search import search_object
 from evennia.utils import gametime
-from world.cyberpunk_sheets.services import CharacterSheetMoneyService
+from world.cyberpunk_sheets.services import CharacterMoneyService
 from world.inventory.models import Weapon, Armor, Gear
 from world.equipment_data import weapons, armors, gears
 from evennia.utils.evmenu import get_input, EvMenu
@@ -67,12 +67,11 @@ class CmdBuy(Command):
             self.caller.msg(f"Sorry, {item_name} is not available from this merchant.")
             return
 
-        if not hasattr(self.caller, 'character_sheet'):
-            self.caller.msg("You don't have a character sheet!")
+        # Get character's inventory (checking typeclass first)
+        inventory = self.get_character_inventory(self.caller)
+        if not inventory:
+            self.caller.msg("You don't have an inventory!")
             return
-
-        cs = self.caller.character_sheet
-        inventory = cs.inventory
 
         # Check if the character already owns the item
         if self._item_exists_in_inventory(inventory, item):
@@ -81,11 +80,28 @@ class CmdBuy(Command):
 
         price = item['value']
 
-        if CharacterSheetMoneyService.spend_money(cs, price):
-            self._add_item_to_inventory(cs, item, merchant.db.merchant_type)
+        # Try to spend money
+        if CharacterMoneyService.spend_money(self.caller, price):
+            self._add_item_to_inventory(self.caller, item, merchant.db.merchant_type)
             self.caller.msg(f"You have purchased {item['name']} for {price} eb.")
         else:
             self.caller.msg(f"You don't have enough Eurodollars to buy {item['name']}. It costs {price} eb.")
+
+    def get_character_inventory(self, character):
+        """Get a character's inventory, checking typeclass first, then character sheet"""
+        # Try to get inventory via typeclass attribute
+        if hasattr(character, 'db') and hasattr(character.db, 'inventory'):
+            return character.db.inventory
+            
+        # Try to get inventory via inventory_object relation
+        if hasattr(character, 'inventory_object'):
+            return character.inventory_object
+            
+        # Fall back to character sheet
+        if hasattr(character, 'character_sheet') and character.character_sheet:
+            return character.character_sheet.inventory
+            
+        return None
 
     def _item_exists_in_inventory(self, inventory, item):
         """Check if the item already exists in the character's inventory."""
@@ -105,8 +121,12 @@ class CmdBuy(Command):
         
         return False
 
-    def _add_item_to_inventory(self, character_sheet, item, merchant_type):
-        inventory = character_sheet.inventory
+    def _add_item_to_inventory(self, character, item, merchant_type):
+        # Get character's inventory (checking typeclass first)
+        inventory = self.get_character_inventory(character)
+        if not inventory:
+            self.caller.msg("Error: Couldn't find your inventory.")
+            return
         
         if merchant_type == "arms_dealer":
             weapon, created = Weapon.objects.get_or_create(
@@ -236,12 +256,12 @@ def execute_sale(caller, raw_string, **kwargs):
     price = context['price']
 
     # Remove the item from the character's inventory
-    inventory = caller.character_sheet.inventory
+    inventory = get_character_inventory(caller)
     category = 'weapons' if hasattr(item, 'damage') else 'armor' if hasattr(item, 'sp') else 'gear'
     getattr(inventory, category).remove(item)
 
     # Add money to the character
-    CharacterSheetMoneyService.add_money(caller.character_sheet, price)
+    CharacterMoneyService.add_money(caller, price)
 
     caller.msg(f"You sold {item.name} to {merchant.name} for {price} eb.")
     merchant.msg(f"{caller.name} sold you {item.name} for {price} eb.")
@@ -260,6 +280,22 @@ def cancel_sale(caller, raw_string, **kwargs):
     
     # Close the menu
     caller.ndb._evmenu.close_menu()
+
+def get_character_inventory(character):
+    """Get a character's inventory, checking typeclass first, then character sheet"""
+    # Try to get inventory via typeclass attribute
+    if hasattr(character, 'db') and hasattr(character.db, 'inventory'):
+        return character.db.inventory
+        
+    # Try to get inventory via inventory_object relation
+    if hasattr(character, 'inventory_object'):
+        return character.inventory_object
+        
+    # Fall back to character sheet
+    if hasattr(character, 'character_sheet') and character.character_sheet:
+        return character.character_sheet.inventory
+        
+    return None
 
 class CmdSellItem(Command):
     """
@@ -295,8 +331,11 @@ class CmdSellItem(Command):
         merchant = merchants[0]
 
         # Find the item in the character's inventory
-        character_sheet = self.caller.character_sheet
-        inventory = character_sheet.inventory
+        inventory = get_character_inventory(self.caller)
+        if not inventory:
+            self.caller.msg("You don't have an inventory!")
+            return
+            
         item = None
 
         for category in ['weapons', 'armor', 'gear']:
@@ -360,8 +399,11 @@ class CmdHaggle(Command):
             return
 
         # Find the item in the character's inventory
-        character_sheet = self.caller.character_sheet
-        inventory = character_sheet.inventory
+        inventory = get_character_inventory(self.caller)
+        if not inventory:
+            self.caller.msg("You don't have an inventory!")
+            return
+            
         item = None
 
         for category in ['weapons', 'armor', 'gear']:
@@ -374,9 +416,11 @@ class CmdHaggle(Command):
             self.caller.msg(f"You don't have an item named '{item_name}' in your inventory.")
             return
 
+        # Get character's cool and trading skill values
+        cool = merchant.get_character_cool(self.caller)
+        trading = merchant.get_character_trading_skill(self.caller)
+        
         # Perform the haggle check
-        cool = character_sheet.cool
-        trading = character_sheet.trading
         roll = random.randint(1, 10)
         total = cool + trading + roll
 
@@ -421,12 +465,12 @@ def handle_sell_confirmation(character, response):
         price = context['price']
 
         # Remove the item from the character's inventory
-        inventory = character.character_sheet.inventory
+        inventory = get_character_inventory(character)
         category = 'weapons' if hasattr(item, 'damage') else 'armor' if hasattr(item, 'sp') else 'gear'
         getattr(inventory, category).remove(item)
 
         # Add money to the character
-        CharacterSheetMoneyService.add_money(character.character_sheet, price)
+        CharacterMoneyService.add_money(character, price)
 
         character.msg(f"You sold {item.name} to {merchant.name} for {price} eb.")
         merchant.msg(f"{character.name} sold you {item.name} for {price} eb.")

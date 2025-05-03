@@ -2,6 +2,7 @@ from django.db import models
 from evennia.utils.idmapper.models import SharedMemoryModel
 from world.cyberware.models import Cyberware
 from django.db.models import JSONField  # If using PostgreSQL
+from evennia.objects.models import ObjectDB
 
 class AmmoType(models.TextChoices):
     BASIC = 'Basic', 'Basic Ammunition'
@@ -56,18 +57,77 @@ class Item(SharedMemoryModel):
     def __str__(self):
         return self.name
 
+# Update to match the definition in cyberware/models.py
 class CyberwareInstance(SharedMemoryModel):
-    cyberware = models.ForeignKey(Cyberware, on_delete=models.CASCADE)
-    character = models.ForeignKey('cyberpunk_sheets.CharacterSheet', related_name='cyberware_instances', on_delete=models.CASCADE)
+    cyberware = models.ForeignKey(Cyberware, on_delete=models.CASCADE, related_name='inventory_app_instances')
+    # For backward compatibility with CharacterSheet
+    character_sheet = models.ForeignKey(
+        'cyberpunk_sheets.CharacterSheet', 
+        related_name='cyberware_instances',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True
+    )
+    # New direct link to character object
+    character_object = models.ForeignKey(
+        ObjectDB,
+        related_name='cyberware_objects',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True
+    )
     installed = models.BooleanField(default=False)
     active = models.BooleanField(default=False)
+    
+    class Meta:
+        # Ensure at least one character field is populated
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(character_object__isnull=False) | models.Q(character_sheet__isnull=False),
+                name='inventory_cyberware_instance_has_character'
+            )
+        ]
 
     def __str__(self):
-        return f"{self.cyberware.name} - {self.character.full_name}"
+        return f"{self.cyberware.name} - {self.get_character_name()}"
+        
+    def get_character_name(self):
+        """Get the character's name from typeclass or sheet"""
+        # Try character typeclass first
+        if self.character_object:
+            if hasattr(self.character_object.db, 'full_name') and self.character_object.db.full_name:
+                return self.character_object.db.full_name
+            return self.character_object.key
+            
+        # Fall back to character sheet
+        if self.character_sheet:
+            if hasattr(self.character_sheet, 'full_name') and self.character_sheet.full_name:
+                return self.character_sheet.full_name
+            return f"Character #{self.character_sheet.id}"
+            
+        return "Unknown Character"
 
     @property
     def is_cyberdeck(self):
         return 'cyberdeck' in self.cyberware.name.lower()
+        
+    @classmethod
+    def get_installed_for_character(cls, character):
+        """Get all installed cyberware for a character"""
+        # Check for direct link to character object
+        character_instances = cls.objects.filter(
+            character_object=character,
+            installed=True
+        )
+        
+        # Check for link via character sheet
+        if not character_instances.exists() and hasattr(character, 'character_sheet'):
+            character_instances = cls.objects.filter(
+                character_sheet=character.character_sheet,
+                installed=True
+            )
+            
+        return character_instances
 
 class Weapon(Item):
     damage = models.CharField(max_length=50)
@@ -124,15 +184,86 @@ class Gear(SharedMemoryModel):
         return 'cyberdeck' in self.name.lower()
 
 class Inventory(SharedMemoryModel):
-    character = models.OneToOneField('cyberpunk_sheets.CharacterSheet', on_delete=models.CASCADE, related_name='inventory')
+    # Keep for backward compatibility
+    character = models.OneToOneField(
+        'cyberpunk_sheets.CharacterSheet', 
+        on_delete=models.CASCADE, 
+        related_name='inventory',
+        null=True,
+        blank=True
+    )
+    # New direct link to character object
+    character_object = models.OneToOneField(
+        ObjectDB,
+        on_delete=models.CASCADE,
+        related_name='inventory_object',
+        null=True,
+        blank=True
+    )
     weapons = models.ManyToManyField('Weapon', blank=True)
     armor = models.ManyToManyField('Armor', blank=True)
     gear = models.ManyToManyField('Gear', blank=True)
     cyberware = models.ManyToManyField(CyberwareInstance, blank=True)
     ammunition = models.ManyToManyField(Ammunition, blank=True)
 
+    class Meta:
+        # Ensure at least one character field is populated
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(character_object__isnull=False) | models.Q(character__isnull=False),
+                name='inventory_has_character'
+            )
+        ]
+
     def __str__(self):
-        return f"Inventory for {self.character.full_name if self.character else 'Unknown'}"
+        return f"Inventory for {self.get_character_name()}"
+        
+    def get_character_name(self):
+        """Get the character's name from typeclass or sheet"""
+        # Try character typeclass first
+        if self.character_object:
+            if hasattr(self.character_object.db, 'full_name') and self.character_object.db.full_name:
+                return self.character_object.db.full_name
+            return self.character_object.key
+            
+        # Fall back to character sheet
+        if self.character:
+            if hasattr(self.character, 'full_name') and self.character.full_name:
+                return self.character.full_name
+            return f"Character #{self.character.id}"
+            
+        return "Unknown Character"
+    
+    @classmethod
+    def get_or_create_for_character(cls, character):
+        """Get or create inventory for character"""
+        # Try direct link to character object
+        try:
+            inventory = cls.objects.get(character_object=character)
+            return inventory, False
+        except cls.DoesNotExist:
+            pass
+            
+        # Try link via character sheet
+        if hasattr(character, 'character_sheet'):
+            try:
+                inventory = cls.objects.get(character=character.character_sheet)
+                # Update with direct link for future
+                inventory.character_object = character
+                inventory.save()
+                return inventory, False
+            except cls.DoesNotExist:
+                pass
+        
+        # Create new inventory
+        inventory = cls.objects.create(character_object=character)
+        
+        # Also link to character sheet if available
+        if hasattr(character, 'character_sheet') and character.character_sheet:
+            inventory.character = character.character_sheet
+            inventory.save()
+            
+        return inventory, True
 
 class Cyberdeck(SharedMemoryModel):
     name = models.CharField(max_length=255)

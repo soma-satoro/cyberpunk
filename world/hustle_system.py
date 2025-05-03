@@ -2,7 +2,7 @@ from evennia import DefaultScript
 from evennia.utils import gametime, create
 from evennia.scripts.models import ScriptDB
 from evennia.utils import logger
-from world.cyberpunk_sheets.services import CharacterSheetMoneyService
+from world.cyberpunk_sheets.services import CharacterMoneyService, CharacterSheetMoneyService
 import random
 
 
@@ -75,10 +75,21 @@ class HustleSystem(DefaultScript):
         """
         Get the available hustle for a character based on their role.
         """
-        if not hasattr(character, 'character_sheet') or not character.character_sheet.role:
-            logger.log_warn(f"HustleSystem: Character {character.name} has no character sheet or role.")
+        # Get character role - first check typeclass attributes, then fall back to character sheet
+        role = None
+        
+        # Check if character has a db attribute
+        if hasattr(character, 'db') and hasattr(character.db, 'role') and character.db.role:
+            role = character.db.role
+            logger.log_info(f"HustleSystem: Found role {role} in character typeclass attributes")
+        # Fall back to character sheet
+        elif hasattr(character, 'character_sheet') and character.character_sheet and character.character_sheet.role:
+            role = character.character_sheet.role
+            logger.log_info(f"HustleSystem: Found role {role} in character sheet")
+        else:
+            logger.log_warn(f"HustleSystem: Character {character.name} has no role.")
             return None
-        role = character.character_sheet.role
+            
         hustle = self.db.available_hustles.get(role)
         if not hustle:
             logger.log_warn(f"HustleSystem: No hustle found for role {role}. Available hustles: {self.db.available_hustles}")
@@ -102,13 +113,6 @@ class HustleSystem(DefaultScript):
                 logger.log_info(f"{character.name} has already attempted a hustle this week.")
                 return False, "You have already attempted your hustle this week.", 0, 0, 0
 
-            if not hasattr(character, 'character_sheet'):
-                logger.log_warn(f"{character.name} doesn't have a character sheet.")
-                return False, "You don't have a character sheet.", 0, 0, 0
-
-            cs = character.character_sheet
-            logger.log_info(f"Character sheet found for {character.name}")
-            
             # Define a mapping of roles to their corresponding abilities
             role_abilities = {
                 "Rockerboy": "charismatic_impact",
@@ -123,12 +127,43 @@ class HustleSystem(DefaultScript):
                 "Nomad": "moto"
             }
             
-            # Get the role-specific ability, or use a default skill (e.g., 'cool') if not found
-            role_ability = role_abilities.get(cs.role, 'cool')
-            role_ability_value = getattr(cs, role_ability, 0)
-            cool_value = getattr(cs, 'cool', 0)
+            # Get character role and abilities from character or character sheet
+            role = None
+            role_ability_value = 0
+            cool_value = 0
             
-            logger.log_info(f"{character.name} - Role: {cs.role}, Role Ability: {role_ability}, Value: {role_ability_value}, Cool: {cool_value}")
+            # First try to get from character typeclass
+            if hasattr(character, 'db'):
+                if hasattr(character.db, 'role'):
+                    role = character.db.role
+                
+                # Get the role-specific ability or default to cool
+                role_ability = role_abilities.get(role, 'cool') if role else 'cool'
+                
+                # Check if ability is in character's skills dictionary
+                if hasattr(character.db, 'skills') and character.db.skills:
+                    role_ability_value = character.db.skills.get(role_ability, 0)
+                    cool_value = character.db.skills.get('cool', 0)
+                # Otherwise, check direct attributes
+                else:
+                    role_ability_value = getattr(character.db, role_ability, 0)
+                    cool_value = getattr(character.db, 'cool', 0)
+            
+            # Fall back to character sheet if values weren't found
+            if role is None and hasattr(character, 'character_sheet') and character.character_sheet:
+                cs = character.character_sheet
+                role = cs.role
+                
+                # Get the role-specific ability or default to cool
+                role_ability = role_abilities.get(role, 'cool') if role else 'cool'
+                role_ability_value = getattr(cs, role_ability, 0)
+                cool_value = getattr(cs, 'cool', 0)
+            
+            if role is None:
+                logger.log_warn(f"HustleSystem: Couldn't determine role for {character.name}")
+                return False, "You need to have a defined role to attempt a hustle.", 0, 0, 0
+            
+            logger.log_info(f"{character.name} - Role: {role}, Role Ability: {role_ability}, Value: {role_ability_value}, Cool: {cool_value}")
 
             dice_roll = random.randint(1, 10)
             total_roll = cool_value + role_ability_value + dice_roll
@@ -140,7 +175,7 @@ class HustleSystem(DefaultScript):
             
             if total_roll >= hustle['difficulty']:
                 logger.log_info(f"{character.name} succeeded in the hustle.")
-                CharacterSheetMoneyService.add_money(character.character_sheet,hustle['payout'])
+                CharacterMoneyService.add_money(character, hustle['payout'])
                 return True, f"Success! You earned {hustle['payout']} eb from your {hustle['name']} hustle.", total_roll, cool_value, role_ability_value
             else:
                 logger.log_info(f"{character.name} failed the hustle.")

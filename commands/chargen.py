@@ -1,6 +1,7 @@
 import traceback
 from django.conf import settings
 from evennia import Command, CmdSet
+from world.jobs.models import Job
 from world.languages.language_dictionary import LANGUAGES
 from world.languages.models import Language
 from world.utils.character_utils import ALL_ATTRIBUTES, SKILL_MAPPING, STAT_MAPPING, get_full_attribute_name
@@ -88,7 +89,8 @@ class CmdChargen(MuxCommand):
 
     Usage:
       chargen <method> <role> <full_name>
-      chargen/reset
+      chargen/delete
+      chargen/finish
 
     Methods:
       edgerunner
@@ -114,8 +116,12 @@ class CmdChargen(MuxCommand):
             self.caller.msg("Your character is already approved. You cannot use chargen commands.")
             return
 
-        if "reset" in self.switches:
-            self.reset_character_sheet()
+        if "delete" in self.switches:
+            self.reset_character()
+            return
+
+        if "finish" in self.switches:
+            self.finish_chargen()
             return
 
         if not self.args:
@@ -126,7 +132,7 @@ class CmdChargen(MuxCommand):
             logger.info("User confirmed. Proceeding with character creation.")
             method, role, full_name = self.caller.ndb._chargen_confirm
             del self.caller.ndb._chargen_confirm
-            self.create_character_sheet(method, role, full_name)
+            self.create_character(method, role, full_name)
             return
 
         args = self.args.split(None, 2)
@@ -151,78 +157,252 @@ class CmdChargen(MuxCommand):
 
         logger.info(f"Chargen command called with method: {method}, role: {role}, full_name: {full_name}")
 
+        # Check for existing character initialization
+        if self.caller.db.get('role') or self.caller.db.get('full_name'):
+            self.caller.msg("You already have a character initialized. Use 'chargen/reset' to reset it or type 'chargen yes' to confirm overwriting it.")
+            self.caller.ndb._chargen_confirm = (method, role, full_name)
+            logger.info("Waiting for user confirmation.")
+            return
+
+        # Also check for sheet for backwards compatibility
         try:
-            existing_sheets = CharacterSheet.objects.filter(account=self.caller.account)
-            logger.info(f"Existing sheets found: {existing_sheets.count()}")
-            
+            existing_sheets = CharacterSheet.objects.filter(character=self.caller)
             if existing_sheets.exists():
-                self.caller.msg(f"Debug: Found {existing_sheets.count()} existing character sheet(s).")
-                for sheet in existing_sheets:
-                    self.caller.msg(f"Debug: Existing sheet ID: {sheet.id}, Role: {sheet.role}")
-                self.caller.msg("You already have a character sheet. Use 'chargen/reset' to reset it or type 'chargen yes' to confirm overwriting it.")
+                self.caller.msg(f"You have {existing_sheets.count()} existing character sheet(s). Use 'chargen/reset' to reset it or type 'chargen yes' to confirm overwriting it.")
                 self.caller.ndb._chargen_confirm = (method, role, full_name)
                 logger.info("Waiting for user confirmation.")
                 return
-            else:
-                logger.info("No existing sheet found. Proceeding with character creation.")
-                self.create_character_sheet(method, role, full_name)
         except Exception as e:
-            logger.error(f"Error in CmdChargen.func(): {str(e)}")
-            self.caller.msg(f"Debug: Error checking for existing sheets: {str(e)}")
+            logger.error(f"Error checking for existing sheets: {str(e)}")
 
-    def create_character_sheet(self, method, role, full_name):
-        logger.info(f"Creating/updating character sheet with method: {method}, role: {role}, full_name: {full_name}")
+        # No existing character data found, proceed with creation
+        self.create_character(method, role, full_name)
+
+    def create_character(self, method, role, full_name):
+        logger.info(f"Creating character with method: {method}, role: {role}, full_name: {full_name}")
         try:
             char = self.caller
-            logger.info(f"Using caller's character object with ID {char.id}")
-
-            # Check if the character already has a sheet
-            if hasattr(char, 'character_sheet'):
-                sheet = char.character_sheet
-                logger.info(f"Using existing character sheet with ID {sheet.id}")
-            else:
-                # If not, create a new one
-                sheet = CharacterSheet.objects.create(character=char, account=self.caller.account)
-                logger.info(f"Created new character sheet with ID {sheet.id}")
-
+            
             # Update the character's name if it has changed
             if char.key != full_name:
                 char.key = full_name
                 char.save()
                 logger.info(f"Updated character name to {full_name}")
-
-            # Associate the sheet ID with the character
-            char.db.character_sheet_id = sheet.id
-            char.save()
-
-            # After creating the sheet, set a default gender if not already set
-            if not sheet.gender:
-                sheet.gender = "Other"  # Or you could prompt the user to choose a gender
-                sheet.save()
-
-            result = EdgerunnerChargen.create_character(sheet, role, method, full_name)
-
+            
+            # Set basic character attributes
+            char.db.full_name = full_name
+            char.db.role = role
+            char.db.gender = char.db.gender or "Other"  # Set default gender if not set
+            
+            # For backward compatibility, also update/create character sheet
+            if not hasattr(char, 'character_sheet') or char.character_sheet is None:
+                sheet = CharacterSheet.objects.create(character=char, account=self.caller.account)
+                char.db.character_sheet_id = sheet.id
+                logger.info(f"Created new character sheet with ID {sheet.id}")
+            else:
+                sheet = char.character_sheet
+                logger.info(f"Using existing character sheet with ID {sheet.id}")
+            
+            # Update sheet with role and name
+            sheet.role = role
+            sheet.full_name = full_name
+            sheet.save()
+            
+            # Generate character based on method
+            if method == "edgerunner":
+                result = self.edgerunner_chargen(char, sheet, role)
+            else:  # complete_package
+                result = self.complete_package_chargen(char, sheet)
+            
             self.caller.msg(result)
-            return sheet
+            return True
 
         except Exception as e:
-            logger.error(f"Error in create_character_sheet: {str(e)}")
+            logger.error(f"Error in create_character: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             self.caller.msg(f"An error occurred during character creation: {str(e)}")
-            return None
+            return False
 
-    def reset_character_sheet(self):
-        try:
-            sheet = CharacterSheet.objects.get(account=self.caller.account)
-            sheet.reset()
-            sheet.save()
-            self.caller.msg("Character sheet reset and marked as unapproved.")
-            logger.info(f"Character sheet reset for {self.caller.key} and marked as unapproved.")
-        except CharacterSheet.DoesNotExist:
-            self.caller.msg("You don't have a character sheet to reset.")
-        except Exception as e:
-            self.caller.msg(f"An error occurred while resetting the character sheet: {str(e)}")
-            logger.error(f"Error resetting character sheet for {self.caller.key}: {str(e)}")
+    def edgerunner_chargen(self, char, sheet, role):
+        """Create character using edgerunner method, storing data in DB attributes."""
+        # Generate stat table
+        stat_templates = EdgerunnerChargen.generate_stat_table(role)
+        
+        # Calculate final stats
+        final_stats, rows_selected = EdgerunnerChargen.calculate_final_stats(stat_templates)
+        
+        # Assign stats to character
+        stat_names = ['intelligence', 'reflexes', 'dexterity', 'technology', 'cool',
+                    'willpower', 'luck', 'move', 'body', 'empathy']
+        
+        # Store in character db
+        for stat, value in zip(stat_names, final_stats):
+            char.db[stat] = value
+            # For compatibility, also update sheet
+            setattr(sheet, stat, value)
+        
+        # Initialize humanity and luck
+        char.db.humanity = char.db.empathy * 10
+        char.db.current_luck = char.db.luck
+        
+        # For compatibility
+        sheet.initialize_humanity()
+        sheet.save()
+        
+        # Assign skills
+        skills = EdgerunnerChargen.get_skills_for_role(role)
+        for skill_name, skill_value in skills.items():
+            # Store in character skills dict
+            char.set_skill(skill_name, skill_value)
+            # For compatibility, also update sheet if the attribute exists
+            if hasattr(sheet, skill_name):
+                setattr(sheet, skill_name, skill_value)
+        
+        # Assign gear and cyberware
+        EdgerunnerChargen.assign_gear(sheet, role)  # Still using sheet for now
+        EdgerunnerChargen.assign_cyberware(sheet, role)  # Still using sheet for now
+        
+        # Initialize default language
+        char.add_language("Streetslang", 4)
+        
+        # Save the sheet again after all assignments (for backward compatibility)
+        sheet.save()
+        
+        # Recalculate derived stats using Character's method
+        char.recalculate_derived_stats()
+        
+        # Prepare stat display for user feedback
+        stat_display = " | ".join(f"{name.upper()}: {value}" for name, value in zip(stat_names, final_stats))
+        
+        # Prepare detailed stat generation info
+        detailed_info = "\nDetailed stat generation:\n"
+        for name, value, row in zip(stat_names, final_stats, rows_selected):
+            detailed_info += f"{name.capitalize()}: {value} (Row {row})\n"
+        
+        return f"Character created using the Edgerunner method for role: {role}.\nYour stats have been assigned as follows:\n{stat_display}\n{detailed_info}\nUse 'sheet' to view your full character details."
+
+    def complete_package_chargen(self, char, sheet):
+        """Create character using complete package method."""
+        # Set default stats (all 1's, already handled at character creation)
+        
+        # Set eurodollars
+        char.db.eurodollars = 2550
+        
+        # Set default skills to 2
+        default_skills = [
+            'athletics', 'brawling', 'concentration', 'conversation', 'education',
+            'evasion', 'first_aid', 'human_perception', 'local_expert', 'perception',
+            'persuasion', 'stealth'
+        ]
+        
+        for skill in default_skills:
+            char.set_skill(skill, 2)
+        
+        # Add Streetslang as a default language
+        char.add_language("Streetslang", 4)
+        
+        # For compatibility
+        sheet.eurodollars = 2550
+        for skill in default_skills:
+            setattr(sheet, skill, 2)
+        sheet.add_language("Streetslang", 4)
+        sheet.save()
+        
+        return f"Character created using the Complete Package method.\nYou have 62 attribute points and 52 skill points to spend.\nUse 'selfstat' to allocate them."
+
+    def reset_character(self):
+        """Reset the character to default values."""
+        char = self.caller
+        
+        # First, try to delete any existing character sheet for backward compatibility
+        if hasattr(char, 'character_sheet') and char.character_sheet:
+            char.character_sheet.delete()
+        
+        # Reset all character attributes to defaults
+        char.db.full_name = char.name
+        char.db.handle = ""
+        char.db.role = ""
+        char.db.gender = ""
+        char.db.age = 0
+        char.db.hometown = ""
+        char.db.height = 0
+        char.db.weight = 0
+        
+        # Core attributes
+        char.db.intelligence = 1
+        char.db.reflexes = 1
+        char.db.dexterity = 1
+        char.db.technology = 1
+        char.db.cool = 1
+        char.db.willpower = 1
+        char.db.luck = 1
+        char.db.current_luck = 1
+        char.db.move = 1
+        char.db.body = 1
+        char.db.empathy = 1
+        
+        # Derived stats
+        char.db.max_hp = 10 + (5 * ((char.db.body + char.db.willpower) // 2))
+        char.db.current_hp = char.db.max_hp
+        char.db.humanity = char.db.empathy * 10
+        char.db.humanity_loss = 0
+        char.db.total_cyberware_humanity_loss = 0
+        char.db.serious_wounds = char.db.body
+        char.db.death_save = char.db.body
+        
+        # Economy
+        char.db.eurodollars = 0
+        char.db.reputation_points = 0
+        char.db.rep = 0
+        
+        # Status flags
+        char.db.is_complete = False
+        char.db.has_cyberarm = False
+        
+        # Reset skills
+        char.db.skills = {skill: 0 for skill in char.db.skills} if char.db.skills else {}
+        
+        # Reset skill instances
+        char.db.skill_instances = {}
+        
+        # Reset languages
+        char.db.languages = {}
+        
+        self.caller.msg("Your character has been reset to default values.")
+
+    def finish_chargen(self):
+        if not isinstance(self.caller.location, ChargenRoom):
+            self.caller.msg("You can only use this command in a character generation room.")
+            return
+
+        if self.caller.tags.has("approved", category="approval"):
+            self.caller.msg("Your character is already approved. You cannot use chargen commands.")
+            return
+
+        sheet = self.caller.character_sheet
+        if not sheet:
+            self.caller.msg("You don't have a character sheet. Use 'chargen' to create one.")
+            return
+
+        remaining_stat_points, remaining_skill_points = sheet.get_remaining_points()
+        total_remaining_points = remaining_stat_points + remaining_skill_points
+
+        if total_remaining_points > 0:
+            self.caller.msg(f"You still have {total_remaining_points} points to spend ({remaining_stat_points} stat points and {remaining_skill_points} skill points). Use 'selfstat' to allocate them before finishing.")
+            return
+
+        sheet.is_complete = True
+        sheet.save()
+        self.caller.msg("Character creation complete. Your character sheet is now locked for approval.")
+        
+        # create a +job indicating that the character is ready for approval
+        job = Job.objects.create(
+            character=self.caller,
+            job_type="approval",
+            description="Character is ready for approval"
+        )
+        job.save()
+
 
 class CmdConfirmReset(Command):
     """
@@ -267,87 +447,6 @@ class ConfirmCmdSet(CmdSet):
     def at_cmdset_creation(self):
         self.add(CmdConfirmReset())
 
-class CmdChargenFinish(Command):
-    """
-    Finish character creation and lock your character sheet.
-
-    Usage:
-      chargen finish
-    """
-
-    key = "chargen finish"
-    locks = "cmd:all()"
-
-    def func(self):
-        if not isinstance(self.caller.location, ChargenRoom):
-            self.caller.msg("You can only use this command in a character generation room.")
-            return
-
-        if self.caller.tags.has("approved", category="approval"):
-            self.caller.msg("Your character is already approved. You cannot use chargen commands.")
-            return
-
-        sheet = self.caller.character_sheet
-        if not sheet:
-            self.caller.msg("You don't have a character sheet. Use 'chargen' to create one.")
-            return
-
-        remaining_stat_points, remaining_skill_points = sheet.get_remaining_points()
-        total_remaining_points = remaining_stat_points + remaining_skill_points
-
-        if total_remaining_points > 0:
-            self.caller.msg(f"You still have {total_remaining_points} points to spend ({remaining_stat_points} stat points and {remaining_skill_points} skill points). Use 'selfstat' to allocate them before finishing.")
-            return
-
-        sheet.is_complete = True
-        sheet.save()
-        self.caller.msg("Character creation complete. Your character sheet is now locked for approval.")
-        # Here you might want to notify staff that a new character is ready for approval
-
-class CmdChargenDelete(MuxCommand):
-    """
-    Delete the character sheet for a character.
-
-    Usage:
-      chargen/delete
-
-    This command deletes the character sheet associated with your character.
-    """
-
-    key = "chargen/delete"
-    locks = "cmd:all()"
-    help_category = "Character"
-
-    def func(self):
-        if not isinstance(self.caller.location, ChargenRoom):
-            self.caller.msg("You can only use this command in a character generation room.")
-            return
-
-        try:
-            cs = CharacterSheet.objects.get(character=self.caller)
-            cs.delete()
-            self.caller.msg("Your character sheet has been deleted.")
-        except CharacterSheet.DoesNotExist:
-            self.caller.msg("You don't have a character sheet to delete.")
-        except Exception as e:
-            self.caller.msg(f"An error occurred while deleting your character sheet: {str(e)}")
-            logger.log_err(f"Error deleting character sheet for {self.caller.key}: {str(e)}")
-
-class CmdClearSheet(Command):
-    """
-    Forcefully clear all character sheets for debugging.
-    """
-    key = "clearsheet"
-    locks = "cmd:perm(Admin)"
-
-    def func(self):
-        if not isinstance(self.caller.location, ChargenRoom):
-            self.caller.msg("You can only use this command in a character generation room.")
-            return
-
-        CharacterSheet.objects.filter(character=self.caller).delete()
-        self.caller.msg("All character sheets for this character have been forcefully cleared.")
-        
 class CmdListCharacterSheets(Command):
     """
     List all character sheet IDs associated with this character.
@@ -374,12 +473,13 @@ class CmdListCharacterSheets(Command):
 
 from world.utils.character_utils import get_pronouns
 
-class CmdSetStat(MuxCommand):
+class CmdSelfStat(MuxCommand):
     """
     Set a stat, skill, or topsheet attribute for your character.
 
     Usage:
       selfstat <attribute>=<value>
+      selfstat <skill>(instance)=<value>
 
     Examples:
       selfstat INT=5
@@ -387,6 +487,7 @@ class CmdSetStat(MuxCommand):
       selfstat HANDLE=CoolRunner
       selfstat AGE=25
       selfstat charismatic impact=6
+      selfstat play instrument(guitar)=3
     """
 
     key = "selfstat"
@@ -411,6 +512,16 @@ class CmdSetStat(MuxCommand):
         attr = attr_and_value[0].strip()
         value = attr_and_value[1].strip()
         
+        # Check if the attribute contains an instance specification like "skill(instance)"
+        instance = None
+        if "(" in attr and ")" in attr:
+            # Extract the instance name
+            instance_start = attr.find("(")
+            instance_end = attr.find(")")
+            if instance_start < instance_end:  # Valid parentheses
+                instance = attr[instance_start+1:instance_end].strip()
+                attr = attr[:instance_start].strip()  # Remove the instance part from the attribute name
+        
         # If the attribute name contains spaces, try joining with underscores
         if " " in attr:
             attr = attr.replace(" ", "_")
@@ -420,11 +531,10 @@ class CmdSetStat(MuxCommand):
             self.caller.msg(f"Invalid attribute name. Choose from: {', '.join(ALL_ATTRIBUTES.values())}")
             return
 
-        sheet = self.caller.character_sheet
-        if not sheet:
-            self.caller.msg("You don't have a character sheet.")
-            return
-
+        # Get the character object (caller)
+        char = self.caller
+        
+        # Check if this is a core stat
         if full_attr_name in STAT_MAPPING.values():
             try:
                 value = int(value)
@@ -435,14 +545,22 @@ class CmdSetStat(MuxCommand):
                 self.caller.msg("You must specify an integer value for stats.")
                 return
 
-            current_value = getattr(sheet, full_attr_name)
+            # Get current value from DB attributes
+            current_value = char.db.get(full_attr_name, 1)  # Default to 1 if not set
             points_needed = value - current_value
-            remaining_stat_points, _ = sheet.get_remaining_points()
+            
+            # Calculate remaining points
+            stat_points_spent, _ = char.calculate_spent_points()
+            remaining_stat_points = max(0, 62 - stat_points_spent)
 
             if points_needed > remaining_stat_points:
                 self.caller.msg(f"Not enough stat points. You need {points_needed} but only have {remaining_stat_points}.")
                 return
+                
+            # Set the new value directly on the character's DB
+            char.db[full_attr_name] = value
 
+        # Check if this is a skill
         elif full_attr_name in SKILL_MAPPING.values():
             try:
                 value = int(value)
@@ -453,85 +571,151 @@ class CmdSetStat(MuxCommand):
                 self.caller.msg("You must specify an integer value for skills.")
                 return
 
-            current_value = getattr(sheet, full_attr_name)
-            points_needed = value - current_value
-            is_double_cost = full_attr_name in ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
-            actual_points_needed = points_needed * 2 if is_double_cost else points_needed
+            # If instance is provided, handle it as a skill instance
+            if instance:
+                # Create a skill instance key
+                skill_instance_key = f"{full_attr_name}({instance})"
+                
+                # Get current skill instance value (default 0 if not set)
+                current_value = char.get_skill_instance(full_attr_name, instance) if hasattr(char, 'get_skill_instance') else 0
+                points_needed = value - current_value
+                
+                # Check for double-cost skills
+                is_double_cost = full_attr_name in ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
+                actual_points_needed = points_needed * 2 if is_double_cost else points_needed
 
-            _, remaining_skill_points = sheet.get_remaining_points()
+                # Calculate remaining skill points
+                _, skill_points_spent = char.calculate_spent_points()
+                remaining_skill_points = max(0, 86 - skill_points_spent)
 
-            if actual_points_needed > remaining_skill_points:
-                self.caller.msg(f"Not enough skill points. You need {actual_points_needed} but only have {remaining_skill_points}.")
+                if actual_points_needed > remaining_skill_points:
+                    self.caller.msg(f"Not enough skill points. You need {actual_points_needed} but only have {remaining_skill_points}.")
+                    return
+                    
+                # Set the skill instance value
+                # Initialize skill instances dict if it doesn't exist
+                if not char.db.skill_instances:
+                    char.db.skill_instances = {}
+                
+                # Store the skill instance
+                char.db.skill_instances[skill_instance_key] = value
+                
+                # Display success message with instance
+                self.caller.msg(f"Set {full_attr_name.replace('_', ' ').title()} ({instance}) to {value}.")
+            else:
+                # Regular skill without instance
+                # Get current skill value
+                current_value = char.get_skill(full_attr_name)
+                points_needed = value - current_value
+                
+                # Check for double-cost skills
+                is_double_cost = full_attr_name in ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
+                actual_points_needed = points_needed * 2 if is_double_cost else points_needed
+
+                # Calculate remaining skill points
+                _, skill_points_spent = char.calculate_spent_points()
+                remaining_skill_points = max(0, 86 - skill_points_spent)
+
+                if actual_points_needed > remaining_skill_points:
+                    self.caller.msg(f"Not enough skill points. You need {actual_points_needed} but only have {remaining_skill_points}.")
+                    return
+                    
+                # Set the skill value using the character's skill setter method
+                char.set_skill(full_attr_name, value)
+
+        # For role attribute specifically, validate against allowed values
+        elif full_attr_name == 'role':
+            valid_roles = ['Rockerboy', 'Solo', 'Netrunner', 'Tech', 'Medtech', 'Media', 'Exec', 'Lawman', 'Fixer', 'Nomad']
+            value_cap = value.capitalize()
+            
+            if value_cap not in valid_roles:
+                self.caller.msg(f"Invalid role. Choose from: {', '.join(valid_roles)}")
+                return
+            
+            # Use the character's set_role method
+            if hasattr(char, 'set_role') and callable(char.set_role):
+                if char.set_role(value_cap):
+                    self.caller.msg(f"Your role has been set to {value_cap}.")
+                else:
+                    self.caller.msg(f"There was an error setting your role to {value_cap}.")
+                return
+            else:
+                # Fallback for older character implementations
+                char.db.role = value_cap
+                
+                # For backward compatibility also update sheet
+                if hasattr(char, 'character_sheet') and char.character_sheet:
+                    sheet = char.character_sheet
+                    sheet.role = value_cap
+                    sheet.save(skip_recalculation=True)
+                
+                self.caller.msg(f"Your role has been set to {value_cap}.")
                 return
 
-        # For topsheet attributes, we don't need to check points
-        setattr(sheet, full_attr_name, value)
+        # For other attributes (non-stat, non-skill)
+        else:
+            # Set the attribute directly on the character's DB
+            char.db[full_attr_name] = value
 
-        # If the attribute being set is Body, update hit points
+        # Special handling for body attribute (affects HP)
         if full_attr_name == 'body':
-            new_max_hp = 10 + (5 * int(value))  # Calculate new max HP
-            sheet._max_hp = new_max_hp
-            sheet._current_hp = new_max_hp  # Set current HP to max
-            self.caller.msg(f"Hit Points updated to {new_max_hp}/{new_max_hp}")
+            # Recalculate derived stats
+            char.recalculate_derived_stats()
+            self.caller.msg(f"Hit Points updated to {char.db.max_hp}/{char.db.current_hp}")
 
-        sheet.save()
+        # For backward compatibility, also update the character sheet if it exists
+        if hasattr(char, 'character_sheet') and char.character_sheet:
+            sheet = char.character_sheet
+            if hasattr(sheet, full_attr_name):
+                setattr(sheet, full_attr_name, value)
+                sheet.save(skip_recalculation=True)  # Skip recalculation to avoid circular updates
 
-        pronouns = get_pronouns(sheet.gender)
-
-        self.caller.msg(f"Set {full_attr_name} to {value}.")
+        # Display success message (for non-instance skills)
+        if not instance or full_attr_name not in SKILL_MAPPING.values():
+            self.caller.msg(f"Set {full_attr_name} to {value}.")
         
+        # Show remaining points
         if full_attr_name in STAT_MAPPING.values() or full_attr_name in SKILL_MAPPING.values():
-            new_remaining_stat_points, new_remaining_skill_points = sheet.get_remaining_points()
+            new_remaining_stat_points, new_remaining_skill_points = char.get_remaining_points()
             self.caller.msg(f"You have {new_remaining_stat_points} stat points and {new_remaining_skill_points} skill points remaining to spend.")
 
         # Update the room's display
         if isinstance(self.caller.location, ChargenRoom):
             self.caller.location.update_remaining_points(self.caller)
+            pronouns = get_pronouns(char.db.gender)
             self.caller.location.msg_contents(f"{self.caller.name} has updated {pronouns['possessive']} stats. Remaining points have been updated.", exclude=[self.caller])
-
-    def get_derived_stats(self, sheet):
-        return {
-            "Max HP": sheet._max_hp,
-            "Current HP": sheet._current_hp,
-            "Death Save": sheet.death_save,
-            "Serious Wounds": sheet.serious_wounds,
-            "Humanity": sheet.humanity
-        }
 
 class CmdSetLanguage(MuxCommand):
     """
     Set a language skill for your character.
 
     Usage:
-      setlanguage <language name> <level>
-      setlanguage/remove <language name>
-      setlanguage/list
+      language <language name> <level>
+      language/remove <language name>
+      language/list
 
     Examples:
-      setlanguage Streetslang 3
-      setlanguage/remove Streetslang
-      setlanguage/list
+      language Streetslang 3
+      language/remove Streetslang
+      language/list
 
     This command allows you to add, update, remove, or list language skills.
     The level should be between 1 and 10.
     """
-    key = "setlanguage"
+    key = "language"
+    aliases = ["lang"]
     locks = "cmd:all()"
     help_category = "Character"
 
     def func(self):
-        if not hasattr(self.caller, 'character_sheet'):
-            self.caller.msg("You don't have a character sheet!")
-            return
-
-        sheet = self.caller.character_sheet
+        char = self.caller
 
         if "list" in self.switches:
-            languages = sheet.character_languages.all()
+            languages = char.languages
             if languages:
                 self.caller.msg("Your languages:")
-                for lang in languages:
-                    self.caller.msg(f"{lang.language} (Level {lang.level})")
+                for name, level in languages.items():
+                    self.caller.msg(f"{name} (Level {level})")
             else:
                 self.caller.msg("You don't know any languages.")
             return
@@ -541,7 +725,7 @@ class CmdSetLanguage(MuxCommand):
                 self.caller.msg("Usage: setlanguage/remove <language name>")
                 return
             language_name = self.args.strip()
-            sheet.remove_language(language_name)
+            char.remove_language(language_name)
             self.caller.msg(f"Removed {language_name} from your languages.")
             return
 
@@ -561,14 +745,14 @@ class CmdSetLanguage(MuxCommand):
         language_info = next((lang for lang in LANGUAGES if lang["name"].lower() == language_name.lower()), None)
 
         if language_info:
-            sheet.add_language(language_info["name"], level)
-            self.caller.msg(f"Added {language_info['name']} at level {level} to your character sheet.")
+            char.add_language(language_info["name"], level)
+            self.caller.msg(f"Added {language_info['name']} at level {level} to your languages.")
         else:
             # If not found in LANGUAGES, try to get it from the database
             try:
                 language_obj = Language.objects.get(name__iexact=language_name)
-                sheet.add_language(language_obj.name, level)
-                self.caller.msg(f"Added {language_obj.name} at level {level} to your character sheet.")
+                char.add_language(language_obj.name, level)
+                self.caller.msg(f"Added {language_obj.name} at level {level} to your languages.")
             except Language.DoesNotExist:
                 self.caller.msg(f"Language '{language_name}' not found. Please check the spelling and try again.")
 
@@ -591,74 +775,3 @@ class CmdLifepath(Command):
                cmdset_priority=1,
                auto_quit=True,
                cmd_on_exit=None)
-       
-"""
-class CmdChargenReset(Command):
-"""
-"""
-    Reset your character sheet and start over.
-    Usage:
-      chargen/reset
-    """"""
-            key = "chargen/reset"
-    locks = "cmd:all()"
-
-    def func(self):
-        if not isinstance(self.caller.location, ChargenRoom):
-            self.caller.msg("You can only use this command in a character generation room.")
-            return
-
-        if self.caller.tags.has("approved", category="approval"):
-            self.caller.msg("Your character is already approved. You cannot use chargen commands.")
-            return
-
-        method = self.args.strip().lower() if self.args else "complete"
-        
-        if method not in ["complete", "edgerunner"]:
-            self.caller.msg("Invalid method. Choose 'complete' or 'edgerunner'.")
-            return
-
-        # Check if character sheet exists
-        sheets = CharacterSheet.objects.filter(character=self.caller)
-        self.caller.msg(f"Debug: Found {sheets.count()} character sheet(s).")
-        for sheet in sheets:
-            self.caller.msg(f"Debug: Existing sheet ID: {sheet.id}, Role: {sheet.role}")
-
-        if not sheets.exists():
-            self.caller.msg("You don't have a character sheet to reset. Use the 'chargen' command to create a new one.")
-            return
-
-        # Ask for confirmation
-        self.caller.msg(f"Are you sure you want to reset your current character sheet and create a new one using the {method} method?")
-        self.caller.msg("This action cannot be undone. Type 'yes' to confirm or anything else to cancel.")
-
-        # Set up the confirmation
-        self.caller.ndb._confirm_reset = True
-        self.caller.ndb._cmd_reset = self
-        self.caller.ndb._chargen_method = method
-        self.caller.cmdset.add(ConfirmCmdSet)
-
-    def reset_sheet(self, method):
-        self.caller.msg(f"Debug: Entering reset_sheet method with method: {method}")
-        try:
-            sheets = CharacterSheet.objects.filter(character=self.caller)
-            self.caller.msg(f"Debug: Found {sheets.count()} character sheet(s) to reset.")
-            for sheet in sheets:
-                self.caller.msg(f"Debug: Resetting sheet ID: {sheet.id}, Role: {sheet.role}")
-                sheet.reset()
-                sheet.role = ""  # Explicitly set role to empty string
-                sheet.save()
-                self.caller.msg(f"Debug: After reset - Sheet ID: {sheet.id}, Role: {sheet.role}")
-            
-            # Ensure the character is marked as unapproved
-            self.caller.tags.clear(category="approval")
-            
-            self.caller.msg("Your character sheet has been reset. Use the 'sheet' command to view it.")
-            self.caller.msg("Remember to set your stats and skills using the 'selfstat' command.")
-            self.caller.msg("Your character is now unapproved and will need to be approved by an admin.")
-            logger.log_info(f"Character sheet reset for {self.caller.key} and marked as unapproved.")
-        except Exception as e:
-            self.caller.msg(f"Debug: Error in reset_sheet: {str(e)}")
-            logger.log_err(f"Error resetting character sheet for {self.caller.key}: {str(e)}")
-            self.caller.msg("An error occurred while resetting your character sheet. Please contact an admin for assistance.")
-"""
