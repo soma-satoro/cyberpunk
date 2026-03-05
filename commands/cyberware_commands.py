@@ -14,11 +14,13 @@ class CmdCyberware(MuxCommand):
       cyberware
       cyberware <name>
       cyberware/activate <name>
+      cyberware/install <name>
 
     Examples:
       cyberware
       cyberware Neural Link
       cyberware/activate Neural Link
+      cyberware/install Sandevistan
     """
 
     key = "cyberware"
@@ -37,13 +39,19 @@ class CmdCyberware(MuxCommand):
             self.caller.msg("You don't have a character sheet. Please create one using the 'chargen' command.")
             return
 
+        if self.switches and "activate" in self.switches:
+            self.activate_cyberware(character_sheet, self.args.strip() if self.args else "")
+            return
+        if self.switches and "install" in self.switches:
+            self.install_cyberware(character_sheet, self.args.strip() if self.args else "")
+            return
         if not self.args:
             self.list_cyberware(character_sheet)
         else:
             self.view_specific_cyberware(character_sheet, self.args.strip())
 
     def list_cyberware(self, character_sheet):
-        installed_cyberware = CyberwareInstance.objects.filter(character=character_sheet, installed=True)
+        installed_cyberware = CyberwareInstance.objects.filter(character_sheet=character_sheet, installed=True)
 
         if not installed_cyberware:
             self.caller.msg("You have no cyberware installed.")
@@ -65,7 +73,7 @@ class CmdCyberware(MuxCommand):
         cyberware_name = cyberware_name.strip()  # Remove leading/trailing whitespace
         try:
             cyberware_instance = CyberwareInstance.objects.get(
-                character=character_sheet,
+                character_sheet=character_sheet,
                 cyberware__name__iexact=cyberware_name,
                 installed=True
             )
@@ -85,11 +93,38 @@ class CmdCyberware(MuxCommand):
         output += footer(width=78, fillchar="|m-|n")
         
         self.caller.msg(output)
+    def install_cyberware(self, character_sheet, cyberware_name):
+        """Install uninstalled cyberware (e.g. purchased from Ripperdoc)."""
+        if not cyberware_name:
+            self.caller.msg("Usage: cyberware/install <name>")
+            return
+        cw_instance = CyberwareInstance.objects.filter(
+            Q(character_sheet=character_sheet) | Q(character_object=self.caller),
+            cyberware__name__iexact=cyberware_name,
+            installed=False
+        ).first()
+        if not cw_instance:
+            self.caller.msg(
+                f"You don't have uninstalled cyberware named '{cyberware_name}'. "
+                "Check your inventory with 'inv' to see uninstalled cyberware."
+            )
+            return
+        cw_instance.installed = True
+        if not cw_instance.character_sheet:
+            cw_instance.character_sheet = character_sheet
+        cw_instance.save()
+        character_sheet.calculate_humanity_loss()
+        self.caller.msg(
+            f"You have installed {cw_instance.cyberware.name}. "
+            f"Humanity loss: {cw_instance.cyberware.humanity_loss}. "
+            f"Current humanity: {character_sheet.humanity}."
+        )
+
     def activate_cyberware(self, character_sheet, cyberware_name):
         cyberware_name = cyberware_name.strip()  # Remove leading/trailing whitespace
         try:
             cyberware_instance = CyberwareInstance.objects.get(
-                character=character_sheet,
+                character_sheet=character_sheet,
                 cyberware__name__iexact=cyberware_name,
                 installed=True
             )
@@ -99,7 +134,7 @@ class CmdCyberware(MuxCommand):
         # Attempt to find the cyberware
         try:
             cyberware = CyberwareInstance.objects.filter(
-                character=character_sheet,
+                character_sheet=character_sheet,
                 installed=True,
                 cyberware__is_weapon=True
             ).filter(
@@ -115,7 +150,7 @@ class CmdCyberware(MuxCommand):
             return
 
         # Deactivate any previously activated cyberware
-        CyberwareInstance.objects.filter(character=character_sheet, active=True).update(active=False)
+        CyberwareInstance.objects.filter(character_sheet=character_sheet, active=True).update(active=False)
 
         # Activate the selected cyberware
         cyberware.active = True

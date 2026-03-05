@@ -39,8 +39,8 @@ class CmdSheet(MuxCommand):
 
     def safe_get_attr(self, obj, attr):
         """Safely get an attribute value, returning 'N/A' if it doesn't exist."""
-        if hasattr(obj, "db") and obj.attributes.has(attr):
-            return obj.db.get(attr, 'N/A')
+        if hasattr(obj, "attributes") and obj.attributes.has(attr):
+            return obj.attributes.get(attr, 'N/A')
         return getattr(obj, attr, 'N/A')
 
     def parse(self):
@@ -104,7 +104,7 @@ class CmdSheet(MuxCommand):
             ("Most Valued Person", "valued_person"),
         ]
         for title, field in present_fields:
-            value = target.db.get(field, "Not set")
+            value = target.attributes.get(field, "Not set")
             output += self.wrap_field(title, value, width, title_width)
         output += "\n"
 
@@ -117,7 +117,7 @@ class CmdSheet(MuxCommand):
             ("Family Crisis", "family_crisis")
         ]
         for title, field in past_fields:
-            value = target.db.get(field, "Not set")
+            value = target.attributes.get(field, "Not set")
             output += self.wrap_field(title, value, width, title_width)
         output += "\n"
 
@@ -185,7 +185,7 @@ class CmdSheet(MuxCommand):
                 ]
             }
             for field in role_specific_fields.get(target.db.role, []):
-                value = target.db.get(field, None)
+                value = target.attributes.get(field, None)
                 if value:
                     title = field.replace('_', ' ').title()
                     output += self.wrap_field(title, value, width, title_width)
@@ -219,6 +219,13 @@ class CmdSheet(MuxCommand):
         target = self.get_target_character()
         if not target:
             return
+
+        # Recalculate humanity from cyberware before display (CharacterSheet is source of truth)
+        if hasattr(target, 'character_sheet') and target.character_sheet:
+            sheet = target.character_sheet
+            sheet.calculate_humanity_loss()
+            target.db.humanity = sheet.humanity
+            target.db.total_cyberware_humanity_loss = sheet.total_cyberware_humanity_loss
             
         # Main header
         output = header(f"Character Sheet for {target.db.full_name}", width=80, fillchar="|m-|n") + "\n"
@@ -267,13 +274,8 @@ class CmdSheet(MuxCommand):
         # Equipment
         output += divider("Equipment", width=80, fillchar="|m-|n") + "\n"
         try:
-            # First try to get inventory directly from character if possible
-            if hasattr(target, 'inventory') and target.inventory:
-                inv = target.inventory
-            else:
-                # Fall back to model if needed
-                from world.inventory.models import Inventory
-                inv = Inventory.objects.get(character_object=target)
+            from world.inventory.models import Inventory
+            inv, _ = Inventory.get_or_create_for_character(target)
         except Exception as e:
             logger.log_err(f"Error retrieving inventory for {target}: {str(e)}")
             output += "Error retrieving inventory\n"
@@ -464,7 +466,7 @@ class CmdRoll(Command):
             return
 
         # Get attribute value directly from character
-        attr_value = char.db.get(full_attr_name, 0)
+        attr_value = char.attributes.get(full_attr_name, 0)
         
         # Get skill value from character's skills dictionary
         skill_key = full_skill_name.lower().replace(' ', '_')

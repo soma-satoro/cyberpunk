@@ -2,7 +2,7 @@ from evennia import Command
 from evennia.utils.ansi import ANSIString
 from evennia.commands.default.muxcommand import MuxCommand
 from world.cyberpunk_sheets.models import CharacterSheet
-from world.inventory.models import Weapon, Armor, Gear, Inventory, Ammunition
+from world.inventory.models import Weapon, Armor, Gear, Inventory, Ammunition, CyberwareInstance
 from world.cyberpunk_sheets.services import CharacterSheetMoneyService
 from world.utils.formatting import header, footer, divider
 from world.utils.character_utils import get_character_sheet
@@ -37,12 +37,12 @@ class CmdInventory(MuxCommand):
             self.caller.msg("You don't have a character sheet. Please create one using the 'chargen' command.")
             return
 
-        if self.switches.get("equip"):
+        if self.switches and "equip" in self.switches:
             self.equip_item()
-        elif self.switches.get("unequip"):
+            return
+        if self.switches and "unequip" in self.switches:
             self.unequip_item()
-        else:
-            self.show_inventory()
+            return
 
         inv = character_sheet.inventory
 
@@ -98,6 +98,18 @@ class CmdInventory(MuxCommand):
                 output += f"{a.name:<25}{a.weapon_type:<25}{a.quantity:<20}\n"
         else:
             output += "No ammunition in inventory.\n"
+        output += "\n"
+
+        # Cyberware
+        output += divider("Cyberware", width=78, fillchar="|m-|n") + "\n"
+        output += f"|c{'Cyberware':<25}{'Type':<18}{'Status':<15}{'Humanity Loss':<15}|n\n"
+        cyberware = inv.cyberware.all()
+        if cyberware:
+            for cw in cyberware:
+                status = "Installed" if cw.installed else "Uninstalled"
+                output += f"{cw.cyberware.name:<25}{cw.cyberware.type:<18}{status:<15}{cw.cyberware.humanity_loss:<15}\n"
+        else:
+            output += "No cyberware in inventory.\n"
         output += "\n"
 
         output += footer(width=78, fillchar="|m-|n")
