@@ -7,6 +7,8 @@ from collections import defaultdict
 
 import time
 
+STAFF_PERMS = ("builders", "admin", "staff", "developer")
+
 class CmdWhere(default_cmds.MuxCommand):
     """
     Displays a list of online players and their locations.
@@ -83,7 +85,7 @@ class CmdWhere(default_cmds.MuxCommand):
         # Add state indicators
         if puppet.db.lfrp:
             name = f"${name}"
-        if puppet.check_permstring("builders", "admin", "staff", "developer"):
+        if any(puppet.check_permstring(perm) for perm in STAFF_PERMS):
             name = f"*{name}"
         if puppet.db.afk:
             name = f"^{name}"
@@ -98,7 +100,7 @@ class CmdWhere(default_cmds.MuxCommand):
         """Implement the command"""
         caller = self.caller
         session_list = SESSIONS.get_sessions()
-        is_staff = caller.check_permstring("builders", "admin", "staff", "developer")
+        is_staff = any(caller.check_permstring(perm) for perm in STAFF_PERMS)
         
         # Group characters by area
         areas = defaultdict(list)

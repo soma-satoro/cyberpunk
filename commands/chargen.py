@@ -7,6 +7,7 @@ from world.languages.models import Language
 from world.utils.character_utils import ALL_ATTRIBUTES, SKILL_MAPPING, STAT_MAPPING, get_full_attribute_name
 from world.cyberpunk_sheets.models import CharacterSheet
 from evennia.utils import evmenu
+from world.cyberpunk_constants import ROLE_SKILLS, ROLE_SKILL_NAME_MAP
 from world.cyberpunk_sheets.edgerunner import EdgerunnerChargen
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils import logger
@@ -89,7 +90,7 @@ class CmdChargen(MuxCommand):
 
     Usage:
       chargen <method> <role> <full_name>
-      chargen/delete
+      chargen/delete or chargen/reset
       chargen/finish
 
     Methods:
@@ -116,7 +117,7 @@ class CmdChargen(MuxCommand):
             self.caller.msg("Your character is already approved. You cannot use chargen commands.")
             return
 
-        if "delete" in self.switches:
+        if "delete" in self.switches or "reset" in self.switches:
             self.reset_character()
             return
 
@@ -158,7 +159,7 @@ class CmdChargen(MuxCommand):
         logger.info(f"Chargen command called with method: {method}, role: {role}, full_name: {full_name}")
 
         # Check for existing character initialization
-        if self.caller.db.get('role') or self.caller.db.get('full_name'):
+        if self.caller.db.role or self.caller.db.full_name:
             self.caller.msg("You already have a character initialized. Use 'chargen/reset' to reset it or type 'chargen yes' to confirm overwriting it.")
             self.caller.ndb._chargen_confirm = (method, role, full_name)
             logger.info("Waiting for user confirmation.")
@@ -183,13 +184,7 @@ class CmdChargen(MuxCommand):
         try:
             char = self.caller
             
-            # Update the character's name if it has changed
-            if char.key != full_name:
-                char.key = full_name
-                char.save()
-                logger.info(f"Updated character name to {full_name}")
-            
-            # Set basic character attributes
+            # Set basic character attributes (full_name is stored but does not change char.key)
             char.db.full_name = full_name
             char.db.role = role
             char.db.gender = char.db.gender or "Other"  # Set default gender if not set
@@ -237,7 +232,7 @@ class CmdChargen(MuxCommand):
         
         # Store in character db
         for stat, value in zip(stat_names, final_stats):
-            char.db[stat] = value
+            setattr(char.db, stat, value)
             # For compatibility, also update sheet
             setattr(sheet, stat, value)
         
@@ -249,14 +244,15 @@ class CmdChargen(MuxCommand):
         sheet.initialize_humanity()
         sheet.save()
         
-        # Assign skills
-        skills = EdgerunnerChargen.get_skills_for_role(role)
+        # Assign skills (map ROLE_SKILLS names to model field names)
+        skills = ROLE_SKILLS.get(role, {})
         for skill_name, skill_value in skills.items():
+            sheet_skill_name = ROLE_SKILL_NAME_MAP.get(skill_name, skill_name)
             # Store in character skills dict
-            char.set_skill(skill_name, skill_value)
+            char.set_skill(sheet_skill_name, skill_value)
             # For compatibility, also update sheet if the attribute exists
-            if hasattr(sheet, skill_name):
-                setattr(sheet, skill_name, skill_value)
+            if hasattr(sheet, sheet_skill_name):
+                setattr(sheet, sheet_skill_name, skill_value)
         
         # Assign gear and cyberware
         EdgerunnerChargen.assign_gear(sheet, role)  # Still using sheet for now
@@ -315,11 +311,21 @@ class CmdChargen(MuxCommand):
         char = self.caller
         
         # First, try to delete any existing character sheet for backward compatibility
+        # Only delete if the sheet exists in DB (pk is not None) - unsaved sheets can't be deleted
         if hasattr(char, 'character_sheet') and char.character_sheet:
-            char.character_sheet.delete()
+            sheet = char.character_sheet
+            if sheet.pk is not None:  # Only delete persisted sheets
+                sheet.delete()
+        
+        # Delete any remaining sheets for this character (handles stale refs) and clear the ID
+        try:
+            CharacterSheet.objects.filter(character=char).delete()
+        except Exception:
+            pass
+        char.db.character_sheet_id = None
         
         # Reset all character attributes to defaults
-        char.db.full_name = char.name
+        char.db.full_name = ""
         char.db.handle = ""
         char.db.role = ""
         char.db.gender = ""
@@ -471,8 +477,6 @@ class CmdListCharacterSheets(Command):
         else:
             self.caller.msg("You don't have any character sheets.")
 
-from world.utils.character_utils import get_pronouns
-
 class CmdSelfStat(MuxCommand):
     """
     Set a stat, skill, or topsheet attribute for your character.
@@ -546,7 +550,7 @@ class CmdSelfStat(MuxCommand):
                 return
 
             # Get current value from DB attributes
-            current_value = char.db.get(full_attr_name, 1)  # Default to 1 if not set
+            current_value = getattr(char.db, full_attr_name, 1)  # Default to 1 if not set
             points_needed = value - current_value
             
             # Calculate remaining points
@@ -558,7 +562,7 @@ class CmdSelfStat(MuxCommand):
                 return
                 
             # Set the new value directly on the character's DB
-            char.db[full_attr_name] = value
+            setattr(char.db, full_attr_name, value)
 
         # Check if this is a skill
         elif full_attr_name in SKILL_MAPPING.values():
@@ -655,7 +659,7 @@ class CmdSelfStat(MuxCommand):
         # For other attributes (non-stat, non-skill)
         else:
             # Set the attribute directly on the character's DB
-            char.db[full_attr_name] = value
+            setattr(char.db, full_attr_name, value)
 
         # Special handling for body attribute (affects HP)
         if full_attr_name == 'body':
@@ -674,16 +678,10 @@ class CmdSelfStat(MuxCommand):
         if not instance or full_attr_name not in SKILL_MAPPING.values():
             self.caller.msg(f"Set {full_attr_name} to {value}.")
         
-        # Show remaining points
+        # Show remaining points (private to user only - no room broadcast)
         if full_attr_name in STAT_MAPPING.values() or full_attr_name in SKILL_MAPPING.values():
             new_remaining_stat_points, new_remaining_skill_points = char.get_remaining_points()
             self.caller.msg(f"You have {new_remaining_stat_points} stat points and {new_remaining_skill_points} skill points remaining to spend.")
-
-        # Update the room's display
-        if isinstance(self.caller.location, ChargenRoom):
-            self.caller.location.update_remaining_points(self.caller)
-            pronouns = get_pronouns(char.db.gender)
-            self.caller.location.msg_contents(f"{self.caller.name} has updated {pronouns['possessive']} stats. Remaining points have been updated.", exclude=[self.caller])
 
 class CmdSetLanguage(MuxCommand):
     """

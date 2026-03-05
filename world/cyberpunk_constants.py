@@ -128,6 +128,22 @@ ROLE_STAT_TABLES = {
     ]
 }
 
+# Map ROLE_SKILLS keys to CharacterSheet/Character skill field names (for chargen persistence)
+ROLE_SKILL_NAME_MAP = {
+    "melee_weapon": "melee",
+    "personal_grooming": "style",  # CharacterSheet merged into style
+    "drive_land_vehicle": "drive_land",
+    "cyberdeck_programming": "electronics",
+    "system_knowledge": "library_search",  # Closest equivalent
+    "diagnosis": "medicine",  # Medtech
+    "pharmaceuticals": "paramedic",
+    "surgery": "paramedic",
+    "wardrobe_and_style": "style",
+    "resources": "business",  # Exec - closest equivalent
+    "navigation": "local_expert",  # Nomad
+    "survival": "wilderness_survival",
+}
+
 # Role-specific skills
 ROLE_SKILLS = {
     "Rockerboy": {

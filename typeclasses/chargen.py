@@ -7,7 +7,6 @@ from world.utils.formatting import header, footer, divider
 from world.cyberpunk_constants import STATS, ROLE_SKILLS
 from evennia.utils.utils import inherits_from
 import logging
-from world.utils.character_utils import get_pronouns
 
 logger = logging.getLogger('cyberpunk.chargen')
 
@@ -28,12 +27,11 @@ class ChargenRoom(DefaultRoom):
         return character.character_sheet.get_remaining_points()
 
     def update_remaining_points(self, character):
-        sheet = character.character_sheet
-        if sheet:
-            remaining_stat_points, remaining_skill_points = sheet.get_remaining_points()
-            pronouns = get_pronouns(sheet.gender)
-            self.msg_contents(f"{character.name} has updated {pronouns['possessive']} stats. Remaining points have been updated.", exclude=[character])
-            self.display_points(character)
+        """
+        Update points display for the character who made changes.
+        Called by commands that modify stats/skills - sends private message only, no room broadcast.
+        """
+        self.display_points(character)
 
     def display_points(self, character):
         """

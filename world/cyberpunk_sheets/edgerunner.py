@@ -1,6 +1,6 @@
 import random, logging
 import traceback
-from world.cyberpunk_constants import ROLES, STATS, ROLE_SKILLS, EQUIPMENT, ROLE_STAT_TABLES, ROLE_CYBERWARE
+from world.cyberpunk_constants import ROLES, STATS, ROLE_SKILLS, ROLE_SKILL_NAME_MAP, EQUIPMENT, ROLE_STAT_TABLES, ROLE_CYBERWARE
 from world.cyberpunk_constants import LANGUAGES as CYBERPUNK_LANGUAGES
 from world.inventory.models import Inventory, Weapon, Armor, Gear, CyberwareInstance, Ammunition, AmmoType
 from world.equipment_data import weapons, armors, gears, ammunition
@@ -274,7 +274,8 @@ class EdgerunnerChargen:
         skills_dict = {}
         
         for skill, value in role_skills.items():
-            skills_dict[skill.lower()] = value
+            sheet_skill_name = ROLE_SKILL_NAME_MAP.get(skill, skill).lower()
+            skills_dict[sheet_skill_name] = value
             
         character.db.skills = skills_dict
         logger.info(f"Assigned {len(skills_dict)} skills to character typeclass")
@@ -440,13 +441,21 @@ class EdgerunnerChargen:
         
         for item_name in cyberware_list:
             logger.info(f"Processing cyberware: {item_name}")
-            cyberware_item, created = Cyberware.objects.get_or_create(name=item_name)
+            # Get defaults from CYBERWARE_DATA to satisfy NOT NULL constraints (cost, etc.)
+            cw_data = CYBERWARE_DATA.get(item_name, {})
+            defaults = {
+                'description': cw_data.get('description', f"{item_name} for {role}"),
+                'cost': cw_data.get('cost', CYBERWARE_COSTS.get(item_name, 100)),
+                'humanity_loss': cw_data.get('humanity_loss', CYBERWARE_HUMANITY_LOSS.get(item_name, 0)),
+                'type': cw_data.get('type', "Implant"),
+                'slots': cw_data.get('slots', 1),
+            }
+            cyberware_item, created = Cyberware.objects.get_or_create(
+                name=item_name,
+                defaults=defaults
+            )
             if created:
-                # Set default values for new cyberware items
-                cyberware_item.type = "Implant"
-                cyberware_item.description = f"{item_name} for {role}"
-                cyberware_item.humanity_loss = 14 // len(cyberware_list)  # This is a placeholder calculation
-                cyberware_item.save()
+                logger.info(f"Created new Cyberware entry for {item_name}")
             
             # Create instance linked to character typeclass
             instance = CyberwareInstance.objects.create(
@@ -635,7 +644,9 @@ class EdgerunnerChargen:
     def assign_skills(cls, sheet, role):
         role_skills = ROLE_SKILLS.get(role, {})
         for skill, value in role_skills.items():
-            setattr(sheet, skill.lower(), value)
+            sheet_skill_name = ROLE_SKILL_NAME_MAP.get(skill, skill).lower()
+            if hasattr(sheet, sheet_skill_name):
+                setattr(sheet, sheet_skill_name, value)
 
     @classmethod
     def assign_languages(cls, sheet, role):
@@ -764,13 +775,21 @@ class EdgerunnerChargen:
         
         for item_name in cyberware_list:
             logger.info(f"Processing cyberware: {item_name}")
-            cyberware_item, created = Cyberware.objects.get_or_create(name=item_name)
+            # Get defaults from CYBERWARE_DATA to satisfy NOT NULL constraints (cost, etc.)
+            cw_data = CYBERWARE_DATA.get(item_name, {})
+            defaults = {
+                'description': cw_data.get('description', f"{item_name} for {role}"),
+                'cost': cw_data.get('cost', CYBERWARE_COSTS.get(item_name, 100)),
+                'humanity_loss': cw_data.get('humanity_loss', CYBERWARE_HUMANITY_LOSS.get(item_name, 0)),
+                'type': cw_data.get('type', "Implant"),
+                'slots': cw_data.get('slots', 1),
+            }
+            cyberware_item, created = Cyberware.objects.get_or_create(
+                name=item_name,
+                defaults=defaults
+            )
             if created:
-                # Set default values for new cyberware items
-                cyberware_item.type = "Implant"
-                cyberware_item.description = f"{item_name} for {role}"
-                cyberware_item.humanity_loss = 14 // len(cyberware_list)  # This is a placeholder calculation
-                cyberware_item.save()
+                logger.info(f"Created new Cyberware entry for {item_name}")
             
             CyberwareInstance.objects.create(
                 cyberware=cyberware_item,
@@ -797,9 +816,11 @@ class EdgerunnerChargen:
         for stat in STATS:
             setattr(sheet, stat.lower(), 1)
         
-        # Reset all skills to 0
+        # Reset all skills to 0 (use mapped names for sheet fields)
         for skill in set(skill for role_skills in ROLE_SKILLS.values() for skill in role_skills):
-            setattr(sheet, skill.lower(), 0)
+            sheet_skill_name = ROLE_SKILL_NAME_MAP.get(skill, skill).lower()
+            if hasattr(sheet, sheet_skill_name):
+                setattr(sheet, sheet_skill_name, 0)
         
         # Clear languages
         sheet.character_languages.all().delete()
