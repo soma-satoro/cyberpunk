@@ -43,7 +43,7 @@ class CyberwareInstance(SharedMemoryModel):
         # Ensure at least one character field is populated
         constraints = [
             models.CheckConstraint(
-                check=models.Q(character_object__isnull=False) | models.Q(character_sheet__isnull=False),
+                condition=models.Q(character_object__isnull=False) | models.Q(character_sheet__isnull=False),
                 name='cyberware_app_instance_has_character'
             )
         ]

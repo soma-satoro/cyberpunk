@@ -112,7 +112,7 @@ def calculate_points_spent(character):
     ])
     
     # Add points from languages
-    skill_points += sum(lang.level for lang in character.character_languages.all())
+    skill_points += sum(lang.level for lang in character.sheet_language_proficiencies.all())
     
     return stat_points, skill_points
 

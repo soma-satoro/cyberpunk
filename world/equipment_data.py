@@ -1,4 +1,4 @@
-from world.inventory.models import Weapon, Armor, Gear, Ammunition, AmmoType, Cyberdeck
+from world.inventory.models import Weapon, Armor, Gear, Ammunition, AmmoType, Cyberdeck, Vehicle
 from world.cyberware.models import Cyberware
 from world.cyberware.utils import populate_cyberware
 from enum import Enum
@@ -15,55 +15,256 @@ class AmmoType(Enum):
     SLEEP_INDUCING = "Sleep Inducing"
     EMP = "EMP"
 
-class Vehicle:
-    def __init__(self, description, sdp, seats, speed_combat, speed_narrative, cost):
-        self.description = description
-        self.sdp = sdp
-        self.seats = seats
-        self.speed_combat = speed_combat
-        self.speed_narrative = speed_narrative
-        self.cost = cost
-        self.occupants = []
-
-    def enter(self, character):
-        if len(self.occupants) < self.seats:
-            self.occupants.append(character)
-            return True
-        return False
-
-    def exit(self, character):
-        if character in self.occupants:
-            self.occupants.remove(character)
-            return True
-        return False
-
-class Motorcycle(Vehicle):
-    def __init__(self, description, sdp, speed_combat, speed_narrative, cost):
-        super().__init__(description, sdp, 2, speed_combat, speed_narrative, cost)
-
-class Car(Vehicle):
-    pass
-
-class Boat(Vehicle):
-    pass
-
-class Helicopter(Vehicle):
-    pass
-
-class Aerodyne(Vehicle):
-    pass
-
-# Example usage
-roadbike = Motorcycle(
-    description="High-performance sport bike with advanced cybernetic controls",
-    sdp=35,
-    speed_combat=8,
-    speed_narrative=(100, 290),  # (mph, km/h)
-    cost=20000
-)
-
-player = "Player1"  # Assume this is a character object
-roadbike.enter(player)
+# Cyberpunk Red vehicles - Land, Sea, and Air (from core rulebook)
+# All CHOOH² powered, Super Luxury category
+# speed_combat: MOVE units; speed_narrative: "X MPH / Y KPH"
+vehicles = [
+    # Land Vehicles
+    {
+        "name": "Roadbike",
+        "description": "Common CHOOH² powered bike.",
+        "category": "land",
+        "sdp": 35,
+        "seats": 2,
+        "speed_combat": 20,
+        "speed_narrative": "100 MPH / 161 KPH",
+        "value": 20000,
+    },
+    {
+        "name": "Superbike",
+        "description": "Exotic CHOOH² streetbike, capable of extreme speeds.",
+        "category": "land",
+        "sdp": 35,
+        "seats": 2,
+        "speed_combat": 60,
+        "speed_narrative": "300 MPH / 483 KPH",
+        "value": 100000,
+    },
+    {
+        "name": "Compact Groundcar",
+        "description": "Common CHOOH² powered car.",
+        "category": "land",
+        "sdp": 50,
+        "seats": 4,
+        "speed_combat": 20,
+        "speed_narrative": "100 MPH / 161 KPH",
+        "value": 30000,
+    },
+    {
+        "name": "High Performance Groundcar",
+        "description": "CHOOH² powered sportscar.",
+        "category": "land",
+        "sdp": 50,
+        "seats": 4,
+        "speed_combat": 40,
+        "speed_narrative": "200 MPH / 322 KPH",
+        "value": 50000,
+    },
+    {
+        "name": "Super Groundcar",
+        "description": "Exotic CHOOH² sportscar, capable of extreme speeds.",
+        "category": "land",
+        "sdp": 50,
+        "seats": 2,
+        "speed_combat": 60,
+        "speed_narrative": "300 MPH / 483 KPH",
+        "value": 100000,
+    },
+    # Sea Vehicles
+    {
+        "name": "Jetski",
+        "description": "Common CHOOH² powered personal watercraft.",
+        "category": "sea",
+        "sdp": 35,
+        "seats": 2,
+        "speed_combat": 20,
+        "speed_narrative": "60 MPH / 97 KPH",
+        "value": 20000,
+    },
+    {
+        "name": "Speedboat",
+        "description": "CHOOH² powered speedboat.",
+        "category": "sea",
+        "sdp": 50,
+        "seats": 4,
+        "speed_combat": 20,
+        "speed_narrative": "60 MPH / 97 KPH",
+        "value": 30000,
+    },
+    {
+        "name": "Cabin Cruiser",
+        "description": "Luxury CHOOH² powerboat with room to provide accommodations for a small, privileged few. Cabin Cruisers have customized rooms.",
+        "category": "sea",
+        "sdp": 60,
+        "seats": 4,  # 2 per room, minimum 2 rooms
+        "speed_combat": 10,
+        "speed_narrative": "15 MPH / 24 KPH",
+        "value": 60000,  # 30,000eb per room, minimum 2 rooms
+    },
+    {
+        "name": "Yacht",
+        "description": "Luxury CHOOH² pleasurecraft with ample room to provide accommodations and entertainment for a host and their distinguished guests. Yachts have customized rooms.",
+        "category": "sea",
+        "sdp": 100,
+        "seats": 16,  # 4 per room, minimum 4 rooms
+        "speed_combat": 10,
+        "speed_narrative": "15 MPH / 24 KPH",
+        "value": 200000,  # 50,000eb per room, minimum 4 rooms
+    },
+    # Air Vehicles
+    {
+        "name": "Gyrocopter",
+        "description": "A tiny CHOOH² powered rotorcraft favored by flying enthusiasts.",
+        "category": "air",
+        "sdp": 35,
+        "seats": 2,
+        "speed_combat": 20,
+        "speed_narrative": "100 MPH / 161 KPH",
+        "value": 20000,
+    },
+    {
+        "name": "Helicopter",
+        "description": "Full featured CHOOH² powered helicopter capable of sustained flight.",
+        "category": "air",
+        "sdp": 60,
+        "seats": 4,
+        "speed_combat": 40,
+        "speed_narrative": "200 MPH / 322 KPH",
+        "value": 40000,
+    },
+    {
+        "name": "AV-4 Multipurpose Aerodyne",
+        "description": "Highly advanced CHOOH² vertical thrust engine powered flying vehicle.",
+        "category": "air",
+        "sdp": 100,
+        "seats": 6,
+        "speed_combat": 40,
+        "speed_narrative": "200 MPH / 322 KPH",
+        "value": 50000,
+    },
+    {
+        "name": "AV-9 Super Aerodyne",
+        "description": "Exotic CHOOH² vertical thrust engine flying vehicle, capable of extreme speeds.",
+        "category": "air",
+        "sdp": 60,
+        "seats": 2,
+        "speed_combat": 60,
+        "speed_narrative": "300 MPH / 483 KPH",
+        "value": 100000,
+    },
+    {
+        "name": "Aerozep",
+        "description": "Modern cargo blimps that range wildly in size depending on their function. Aerozeps have customized rooms.",
+        "category": "air",
+        "sdp": 100,
+        "seats": 4,  # 2 per room, minimum 2 rooms
+        "speed_combat": 20,
+        "speed_narrative": "100 MPH / 161 KPH",
+        "value": 60000,  # 30,000eb per room, minimum 2 rooms
+    },
+    # Black Chrome vehicles
+    {
+        "name": "Tanson JetBoy Hoverboard",
+        "description": "Hoverboard with twin turbines. 15 MOVE, 30 MPH. Driven with Athletics. 10 SDP. Cannot be upgraded.",
+        "category": "land",
+        "sdp": 10,
+        "seats": 1,
+        "speed_combat": 15,
+        "speed_narrative": "30 MPH / 48 KPH",
+        "value": 1000,
+    },
+    {
+        "name": "Tanson Bellhop",
+        "description": "Folds into luggage-sized gyrocopter. 1 seat. Transform with Action. Incompatible with Seating Upgrade.",
+        "category": "air",
+        "sdp": 35,
+        "seats": 1,
+        "speed_combat": 20,
+        "speed_narrative": "100 MPH / 161 KPH",
+        "value": 16000,
+    },
+    {
+        "name": "Zonda Molly 1K",
+        "description": "Classic off-road workhorse. 2 seats. No Interface Plug control. 60 MPH max.",
+        "category": "land",
+        "sdp": 50,
+        "seats": 2,
+        "speed_combat": 20,
+        "speed_narrative": "60 MPH / 97 KPH",
+        "value": 15000,
+    },
+    {
+        "name": "AmeriCar EconoCompact",
+        "description": "Affordable no-frills compact. 3 seats. Rear folds for storage.",
+        "category": "land",
+        "sdp": 50,
+        "seats": 3,
+        "speed_combat": 20,
+        "speed_narrative": "100 MPH / 161 KPH",
+        "value": 20000,
+    },
+    {
+        "name": "Harvey 100",
+        "description": "AmeriCar 'motorcycle for everyone.' Customizable. Frankenbike reputation.",
+        "category": "land",
+        "sdp": 35,
+        "seats": 2,
+        "speed_combat": 20,
+        "speed_narrative": "100 MPH / 161 KPH",
+        "value": 20000,
+    },
+    {
+        "name": "Makigai Ebi",
+        "description": "Reliable mini-hatchback. 35 SDP. Incompatible with Heavy Chassis. Great fuel efficiency.",
+        "category": "land",
+        "sdp": 35,
+        "seats": 4,
+        "speed_combat": 20,
+        "speed_narrative": "100 MPH / 161 KPH",
+        "value": 23000,
+    },
+    {
+        "name": "The Grundy",
+        "description": "Grundy Salvage scrap-built truck. Heavy Chassis, Armored Chassis, Combat Plow. Mobile bunker.",
+        "category": "land",
+        "sdp": 50,
+        "seats": 4,
+        "speed_combat": 20,
+        "speed_narrative": "100 MPH / 161 KPH",
+        "value": 41000,
+    },
+    {
+        "name": "Zetatech AeroVox",
+        "description": "Economy-class aerodyne. Heavy Chassis. Sturdy corporate transport.",
+        "category": "air",
+        "sdp": 100,
+        "seats": 6,
+        "speed_combat": 40,
+        "speed_narrative": "200 MPH / 322 KPH",
+        "value": 51000,
+    },
+    {
+        "name": "Zetatech Destination",
+        "description": "Compact aerodyne. 4 seats. Affordable and reliable.",
+        "category": "air",
+        "sdp": 100,
+        "seats": 4,
+        "speed_combat": 40,
+        "speed_narrative": "200 MPH / 322 KPH",
+        "value": 40000,
+    },
+    # Interface RED Vol 3: Spinning Your Wheels
+    {
+        "name": "Bicycle",
+        "description": "Yang's Wheels. Speed BODY-dependent. Upgrades: Electric Pedal Assist, Enclosure, etc.",
+        "category": "land",
+        "sdp": 15,
+        "seats": 1,
+        "speed_combat": 15,
+        "speed_narrative": "BODY Dependent",
+        "value": 100,
+    },
+]
 
 ammunition = [
     {
@@ -75,8 +276,18 @@ ammunition = [
         "description": "Standard ammunition for pistols.",
         "cost": 10,
         "quantity": 50
-    }
-    # ... (add more ammunition types as needed)
+    },
+    # Solo of Fortune 2045 (Mr. A-Maaaaaaze) ammunition types
+    {"name": "Burrowing Ammo", "ammo_type": "BURROWING", "weapon_type": "Generic", "damage_modifier": 0, "armor_piercing": 0, "description": "Rounds dig into target. Solo of Fortune 2045.", "cost": 100},
+    {"name": "Explosive Ammo", "ammo_type": "EXPLOSIVE", "weapon_type": "Generic", "damage_modifier": 0, "armor_piercing": 0, "description": "Explosive rounds. Solo of Fortune 2045.", "cost": 100},
+    {"name": "High Precision Ammo", "ammo_type": "HIGH_PRECISION", "weapon_type": "Generic", "damage_modifier": 0, "armor_piercing": 0, "description": "Improved accuracy ammunition. Solo of Fortune 2045.", "cost": 100},
+    {"name": "High Velocity Ammo", "ammo_type": "HIGH_VELOCITY", "weapon_type": "Generic", "damage_modifier": 0, "armor_piercing": 0, "description": "Increased muzzle velocity. Solo of Fortune 2045.", "cost": 100},
+    {"name": "Hyper Expansive Ammo", "ammo_type": "HYPER_EXPANSIVE", "weapon_type": "Generic", "damage_modifier": 0, "armor_piercing": 0, "description": "Enhanced expansive rounds. Solo of Fortune 2045.", "cost": 100},
+    {"name": "Serrated Arrow", "ammo_type": "SERRATED_ARROW", "weapon_type": "Archery", "damage_modifier": 0, "armor_piercing": 0, "description": "Serrated arrow ammunition. Solo of Fortune 2045.", "cost": 100},
+    {"name": "Hollow Point Ammo", "ammo_type": "HOLLOW_POINT", "weapon_type": "Generic", "damage_modifier": 0, "armor_piercing": 0, "description": "Hollow point expansion. Solo of Fortune 2045.", "cost": 100},
+    {"name": "Tracer Ammo", "ammo_type": "TRACER", "weapon_type": "Generic", "damage_modifier": 0, "armor_piercing": 0, "description": "Tracer rounds for visibility. Solo of Fortune 2045.", "cost": 50},
+    # Danger Gal Dossier
+    {"name": "Junk Ammunition", "ammo_type": "JUNK", "weapon_type": "Generic", "damage_modifier": 0, "armor_piercing": 0, "description": "Poor quality rounds. -1d6 vs SP 1+, Autofire -1. Arrows, Bullets, Slugs. 50 rounds.", "cost": 10},
 ]
 
 weapons = [
@@ -293,7 +504,842 @@ weapons = [
         "weight": 0,
         "value": 2500,
         "category": "brawling"
-    }
+    },
+    # Black Chrome weapons
+    {
+        "name": "Militech Fox Dual Ammo Pistol",
+        "damage": "3d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 1000,
+        "category": "handgun",
+        "clip": 10,
+        "description": "Exotic Heavy Pistol with twin helical magazines. Each magazine can hold different ammo types. Reload each magazine separately."
+    },
+    {
+        "name": "Militech Mastiff SMG",
+        "damage": "2d6",
+        "rof": "4",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "handgun",
+        "clip": 30,
+        "description": "Exotic Combination SMG and Shotgun. Shotgun has 3 shots. Both modes use separate magazines."
+    },
+    {
+        "name": "ModFire 10X",
+        "damage": "3d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 1000,
+        "category": "handgun",
+        "clip": 8,
+        "description": "Exotic Heavy Pistol that transforms into SMG or Assault Rifle with modular parts. 1 minute to convert."
+    },
+    {
+        "name": "Westwood",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 500,
+        "category": "handgun",
+        "clip": 6,
+        "description": "Chrome .44 magnum from Nova Arms Classic Guns of Film series. Incompatible with magazine attachments."
+    },
+    {
+        "name": "Sanroo HelloCutie Ultra-K8",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 5000,
+        "category": "handgun",
+        "clip": 30,
+        "description": "Excellent Quality Exotic Very Heavy Pistol reconfigurable to Heavy SMG. 2 attachment slots."
+    },
+    {
+        "name": "Superchrome Sidearm",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 1000,
+        "category": "handgun",
+        "clip": 8,
+        "description": "Exotic Very Heavy Pistol. +2 Wardrobe and Style when worn openly."
+    },
+    {
+        "name": "Sternmeyer M-04 Variable Assault",
+        "damage": "5d6",
+        "rof": "4",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 500,
+        "category": "shoulder_arms",
+        "clip": 25,
+        "description": "Exotic Combination Assault Rifle and Grenade Launcher. Rifle: 20 rounds, GL: 2 grenades. Poor Quality."
+    },
+    {
+        "name": "Superchrome Glam Rifle",
+        "damage": "5d6",
+        "rof": "4",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "shoulder_arms",
+        "clip": 25,
+        "description": "Exotic Assault Rifle. +2 Wardrobe and Style when worn openly."
+    },
+    {
+        "name": "Tommyknocker",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "handgun",
+        "clip": 8,
+        "description": "Exotic Combination Very Heavy Pistol and Poor Quality Shotgun. BODY 10+ or two hands or it flies from grip."
+    },
+    {
+        "name": "E-TACK Public Defender",
+        "damage": "3d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 500,
+        "category": "handgun",
+        "clip": 8,
+        "description": "Exotic Heavy Pistol with Smartgun Link and stun setting. Requires Subdermal Grip. Less-than-lethal mode available."
+    },
+    {
+        "name": "Kendachi Mono-Katana",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 500,
+        "category": "melee",
+        "description": "Monofilament katana. Very Heavy Melee Weapon."
+    },
+    {
+        "name": "Zhirafa Rhinocefist",
+        "damage": "3d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 500,
+        "category": "melee",
+        "description": "Heavy Melee Weapon. Carbo-glass knuckle dusters. Concealable."
+    },
+    # Edgerunners Mission Kit weapons (2070s)
+    {
+        "name": "Arasaka HJKE-11 Yukimura",
+        "damage": "3d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 500,
+        "category": "handgun",
+        "clip": 30,
+        "description": "Exotic SMG with Smart Rebuild. Single shot: 3d6, 3 rounds/check. Autofire x3. +1 Attack. Improved Smart Ammo compatible."
+    },
+    {
+        "name": "Arasaka HJSH-18 Masamune",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 500,
+        "category": "shoulder_arms",
+        "clip": 24,
+        "description": "Exotic Assault Rifle with Power Rebuild. 5d6 single (3 rounds), 4d6 if fewer. Power: +5 Critical Bonus, ricochet shots."
+    },
+    {
+        "name": "Arasaka TKI-20 Shingen",
+        "damage": "3d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "handgun",
+        "clip": 30,
+        "description": "Exotic Heavy SMG with Smart Rebuild. Autofire x4. 3d6/3 rounds or 2d6. +1 Attack. Improved Smart Ammo."
+    },
+    {
+        "name": "Budget Arms Carnage",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 100,
+        "category": "shoulder_arms",
+        "clip": 5,
+        "description": "Poor Quality Shotgun with Power Rebuild. BODY 10+ or Torn Muscle. Power: +5 Critical Bonus, ricochet."
+    },
+    {
+        "name": "Constitutional Arms Unity",
+        "damage": "3d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 500,
+        "category": "handgun",
+        "clip": 12,
+        "description": "Exotic Heavy Pistol with Power Rebuild. Aimed Shot: 4d6. Power: +5 Critical Bonus, ricochet."
+    },
+    {
+        "name": "Kang Tao L-69 Zhuo",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "shoulder_arms",
+        "clip": 32,
+        "description": "Exotic Shotgun with Smart Rebuild. Improved Smart Shells only. 8 shells per shot. 4d6 to 6m area."
+    },
+    {
+        "name": "Militech Crusher",
+        "damage": "3d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 1000,
+        "category": "handgun",
+        "clip": 12,
+        "description": "Exotic Very Heavy Pistol with Power Rebuild. Shotgun Shells only. 3d6 to 6m area. Power: ricochet."
+    },
+    {
+        "name": "Militech M-10AF Lexington",
+        "damage": "3d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 1000,
+        "category": "handgun",
+        "clip": 21,
+        "description": "Exotic Heavy Pistol with Power Rebuild. Power: +5 Critical Bonus, ricochet."
+    },
+    {
+        "name": "Militech M-76e Omaha",
+        "damage": "3d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 500,
+        "category": "handgun",
+        "clip": 9,
+        "description": "Exotic Heavy Pistol with Tech Rebuild. Charge: ROF2, 3 rounds/shot, fire through Thin Cover, half SP."
+    },
+    {
+        "name": "Rostović DB-2 Satara Shotgun",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 500,
+        "category": "shoulder_arms",
+        "clip": 2,
+        "description": "Exotic Shotgun with Tech Rebuild. Dual barrels, separate ammo types. Charge: fire through Thin Cover, half SP."
+    },
+    {
+        "name": "Techtronika RT-46 Burya",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 1000,
+        "category": "handgun",
+        "clip": 4,
+        "description": "Exotic Very Heavy Pistol with Tech Rebuild. Charge without Move Action. Muscle&Bone Lace or Cyberarm or Broken Arm."
+    },
+    {
+        "name": "Techtronika SPT32 Grad",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 500,
+        "category": "shoulder_arms",
+        "clip": 4,
+        "description": "Excellent Quality Exotic Sniper Rifle with Power Rebuild. +1 Attack. Bolt action: 1 Action between shots."
+    },
+    {
+        "name": "Tsunami Arms Nekomata",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "shoulder_arms",
+        "clip": 4,
+        "description": "Sniper Rifle with Tech Rebuild. Charged: fire through Thin and Thick Cover, half SP."
+    },
+    # Interface RED Vol 2: The 12 Days of Gunmas
+    {
+        "name": "Arasaka WAA Bullpup Assault Weapon",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "shoulder_arms",
+        "clip": 30,
+        "description": "Exotic Assault Rifle with Smartgun Link. Autofire (4), Suppressive Fire. Loads Non-Basic Ammunition."
+    },
+    {
+        "name": "Constitutional Arms Multi-Ammo Pistol",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 500,
+        "category": "handgun",
+        "clip": 5,
+        "description": "Exotic Very Heavy Pistol. Load with up to 5 different Very Heavy Pistol ammo types, select per shot."
+    },
+    {
+        "name": "IMI Chainknife",
+        "damage": "2d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 500,
+        "category": "melee",
+        "description": "Exotic Medium Melee. Action to rev up; while revved = Excellent Quality Very Heavy Melee (4d6). Until dropped/stowed/revved down."
+    },
+    {
+        "name": "Kendachi Dragon Flamethrower",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "heavy_weapons",
+        "clip": 2,
+        "description": "Exotic Shotgun. Heavy Weapons Skill. Incendiary Shotgun Shells only. Targets take 4 HP/turn until Action to put out. No Critical Injury, no Aimed Shots."
+    },
+    {
+        "name": "Magnum Opus Hellbringer",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 1000,
+        "category": "handgun",
+        "clip": 3,
+        "description": "Exotic Very Heavy Pistol. BODY 10+ or jams after each shot; Action to unjam."
+    },
+    {
+        "name": "Malorian Arms Sub-Flechette Gun",
+        "damage": "3d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": False,
+        "weight": 2,
+        "value": 5000,
+        "category": "handgun",
+        "clip": 25,
+        "description": "Excellent Quality Exotic Heavy SMG. Autofire (4), Suppressive Fire, Smartgun Link. Unique AP ammo ablates 4/ hit."
+    },
+    {
+        "name": "Militech Crusher SSG",
+        "damage": "3d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 500,
+        "category": "handgun",
+        "clip": 6,
+        "description": "Exotic Very Heavy Pistol (2020 classic). Shotgun Shell Ammunition only."
+    },
+    {
+        "name": "Mustang Arms ARS-5 Submachine Gun",
+        "damage": "3d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "handgun",
+        "clip": 40,
+        "description": "Exotic Heavy SMG. Autofire (3), Suppressive Fire, Smartgun Link, Infrared Nightvision Scope, Sniping Scope."
+    },
+    {
+        "name": "Nomad Pneumatic Bolt Gun",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 500,
+        "category": "shoulder_arms",
+        "clip": 8,
+        "description": "Exotic Sniper Rifle. Fires Arrows, loads all Non-Basic Ammunition. 4 rotating barrels, built-in air compressor."
+    },
+    {
+        "name": "Nova Model 757 Cityhunter",
+        "damage": "3d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 1000,
+        "category": "handgun",
+        "clip": 18,
+        "description": "Exotic Heavy Pistol. Smartgun Link, Smart Ammo. Unique caseless trounds; ammo in 18-round packs."
+    },
+    {
+        "name": "Stolbovoy ST-5 Assault Rifle",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 100,
+        "category": "shoulder_arms",
+        "clip": 20,
+        "description": "Poor Quality Exotic Assault Rifle. Autofire (4), Suppressive Fire. When jammed, 50% chance to fire and clear jam. Loads Non-Basic Ammunition."
+    },
+    {
+        "name": "Teen Dreem",
+        "damage": "2d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 20,
+        "category": "handgun",
+        "clip": 10,
+        "description": "Poor Quality Exotic SMG. Autofire/Suppressive Fire (2+ bullets): drains clip, barrel melts and weapon destroyed."
+    },
+    # Interface RED Vol 3: Woodchipper's Garage
+    {
+        "name": "Biotechnica Enviro-Launcher",
+        "damage": "8d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 500,
+        "category": "heavy_weapons",
+        "clip": 1,
+        "description": "Exotic Rocket Launcher. Explosive, Decomposable ammunition."
+    },
+    {
+        "name": "BudgetArms Triple Threat",
+        "damage": "8d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 500,
+        "category": "heavy_weapons",
+        "clip": 2,
+        "description": "Exotic Rocket Launcher. Explosive. Integrated Poor Quality Grenade Launcher."
+    },
+    {
+        "name": "Flare Gun",
+        "damage": "6d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 100,
+        "category": "heavy_weapons",
+        "clip": 1,
+        "description": "Exotic Grenade Launcher. Explosive, Roadflare ammunition."
+    },
+    {
+        "name": "Midnight Arms SDF-45",
+        "damage": "8d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 1000,
+        "category": "heavy_weapons",
+        "clip": 4,
+        "description": "Exotic Rocket Launcher. Explosive, Double Launch. Max range 400 m/yd."
+    },
+    {
+        "name": "Militech Aegis",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "heavy_weapons",
+        "clip": 8,
+        "description": "Poor Quality Exotic Shotgun. Battery-powered. Shotgun Shells, less-than-lethal. 8 charges, 1hr recharge. No Critical Injury, no armor ablation. Reduces to 1 HP Unconscious if would kill."
+    },
+    {
+        "name": "Militech Archimedes",
+        "damage": "8d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 5000,
+        "category": "heavy_weapons",
+        "clip": 1,
+        "description": "Excellent Quality Exotic Rocket Launcher. Pilot Air Vehicle Skill. Smart Rockets only. Requires Targeting Scope. Includes 1 Smart Rocket."
+    },
+    {
+        "name": "Nomad Air Cannon",
+        "damage": "0",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "heavy_weapons",
+        "clip": 1,
+        "description": "Exotic Shotgun (Shoulder Arms). 1 shot. Coats targets in liquid (paint/water/acid). Acid: -1 SP to coated targets. Poison/Biotoxin: 3 vials per shot, Resist Check."
+    },
+    {
+        "name": "Pursuit Security Inc. TearJerker",
+        "damage": "0",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 500,
+        "category": "heavy_weapons",
+        "clip": 3,
+        "description": "Excellent Quality Exotic Grenade Launcher. Smoke or Teargas ammunition only."
+    },
+    {
+        "name": "SlamDance Ballistic Harpoon",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 1000,
+        "category": "melee",
+        "description": "Exotic Very Heavy Melee. Can be fired: Heavy Weapons, Bow/Crossbow Range, ignores half armor. Reload with Action."
+    },
+    {
+        "name": "Sternmeyer M-02 Heavy Rifle",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "shoulder_arms",
+        "clip": 80,
+        "description": "Exotic Assault Rifle. No Autofire/Suppressive Fire. Heavy Weapons Skill. Unique tround ammo: 500eb per 80 AP drum."
+    },
+    {
+        "name": "Towa Pocket Launcher",
+        "damage": "8d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 500,
+        "category": "heavy_weapons",
+        "clip": 1,
+        "description": "Poor Quality Exotic Rocket Launcher. Smartgun Link, unique ammo. Collapsible; concealable when unloaded."
+    },
+    {
+        "name": "UrbanTech Burst Flamethrower",
+        "damage": "3d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 1000,
+        "category": "heavy_weapons",
+        "clip": 4,
+        "description": "Exotic Shotgun. Heavy Weapons. Incendiary Shells only. 4 HP/turn until Action to put out. Burst: drain clip for incendiary grenade (Grenade Launcher Range). User catches fire."
+    },
+    # Interface RED Vol 5: Solo of Fortune 2045
+    {
+        "name": "Arasaka Neo Rapid Assault 16",
+        "damage": "5d6",
+        "rof": "4",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "shoulder_arms",
+        "clip": 8,
+        "attachment_slots": 0,
+        "description": "Excellent Shotgun. Autofire (Machine Pistol 4)."
+    },
+    {
+        "name": "Arasaka Takanami SMG",
+        "damage": "3d6",
+        "rof": "4",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "handgun",
+        "clip": 40,
+        "attachment_slots": 0,
+        "description": "Excellent Heavy SMG. Autofire (SMG 4)."
+    },
+    {
+        "name": "MetaCorp Chaingun Victoria",
+        "damage": "5d6",
+        "rof": "5",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 5000,
+        "category": "heavy_weapons",
+        "clip": 200,
+        "attachment_slots": 0,
+        "description": "Excellent Machine Gun. Autofire (Machine Gun 5)."
+    },
+    {
+        "name": "Midnight Arms Dawnmaker AMR",
+        "damage": "6d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 5000,
+        "category": "shoulder_arms",
+        "clip": 5,
+        "attachment_slots": 1,
+        "description": "Anti-Materiel Rifle. Sniper Rifle."
+    },
+    {
+        "name": "Midnight Assault HB",
+        "damage": "5d6",
+        "rof": "4",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "shoulder_arms",
+        "clip": 30,
+        "attachment_slots": 1,
+        "description": "Exotic Assault Rifle."
+    },
+    {
+        "name": "Militech MK.27 LMG",
+        "damage": "5d6",
+        "rof": "4",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 1000,
+        "category": "heavy_weapons",
+        "clip": 100,
+        "attachment_slots": 0,
+        "description": "Exotic Machine Gun. Autofire (4)."
+    },
+    {
+        "name": "Militech Mountain Goat Rifle",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 500,
+        "category": "shoulder_arms",
+        "clip": 5,
+        "attachment_slots": 1,
+        "description": "Sniper Rifle. Portable."
+    },
+    {
+        "name": "Techtronika Russia BMG-500",
+        "damage": "6d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 4,
+        "value": 10000,
+        "category": "heavy_weapons",
+        "clip": 10,
+        "attachment_slots": 0,
+        "description": "Exotic Heavy Sniper. .50 BMG."
+    },
+    {
+        "name": "Tsunami Arms Helix (Citrus Edition)",
+        "damage": "3d6",
+        "rof": "4",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 500,
+        "category": "handgun",
+        "clip": 25,
+        "attachment_slots": 0,
+        "description": "Exotic Heavy SMG. Autofire (4)."
+    },
+    {
+        "name": "Scatter Ratter",
+        "damage": "4d6",
+        "rof": "4",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 500,
+        "category": "handgun",
+        "clip": 20,
+        "attachment_slots": 0,
+        "description": "Exotic Heavy SMG. Autofire (Machine Pistol 4)."
+    },
+    {
+        "name": "Tsunami Arms Deathwind Railgun",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 4,
+        "value": 12000,
+        "category": "heavy_weapons",
+        "clip": 1,
+        "attachment_slots": 0,
+        "description": "Exotic Railgun. Ignores armor below SP12. Single shot."
+    },
+    {
+        "name": "Highland Defense Stickybomb Launcher",
+        "damage": "8d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 2000,
+        "category": "heavy_weapons",
+        "clip": 4,
+        "attachment_slots": 0,
+        "description": "Exotic Grenade Launcher. Fires Mini C9 sticky charges."
+    },
+    # Danger Gal Dossier
+    {
+        "name": "Sanroo Hello Cutie MicroCutie",
+        "damage": "3d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 1000,
+        "category": "handgun",
+        "clip": 10,
+        "description": "Excellent Quality Exotic Medium Pistol. Hypurrburst: Action to toggle; drains mag for 4d6 shot (min 4 rounds). No Aimed Shots. Purrs audibly."
+    },
+]
+
+# Solo of Fortune 2045 weapon attachments (DV17 Weaponstech to install)
+weapon_attachments = [
+    {
+        "name": "Ammunition Compatibility Internals",
+        "value": 100,
+        "description": "Internal modification allowing non-flamethrower ranged weapons to load any non-Basic Ammunition type.",
+        "eligible_categories": ["handgun", "shoulder_arms", "archery", "heavy_weapons"],
+        "requires_slot": False,
+        "install_dv": 17,
+        "effect_description": "Weapon can load any non-Basic Ammunition type.",
+    },
+    {
+        "name": "Reinforced String",
+        "value": 250,
+        "description": "Upgrades bow or crossbow draw. +1d6 damage (max 5d6).",
+        "eligible_categories": ["archery"],
+        "requires_slot": False,
+        "install_dv": 17,
+        "effect_description": "+1d6 damage, max 5d6.",
+    },
+    {
+        "name": "Sniper Rifle Rechamber",
+        "value": 300,
+        "description": "Rechamber sniper rifles for increased power. +1d6 damage (max 6d6).",
+        "eligible_categories": ["shoulder_arms"],
+        "requires_slot": False,
+        "install_dv": 17,
+        "effect_description": "+1d6 damage, max 6d6. Sniper rifles only.",
+    },
+    {
+        "name": "Compatibility Rail",
+        "value": 50,
+        "description": "Adds a scope-only attachment slot to exotic ranged weapons.",
+        "eligible_categories": ["handgun", "shoulder_arms"],
+        "requires_slot": False,
+        "slot_type": "scope",
+        "install_dv": 17,
+        "effect_description": "Adds 1 scope attachment slot.",
+    },
+    {
+        "name": "Range Table Modification",
+        "value": 100,
+        "description": "Modifies the weapon's range table for its category.",
+        "eligible_categories": ["handgun", "shoulder_arms", "archery", "heavy_weapons"],
+        "requires_slot": False,
+        "install_dv": 17,
+        "effect_description": "Changes range table (see Solo of Fortune 2045).",
+    },
+    {
+        "name": "Pistol Autosear",
+        "value": 100,
+        "description": "Adds autofire to pistols. Autofire (Machine Pistol 3 or 4).",
+        "eligible_categories": ["handgun"],
+        "requires_slot": False,
+        "install_dv": 17,
+        "effect_description": "Grants Autofire (Machine Pistol 3 or 4).",
+    },
+    {
+        "name": "Shotgun Automatic Control Group",
+        "value": 100,
+        "description": "Adds autofire for slugs/shells.",
+        "eligible_categories": ["shoulder_arms"],
+        "requires_slot": False,
+        "install_dv": 17,
+        "effect_description": "Autofire for shotgun slugs/shells.",
+    },
+    {
+        "name": "SMG Cyclic Internals",
+        "value": 100,
+        "description": "Upgrades Autofire (SMG 3) to (SMG 4) or (Machine Pistol 4).",
+        "eligible_categories": ["handgun"],
+        "requires_slot": False,
+        "install_dv": 17,
+        "effect_description": "Upgrades SMG autofire rate.",
+    },
 ]
 
     # Armor
@@ -409,7 +1455,99 @@ armors = [
         "locations": "Body, Head, Arms, Legs",
         "weight": 2,
         "value": 1000
-    }
+    },
+    # Black Chrome fashion and armor
+    {
+        "name": "Dirk Combat Jacket",
+        "sp": 11,
+        "ev": 0,
+        "locations": "Body",
+        "weight": 1,
+        "value": 500,
+        "description": "Light Armorjack with Leisurewear appearance. Two clips can be concealed without a Check."
+    },
+    {
+        "name": "Gibson Shock Armor",
+        "sp": 7,
+        "ev": 0,
+        "locations": "Body",
+        "weight": 1,
+        "value": 500,
+        "description": "Kevlar Body Armor. Action to shock grappler: DV15 Resist Torture/Drugs or grapple ends."
+    },
+    {
+        "name": "Gibson Tactical Smart Armor",
+        "sp": 12,
+        "ev": 2,
+        "locations": "Body, Head",
+        "weight": 2,
+        "value": 1000,
+        "description": "Medium Armorjack with built-in Smart Glasses. Worn on body and head."
+    },
+    {
+        "name": "Fire Brand Bunker Gear",
+        "sp": 15,
+        "ev": 4,
+        "locations": "Body, Head, Arms, Legs",
+        "weight": 3,
+        "value": 1000,
+        "description": "Flak Armor. Immune to fire. Built-in gas mask and 30min oxygen tank."
+    },
+    {
+        "name": "Laser Light Street Jacket",
+        "sp": 11,
+        "ev": 0,
+        "locations": "Body",
+        "weight": 1,
+        "value": 500,
+        "description": "Light Armorjack with Urban Flash appearance. Counts as 1 Light Tattoo for Style bonus."
+    },
+    {
+        "name": "SkidRow Trench",
+        "sp": 13,
+        "ev": 4,
+        "locations": "Body",
+        "weight": 2,
+        "value": 100,
+        "description": "Flak Body Armor with SP 13 instead of 15."
+    },
+    {
+        "name": "T&C Executive Armor",
+        "sp": 11,
+        "ev": 0,
+        "locations": "Body",
+        "weight": 1,
+        "value": 1000,
+        "description": "Light Armorjack with Businesswear appearance. Repairs 1 SP per day when no damage taken."
+    },
+    {
+        "name": "Street Viper Riding Suit",
+        "sp": 7,
+        "ev": 0,
+        "locations": "Body",
+        "weight": 1,
+        "value": 100,
+        "description": "Kevlar Body Armor with 2 built-in Medium Melee Weapons (elbow blades)."
+    },
+    {
+        "name": "MechaMan Motorcycle Helmet",
+        "sp": 15,
+        "ev": 4,
+        "locations": "Head",
+        "weight": 1,
+        "value": 5000,
+        "description": "Flak Head Armor with Smart Glasses (Chyron, Low Light/IR/UV)."
+    },
+    # Danger Gal Dossier
+    {
+        "name": "Scavenged Armor",
+        "sp": 7,
+        "ev": 0,
+        "locations": "Head, Body",
+        "weight": 1,
+        "value": 0,
+        "description": "Patchwork armor scavenged from the dead. SP 7 Head and Body. Common in Combat Zones."
+    },
 ]
     # Gear
 gears = [
@@ -756,6 +1894,328 @@ gears = [
         "weight": 0.5,
         "value": 20
     },
+    # Black Chrome gear and apps
+    {
+        "name": "Shower-in-a-Can",
+        "category": "Survival",
+        "description": "Biotechnica disinfectant and deodorizer. One use per can. Classic Clean or Fresh Pine.",
+        "weight": 0.5,
+        "value": 10
+    },
+    {
+        "name": "Drink Master 3000",
+        "category": "Electronics",
+        "description": "Rolling bar unit. Holds 32 fluids, dispenses 3000 drink combinations. 10 beverages before refill (100eb). Can dispense Smash.",
+        "weight": 2,
+        "value": 1000
+    },
+    {
+        "name": "Hydrosubsidium Universal Aqualung",
+        "category": "Survival",
+        "description": "Donut-shaped neck device. Breathe water within 10m of surface. Filters oxygen from seawater.",
+        "weight": 1,
+        "value": 5000
+    },
+    {
+        "name": "Jeeves Executive Garment Bag",
+        "category": "Clothing",
+        "description": "Repairs damaged Fashion or Armor. Time: Cheap 1hr, Costly 6hr, Premium 1 day, Expensive 1 week, V.Expensive 2 weeks.",
+        "weight": 1,
+        "value": 1000
+    },
+    {
+        "name": "Zetatech Porta-Printer",
+        "category": "Electronics",
+        "description": "Backpack 3D printer. Tech can use Upgrade/Fabrication Expertise anywhere with assembly tools.",
+        "weight": 2,
+        "value": 1000
+    },
+    {
+        "name": "ChipVault by SecSystems",
+        "category": "Electronics",
+        "description": "Holds 8 Chipware. EMP shielding. Biometric lock. DV17 Electronics/Security to bypass.",
+        "weight": 0.5,
+        "value": 100
+    },
+    {
+        "name": "Streetcase by SecSystems",
+        "category": "Electronics",
+        "description": "Briefcase with Heavy Pistol holster, laptop space, ChipVault, Smoke Grenade. Draw pistol without Action. Floats.",
+        "weight": 2,
+        "value": 500
+    },
+    {
+        "name": "RapiDeploy Sheath",
+        "category": "Tools",
+        "description": "Rapid deployment for pistols/light melee. +2 Conceal/Reveal Object. Wrist or back config. Repairable when destroyed.",
+        "weight": 0.5,
+        "value": 500
+    },
+    {
+        "name": "Everest VentureWare AirWell 50",
+        "category": "Survival",
+        "description": "Atmospheric water condenser. Produces 17oz per 5 hours. Solar powered.",
+        "weight": 1,
+        "value": 100
+    },
+    {
+        "name": "Everest VentureWare One Touch Habitat",
+        "category": "Survival",
+        "description": "Self-deploying tent. Protection from Exposure. Heating/AC. Deploy/undeploy as Action.",
+        "weight": 2,
+        "value": 100
+    },
+    {
+        "name": "Mr. Biscuit Multi-Food Processor",
+        "category": "Survival",
+        "description": "Converts organic material to nutritious wafers in 10 min. Feeds 10 without Lifestyle in Outskirts.",
+        "weight": 2,
+        "value": 500
+    },
+    {
+        "name": "WorldSat Aerial Sphere",
+        "category": "Electronics",
+        "description": "Helium balloon relay. 1hr setup. CitiNet access within 50 miles. 100m range to control unit.",
+        "weight": 1,
+        "value": 1000
+    },
+    {
+        "name": "KillStrom Banshee Microphone",
+        "category": "Music",
+        "description": "Wireless headset. +2 Play Instrument (Singing). 48hr runtime per 1hr charge.",
+        "weight": 0.5,
+        "value": 1000
+    },
+    {
+        "name": "KillStrom Sonic Boom Amp",
+        "category": "Music",
+        "description": "Action: DV15 Resist Torture/Drugs for everyone within 10m or Damaged Ear 1min. Requires outlet.",
+        "weight": 2,
+        "value": 1000
+    },
+    {
+        "name": "Laser Light Electric Guitar",
+        "category": "Music",
+        "description": "Laser fret display. +1 Play Instrument (Guitar). Counts as 1 Light Tattoo for Style.",
+        "weight": 2,
+        "value": 1000
+    },
+    {
+        "name": "Digital Gladiator App",
+        "category": "Electronics",
+        "description": "Segotari. Head-to-head virtual combat. Loser's Agent destroyed. Rank 4 Solo Gladiators. 20eb.",
+        "weight": 0,
+        "value": 20
+    },
+    {
+        "name": "4Tify App",
+        "category": "Electronics",
+        "description": "SecSystems. Scan cover 5min for +1d6 next damage vs it. Requires CitiNet. 100eb.",
+        "weight": 0,
+        "value": 100
+    },
+    {
+        "name": "NCPD Crime Database App",
+        "category": "Electronics",
+        "description": "Upload photos for crime records check. 1hr for results. Night City CitiNet only. 500eb.",
+        "weight": 0,
+        "value": 500
+    },
+    {
+        "name": "Ziggurat City Database App",
+        "category": "Electronics",
+        "description": "+1 Local Expert for one city. One city per purchase. 100eb.",
+        "weight": 0,
+        "value": 100
+    },
+    {
+        "name": "Trauma Team MedScan App",
+        "category": "Electronics",
+        "description": "Connects to remote specialist. 100eb: +1 First Aid/Paramedic 1hr. 500eb: +1 Medical Tech/Surgery 4hr. 20eb.",
+        "weight": 0,
+        "value": 20
+    },
+    # Edgerunners Mission Kit gear (2070s)
+    {
+        "name": "Immunoblockers",
+        "category": "Drugs",
+        "description": "Primary: Restore 2d6 Humanity for 1 month (cannot exceed therapy max). Secondary (DV21): Lose gain, -2 Checks 60sec, 4d6 HL if no 2 doses. 100eb/dose.",
+        "weight": 0.1,
+        "value": 100
+    },
+    {
+        "name": "Power Rebuild",
+        "category": "Weapon Attachments",
+        "description": "2 attachment slots. Transforms weapon to Power: +5 Critical Injury bonus damage, ricochet shots at -4.",
+        "weight": 0.5,
+        "value": 1000
+    },
+    {
+        "name": "Smart Rebuild",
+        "category": "Weapon Attachments",
+        "description": "2 attachment slots. Transforms to Smart Weapon. +1 Attack. Improved Smart Ammo compatible. Requires Interface Plug or Subdermal Grip.",
+        "weight": 0.5,
+        "value": 1000
+    },
+    {
+        "name": "Tech Rebuild",
+        "category": "Weapon Attachments",
+        "description": "2 attachment slots. Transforms to Tech Weapon. Charge (Move Action): fire through Thin Cover, half SP. No GL/RL.",
+        "weight": 0.5,
+        "value": 1000
+    },
+    {
+        "name": "Improved Smart Ammunition (10)",
+        "category": "Ammunition",
+        "description": "Smart Weapons only. Ignore darkness/smoke/fog penalties. Miss by 5 or less: retry with 14+1d10 vs same DV. Bullets, Slugs, Shells, Arrows.",
+        "weight": 0.5,
+        "value": 50
+    },
+    {
+        "name": "Improved Smart Grenade/Rocket",
+        "category": "Ammunition",
+        "description": "Smart Weapons only. One grenade or rocket. Same benefits as Improved Smart Ammo.",
+        "weight": 0.5,
+        "value": 500
+    },
+    # Interface RED Vol 2: Night City Weather gear
+    {
+        "name": "Cold-Weather Jacket Lining",
+        "category": "Clothing",
+        "description": "Insulated lining for existing jacket. Protects against Exposure (extreme cold).",
+        "weight": 0.5,
+        "value": 500
+    },
+    {
+        "name": "Hot-Weather Jacket Lining",
+        "category": "Clothing",
+        "description": "Wicking, vented lining for jacket. Protects against Exposure (extreme heat). Lowers Heat Wave armor penalty by 1.",
+        "weight": 0.5,
+        "value": 500
+    },
+    {
+        "name": "Militech Tactical Umbrella",
+        "category": "Tools",
+        "description": "Protects vs Acid/Blood Rain. Excellent Quality Exotic Heavy Melee + Poor Quality Exotic Heavy Pistol (2 rounds). Armed Executive line.",
+        "weight": 1,
+        "value": 1000
+    },
+    {
+        "name": "Umbrella",
+        "category": "Tools",
+        "description": "Negates Acid Rain armor ablation. +2 Resist Torture/Drugs vs Blood Rain. Hand holding umbrella cannot hold anything else.",
+        "weight": 0.5,
+        "value": 10
+    },
+    {
+        "name": "Waterproof Jacket Lining",
+        "category": "Clothing",
+        "description": "Treated lining for jacket. Negates Acid Rain ablation, +2 Resist Torture/Drugs vs Blood Rain. Not for submersion.",
+        "weight": 0.5,
+        "value": 500
+    },
+    # Interface RED Vol 3: Spinning Your Wheels
+    {
+        "name": "Inline Skates",
+        "category": "Sports",
+        "description": "Roller skates, four wheels in a line. +4 m/yds when using Run Action. Action to put on/off. Cyberleg options inaccessible while worn.",
+        "weight": 1,
+        "value": 50
+    },
+    {
+        "name": "Skateboard",
+        "category": "Sports",
+        "description": "Deck, trucks, four wheels. +4 m/yds Run on level/downward ground. Athletics for tricks.",
+        "weight": 1,
+        "value": 50
+    },
+    # Interface RED Vol 4: Hornet's Pharmacy
+    {
+        "name": "Berserker",
+        "category": "Drugs",
+        "description": "Combat drug. 10 min: no Bonus Damage from Criticals; Seriously/Mortally wounded penalties halved; Facedown penalties halved. Secondary (DV17): 2 HL, addicted (Base Death Save +1).",
+        "weight": 0.1,
+        "value": 100
+    },
+    {
+        "name": "Prime Time",
+        "category": "Drugs",
+        "description": "Combat drug. 4 hrs: 4d6 HL (returned after); COOL/WILL +2 (WILL doesn't increase HP). Secondary (DV17): 1 HL, addicted (COOL -2 unless on drug).",
+        "weight": 0.1,
+        "value": 50
+    },
+    {
+        "name": "Sixgun",
+        "category": "Drugs",
+        "description": "Netrunner drug. 4 hrs: MOVE/REF -2; +2 Speed Jacked In; Unsafe Jack Out = Safe; 1 HL per extra NET Action/turn. Secondary (DV17): addicted (-2 Speed unless on drug).",
+        "weight": 0.1,
+        "value": 100
+    },
+    {
+        "name": "Timewarp",
+        "category": "Drugs",
+        "description": "Stimulant. 1 min: +3 Initiative (or +3 if already in queue). Secondary (DV17): addicted (-2 Initiative unless on drug).",
+        "weight": 0.1,
+        "value": 100
+    },
+    {
+        "name": "Delaying Compound",
+        "category": "Tools",
+        "description": "Mix with Poison/Biotoxin: delay effects 1 min or 1 hr after target takes it.",
+        "weight": 0.1,
+        "value": 50
+    },
+    {
+        "name": "Distilling Compound",
+        "category": "Tools",
+        "description": "Mix with Poison/Biotoxin: +2 DV to Resist Torture/Drugs.",
+        "weight": 0.1,
+        "value": 100
+    },
+    {
+        "name": "Osmosis Compound",
+        "category": "Tools",
+        "description": "Mix with Poison/Biotoxin: enters through skin. Place on surface up to 2 sq ft. Lasts 1 hr. DV17 Perception to notice.",
+        "weight": 0.1,
+        "value": 50
+    },
+    # Interface RED Vol 5: Solo of Fortune 2045 - Explosives
+    {
+        "name": "C9 Charge",
+        "category": "Explosives",
+        "description": "Military-grade explosive. Solo of Fortune 2045.",
+        "weight": 0.5,
+        "value": 500
+    },
+    {
+        "name": "C9 Kill Switch",
+        "category": "Explosives",
+        "description": "C9 Charge with remote detonation. Solo of Fortune 2045.",
+        "weight": 0.5,
+        "value": 500
+    },
+    {
+        "name": "Mini C9 Charge",
+        "category": "Explosives",
+        "description": "Compact C9 for Stickybomb Launcher. Solo of Fortune 2045.",
+        "weight": 0.2,
+        "value": 500
+    },
+    # Danger Gal Dossier
+    {
+        "name": "Molotov Cocktail",
+        "category": "Explosives",
+        "description": "Incendiary grenade 5d6. If carrier takes penetrating damage, 50% each Molotov destroyed; destroyed one sets carrier Deadly on Fire and destroys all others carried.",
+        "weight": 0.5,
+        "value": 20
+    },
+    {
+        "name": "The Observer",
+        "category": "Electronics",
+        "description": "Flying quadcopter drone. 6 MOVE, 15 HP. Links to Agent. Standby/Auto/Direct Control. Records 1hr. Observation Camera. DV17 Electronics/Security to counter.",
+        "weight": 0.5,
+        "value": 1000
+    },
 ]
 #Cyberdecks (External)
 cyberdecks = [
@@ -908,35 +2368,54 @@ cyberdecks = [
 @transaction.atomic
 def initialize_weapons():
     from world.inventory.models import Weapon
-    
+
+    allowed_keys = {
+        'damage', 'rof', 'hands', 'concealable', 'weight', 'value',
+        'category', 'clip', 'description', 'attachment_slots', 'range_dvs'
+    }
     for weapon_data in weapons:
-        if not all(weapon_data.values()):
+        if not all(weapon_data.get(k) is not None for k in ('name', 'damage', 'rof', 'hands')):
             logger.warn(f"Incomplete weapon data found: {weapon_data}")
             continue
-        
+
+        defaults = {k: v for k, v in weapon_data.items() if k in allowed_keys}
         weapon, created = Weapon.objects.get_or_create(
             name=weapon_data['name'],
-            defaults={
-                'damage': weapon_data['damage'],
-                'rof': weapon_data['rof'],
-                'hands': weapon_data['hands'],
-                'concealable': weapon_data['concealable'],
-                'weight': weapon_data['weight'],
-                'value': weapon_data['value']
-            }
+            defaults=defaults
         )
         if created:
             logger.info(f"Created weapon: {weapon.name}")
         else:
-            # Update existing weapon if data has changed
             updated = False
-            for key, value in weapon_data.items():
-                if getattr(weapon, key) != value:
-                    setattr(weapon, key, value)
+            for key in allowed_keys:
+                if key in weapon_data and getattr(weapon, key, None) != weapon_data[key]:
+                    setattr(weapon, key, weapon_data[key])
                     updated = True
             if updated:
                 weapon.save()
                 logger.info(f"Updated weapon: {weapon.name}")
+
+
+@transaction.atomic
+def initialize_weapon_attachments():
+    from world.inventory.models import WeaponAttachment
+
+    for data in weapon_attachments:
+        att, created = WeaponAttachment.objects.update_or_create(
+            name=data['name'],
+            defaults={
+                'value': data.get('value', 0),
+                'description': data.get('description', ''),
+                'eligible_categories': data.get('eligible_categories', []),
+                'requires_slot': data.get('requires_slot', False),
+                'slot_type': data.get('slot_type', ''),
+                'install_dv': data.get('install_dv', 17),
+                'install_skill': data.get('install_skill', 'Weaponstech'),
+                'effect_description': data.get('effect_description', ''),
+            }
+        )
+        if created:
+            logger.info(f"Created weapon attachment: {att.name}")
 
 @transaction.atomic
 def initialize_armor():
@@ -1030,7 +2509,46 @@ def initialize_cyberdecks():
             if updated:
                 cyberdeck.save()
                 logger.info(f"Updated gear: {cyberdeck.name}")
-        print(f"Initilized {len(cyberdeck)} cyberdeck types.")
+        print(f"Initialized {len(cyberdecks)} cyberdeck types.")
+
+
+@transaction.atomic
+def initialize_vehicles():
+    from world.inventory.models import Vehicle
+
+    for vehicle_data in vehicles:
+        if not all(k in vehicle_data and vehicle_data[k] is not None for k in ('name', 'value')):
+            logger.warn(f"Incomplete vehicle data found: {vehicle_data}")
+            continue
+
+        vehicle, created = Vehicle.objects.get_or_create(
+            name=vehicle_data['name'],
+            defaults={
+                'description': vehicle_data.get('description', ''),
+                'category': vehicle_data.get('category', 'land'),
+                'sdp': vehicle_data.get('sdp', 35),
+                'seats': vehicle_data.get('seats', 2),
+                'speed_combat': vehicle_data.get('speed_combat', 20),
+                'speed_narrative': vehicle_data.get('speed_narrative', ''),
+                'value': vehicle_data['value'],
+            }
+        )
+        if created:
+            logger.info(f"Created vehicle: {vehicle.name}")
+        else:
+            updated = False
+            for key, value in vehicle_data.items():
+                if key == 'value' and hasattr(vehicle, 'value'):
+                    if vehicle.value != value:
+                        vehicle.value = value
+                        updated = True
+                elif hasattr(vehicle, key) and getattr(vehicle, key) != value:
+                    setattr(vehicle, key, value)
+                    updated = True
+            if updated:
+                vehicle.save()
+                logger.info(f"Updated vehicle: {vehicle.name}")
+    print(f"Initialized {len(vehicles)} vehicle types.")
 
 
 @transaction.atomic
@@ -1071,6 +2589,24 @@ def populate_cyberdecks():
         Cyberdeck.objects.get_or_create(**cyberdeck_data)
     print(f"Populated {len(cyberdecks)} cyberdecks.")
 
+
+def populate_vehicles():
+    for vehicle_data in vehicles:
+        Vehicle.objects.get_or_create(
+            name=vehicle_data["name"],
+            defaults={
+                "description": vehicle_data.get("description", ""),
+                "category": vehicle_data.get("category", "land"),
+                "sdp": vehicle_data.get("sdp", 35),
+                "seats": vehicle_data.get("seats", 2),
+                "speed_combat": vehicle_data.get("speed_combat", 20),
+                "speed_narrative": vehicle_data.get("speed_narrative", ""),
+                "value": vehicle_data["value"],
+            },
+        )
+    print(f"Populated {len(vehicles)} vehicles.")
+
+
 def populate_ammunition():
     for ammo_data in ammunition:
         Ammunition.objects.get_or_create(**ammo_data)
@@ -1083,4 +2619,5 @@ def populate_all_equipment():
     populate_cyberware()
     populate_ammunition()
     populate_cyberdecks()
+    populate_vehicles()
     print("All equipment populated successfully.")

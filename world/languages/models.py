@@ -16,7 +16,7 @@ class CharacterLanguage(models.Model):
     character_sheet = models.ForeignKey(
         'cyberpunk_sheets.CharacterSheet',
         on_delete=models.CASCADE,
-        related_name='character_languages',
+        related_name='sheet_language_proficiencies',  # Unique to avoid clash with cyberpunk_sheets if duplicate exists
         null=True,  # Keep it nullable for now
         blank=True  # Allow blank in forms
     )
@@ -24,11 +24,15 @@ class CharacterLanguage(models.Model):
     character = models.ForeignKey(
         ObjectDB,
         on_delete=models.CASCADE,
-        related_name='languages',
+        related_name='character_language_proficiencies',  # Unique to avoid clash with cyberpunk_sheets if duplicate exists
         null=True,
         blank=True
     )
-    language = models.ForeignKey(Language, on_delete=models.CASCADE)
+    language = models.ForeignKey(
+        Language,
+        on_delete=models.CASCADE,
+        related_name='character_language_entries'  # Unique to avoid clash with cyberpunk_sheets if duplicate exists
+    )
     level = models.IntegerField(default=1)
 
     class Meta:
@@ -37,10 +41,9 @@ class CharacterLanguage(models.Model):
             ('character_sheet', 'language'),
             ('character', 'language')
         ]
-        # Make sure at least one character field is filled
         constraints = [
             models.CheckConstraint(
-                check=models.Q(character__isnull=False) | models.Q(character_sheet__isnull=False),
+                condition=models.Q(character__isnull=False) | models.Q(character_sheet__isnull=False),
                 name='character_language_has_character'
             )
         ]

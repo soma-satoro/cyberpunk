@@ -27,6 +27,9 @@ put secret game- or server-specific settings in secret_settings.py.
 # Use the defaults from Evennia unless explicitly overridden
 from evennia.settings_default import *
 import os
+
+# File-based help entries (world/help_entries.py)
+FILE_HELP_ENTRY_MODULES = ["world.help_entries"]
 from evennia.contrib.base_systems import color_markups
 
 ######################################################################
@@ -69,10 +72,13 @@ INSTALLED_APPS += [  # type: ignore
     'world.factions',
     'world.mail',
     'world.jobs',
+    'world.mission_board',
     'world.plots',
     'world.hangouts',
     'world.languages',
-    'world.netrunning'
+    'world.netrunning',
+    'world.mystery',
+    'world.elflines.apps.ElflinesConfig',
 ]
 CMDSET_CHARACTER = "commands.default_cmdsets.CharacterCmdSet"
 BASE_ROOM_TYPECLASS = "typeclasses.rooms.Room"
@@ -103,7 +109,7 @@ WEBCLIENT_RECONNECT_DELAY = 2000 # This is the delay in milliseconds between rec
 WEBCLIENT_KEEPALIVE = True # This is a boolean that determines whether the web client will send keepalive messages to the server.
 
 # Security settings
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'nightcitymux.com', 'www.nightcitymux.com']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '143.198.128.164']
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB

@@ -1,0 +1,22 @@
+"""Re-export lifepath from world.lifepath for compatibility with newcommands."""
+from world.lifepath import (
+    CULTURAL_ORIGINS,
+    PERSONALITY_TRAITS,
+    CLOTHING_STYLES,
+    HAIRSTYLES,
+    AFFECTATIONS,
+    MOTIVATIONS,
+    LIFE_GOALS,
+    FAMILY_BACKGROUND,
+    CHILDHOOD_ENVIRONMENT,
+    FAMILY_CRISIS,
+    FRIEND_RELATIONSHIPS,
+    ENEMY_CAUSES,
+    ENEMY_TYPES,
+    ENEMY_THREATS,
+    ROMANTIC_COMPLICATIONS,
+    ROLE_LIFEPATH,
+    format_lifepath,
+    roll_table,
+    generate_lifepath,
+)

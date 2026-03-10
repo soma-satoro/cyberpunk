@@ -2,12 +2,12 @@ from evennia import Command
 from evennia.commands.default.muxcommand import MuxCommand
 from django.utils import timezone
 from datetime import timedelta
-from world.inventory.models import Weapon, Armor, Gear, Ammunition, Cyberdeck, Inventory
+from world.inventory.models import Weapon, Armor, Gear, Vehicle as VehicleModel, Ammunition, Cyberdeck, Inventory, WeaponAttachment
 from world.cyberware.models import Cyberware
-from world.equipment_data import populate_weapons, populate_armor, populate_gear, populate_all_equipment
+from world.equipment_data import populate_weapons, populate_armor, populate_gear, populate_vehicles, populate_all_equipment, initialize_vehicles
 from world.cyberpunk_sheets.models import CharacterSheet
 from world.utils.ansi_utils import wrap_ansi
-from world.utils.formatting import header, footer, divider, format_stat
+from world.utils.formatting import header, footer, divider, section_header
 from world.cyberware.utils import populate_cyberware
 from evennia.utils.ansi import ANSIString
 from evennia.utils import evtable
@@ -33,7 +33,7 @@ class CmdAddWeapon(Command):
             return
 
         player_name, weapon_name = self.args.split(None, 1)
-        player = self.caller.search(player_name)
+        player = self.caller.search(player_name, global_search=True)
         if not player:
             return
 
@@ -74,7 +74,7 @@ class CmdAddArmor(Command):
             return
 
         player_name, armor_name = self.args.split(None, 1)
-        player = self.caller.search(player_name)
+        player = self.caller.search(player_name, global_search=True)
         if not player:
             return
 
@@ -115,7 +115,7 @@ class CmdAddGear(Command):
             return
 
         player_name, gear_name = self.args.split(None, 1)
-        player = self.caller.search(player_name)
+        player = self.caller.search(player_name, global_search=True)
         if not player:
             return
 
@@ -135,6 +135,98 @@ class CmdAddGear(Command):
         inventory.gear.add(gear)
         self.caller.msg(f"Added {gear.name} to {player.name}'s inventory.")
         player.msg(f"A {gear.name} has been added to your inventory.")
+
+class CmdAddVehicle(Command):
+    """
+    Add a vehicle to a player's inventory.
+
+    Usage:
+      addvehicle <player> <vehicle_name>
+
+    Example:
+      addvehicle Bob Roadbike
+      addvehicle Alice "AV-4 Multipurpose Aerodyne"
+    """
+    key = "addvehicle"
+    locks = "cmd:perm(Admin)"
+    help_category = "Admin"
+
+    def func(self):
+        if not self.args or len(self.args.split()) < 2:
+            self.caller.msg("Usage: addvehicle <player> <vehicle_name>")
+            return
+
+        player_name, vehicle_name = self.args.split(None, 1)
+        vehicle_name = vehicle_name.strip('"')
+
+        player = self.caller.search(player_name, global_search=True)
+        if not player:
+            return
+
+        try:
+            vehicle_model = VehicleModel.objects.get(name__iexact=vehicle_name)
+        except VehicleModel.DoesNotExist:
+            self.caller.msg(f"Vehicle '{vehicle_name}' does not exist. Use 'equipdb vehicles' to list available vehicles.")
+            return
+
+        # Use same inventory lookup as +inventory (get_or_create_for_character prefers character_sheet)
+        try:
+            inventory, _ = Inventory.get_or_create_for_character(player)
+        except (ValueError, AttributeError):
+            self.caller.msg(f"{player.name} doesn't have a character sheet.")
+            return
+
+        if inventory.vehicles.filter(id=vehicle_model.id).exists():
+            self.caller.msg(f"{player.name} already has a {vehicle_model.name}.")
+            return
+
+        inventory.vehicles.add(vehicle_model)
+        self.caller.msg(f"Added {vehicle_model.name} to {player.name}'s inventory.")
+        player.msg(f"A {vehicle_model.name} has been added to your inventory.")
+
+class CmdRemoveVehicle(Command):
+    """
+    Remove a vehicle from a player's inventory.
+
+    Usage:
+      removevehicle <player> <vehicle_name>
+
+    Example:
+      removevehicle Bob Roadbike
+      removevehicle Alice "Cabin Cruiser"
+    """
+    key = "removevehicle"
+    locks = "cmd:perm(Admin)"
+    help_category = "Admin"
+
+    def func(self):
+        if not self.args or len(self.args.split()) < 2:
+            self.caller.msg("Usage: removevehicle <player> <vehicle_name>")
+            return
+
+        player_name, vehicle_name = self.args.split(None, 1)
+        vehicle_name = vehicle_name.strip('"')
+
+        player = self.caller.search(player_name, global_search=True)
+        if not player:
+            return
+
+        # Use same inventory lookup as +inventory
+        try:
+            inventory, _ = Inventory.get_or_create_for_character(player)
+        except (ValueError, AttributeError):
+            self.caller.msg(f"{player.name} doesn't have a character sheet.")
+            return
+
+        try:
+            vehicle_model = inventory.vehicles.get(name__iexact=vehicle_name)
+        except VehicleModel.DoesNotExist:
+            self.caller.msg(f"Vehicle '{vehicle_name}' not found in {player.name}'s inventory.")
+            return
+
+        inventory.vehicles.remove(vehicle_model)
+        self.caller.msg(f"Removed {vehicle_model.name} from {player.name}'s inventory.")
+        player.msg(f"Your {vehicle_model.name} has been removed from your inventory.")
 
 class CmdPopulateWeapons(Command):
     """
@@ -189,6 +281,25 @@ class CmdPopulateGear(Command):
     def func(self):
         populate_gear()
         self.caller.msg("Gear database populated successfully.")
+
+class CmdPopulateVehicles(Command):
+    """
+    Populate the database with vehicles from Cyberpunk RED.
+
+    Usage:
+      populate_vehicles
+
+    This command initializes all vehicle types (land, sea, air) from the
+    core rulebook. Run once to set up the vehicle database.
+    """
+
+    key = "populate_vehicles"
+    locks = "cmd:perm(Admin)"
+    help_category = "Admin"
+
+    def func(self):
+        populate_vehicles()
+        self.caller.msg("Vehicle database populated successfully.")
 
 class CmdPopulateAllEquipment(Command):
     """
@@ -281,11 +392,12 @@ class CmdViewEquipment(MuxCommand):
     View all equipment in the database.
 
     Usage:
-      equipment [type]
+      equipdb [type [category]]
+      equipdb weapons [handgun|shoulder_arms|archery|heavy_weapons|melee|brawling]
+      equipdb gear [Electronics|Tools|Medical|Drugs|Clothing|...]
+      equipdb vehicles [land|sea|air]
 
-    Options:
-      type - Optional. Can be 'weapons', 'armor', 'gear', 'ammo', or 'cyberdecks'.
-             If not specified, shows all equipment.
+    Types: weapons, armor, gear, ammo, cyberdecks, vehicles, attachments
     """
 
     key = "equipdb"
@@ -294,114 +406,126 @@ class CmdViewEquipment(MuxCommand):
     help_category = "Inventory"
 
     def func(self):
-        valid_types = ['weapons', 'armor', 'gear', 'ammo', 'cyberdecks']
-        if self.args and self.args.strip().lower() not in valid_types:
-            self.caller.msg(f"Invalid equipment type. Use one of: {', '.join(valid_types)}.")
+        valid_types = ['weapons', 'armor', 'gear', 'ammo', 'cyberdecks', 'vehicles', 'attachments']
+        parts = self.args.strip().lower().split(None, 1) if self.args.strip() else []
+        equip_type = parts[0] if parts else None
+        subcategory = parts[1] if len(parts) > 1 else None
+
+        if equip_type and equip_type not in valid_types:
+            self.caller.msg(f"Invalid type. Use one of: {', '.join(valid_types)}.")
             return
 
         output = []
-
-        if not self.args:
-            for equip_type in valid_types:
-                output.append(getattr(self, f"display_{equip_type}")())
+        if not equip_type:
+            output.append(header("Equipment Database"))
+            for t in valid_types:
+                output.append(getattr(self, f"display_{t}")(None))
+            output.append(footer())
         else:
-            output.append(getattr(self, f"display_{self.args.strip().lower()}")())
+            output.append(header(f"Equipment: {equip_type.title()}"))
+            output.append(getattr(self, f"display_{equip_type}")(subcategory))
+            output.append(footer())
 
         self.caller.msg("\n".join(filter(None, output)))
 
-    def display_weapons(self):
-        weapons = Weapon.objects.all()
+    def display_weapons(self, subcategory=None):
+        qs = Weapon.objects.all().order_by('category', 'name')
+        if subcategory:
+            qs = qs.filter(category__iexact=subcategory)
+        weapons = list(qs)
         if not weapons:
-            return divider("Weapons", width=80, fillchar="|m-|n") + "\nNo weapons found in the database.\n"
-        
-        output = [divider("Weapons", width=80, fillchar="|m-|n")]
-        for weapon in weapons:
-            name_damage = f"|c{weapon.name:<25}|n |gDamage:|n {weapon.damage:<10}"
-            rof_hands = f"|gROF:|n {weapon.rof:<5} |gHands:|n {weapon.hands}"
-            output.append(f"{name_damage}{rof_hands:>40}")
-            concealable = "Yes" if weapon.concealable else "No"
-            weight_value = f"|gWeight:|n {weapon.weight:<5} |gValue:|n |y{weapon.value:>4} eb|n"
-            output.append(f"  |gConcealable:|n {concealable:<5}{weight_value:>58}")
-        output.append(divider("", width=80, fillchar="|m-|n"))
-        return "\n".join(output) + "\n"
+            return section_header("Weapons", width=78) + "\nNo weapons found.\n"
+        out = [section_header("Weapons", width=78)]
+        for w in weapons:
+            out.append(f"|c{w.name:<28}|n |gDamage:|n {w.damage:<8} |gROF:|n {w.rof:<4} |gHands:|n {w.hands} |gValue:|n |y{w.value} eb|n")
+            out.append(f"  |gCategory:|n {w.category:<14} |gConceal:|n {'Yes' if w.concealable else 'No'} |gWeight:|n {w.weight}")
+        out.append(divider("", width=78))
+        return "\n".join(out) + "\n"
 
-    def display_armor(self):
-        armors = Armor.objects.all()
+    def display_armor(self, subcategory=None):
+        armors = list(Armor.objects.all().order_by('name'))
         if not armors:
-            return divider("Armor", width=80, fillchar="|m-|n") + "\nNo armor found in the database.\n"
-        
-        output = [divider("Armor", width=80, fillchar="|m-|n")]
-        for armor in armors:
-            name_sp_ev = f"|c{armor.name:<25}|n |gSP:|n {armor.sp:<5} |gEV:|n {armor.ev:<5}"
-            weight_value = f"|gWeight:|n {armor.weight:<5} |gValue:|n |y{armor.value:>4} eb|n"
-            output.append(f"{name_sp_ev}{weight_value:>35}")
-            output.append(f"  |gLocations:|n {armor.locations}")
-        output.append(divider("", width=80, fillchar="|m-|n"))
-        return "\n".join(output) + "\n"
+            return section_header("Armor", width=78) + "\nNo armor found.\n"
+        out = [section_header("Armor", width=78)]
+        for a in armors:
+            out.append(f"|c{a.name:<28}|n |gSP:|n {a.sp:<3} |gEV:|n {a.ev:<3} |gValue:|n |y{a.value} eb|n |gLocations:|n {a.locations}")
+        out.append(divider("", width=78))
+        return "\n".join(out) + "\n"
 
-    def display_gear(self):
-        gears = Gear.objects.all()
+    def display_gear(self, subcategory=None):
+        qs = Gear.objects.all().order_by('category', 'name')
+        if subcategory:
+            qs = qs.filter(category__iexact=subcategory)
+        gears = list(qs)
         if not gears:
-            return divider("Gear", width=80, fillchar="|m-|n") + "\nNo gear found in the database.\n"
-        
-        output = [divider("Gear", width=80, fillchar="|m-|n")]
-        for gear in gears:
-            name_cat = f"|c{gear.name:<25}|n |gCategory:|n {gear.category:<15}"
-            weight_value = f"|gWeight:|n {gear.weight:<5} |gValue:|n |y{gear.value:>4} eb|n"
-            output.append(f"{name_cat}{weight_value:>35}")
-            
-            description = wrap_ansi(gear.description, 76)  # Wrap to 76 to account for initial spaces
-            if len(ANSIString(description)) > 76:
-                description = description[:73] + "..."
-            output.append(f"  |gDescription:|n {description}")
-        
-        output.append(divider("", width=80, fillchar="|m-|n"))
-        return "\n".join(output) + "\n"
+            return section_header("Gear", width=78) + "\nNo gear found.\n"
+        out = [section_header("Gear", width=78)]
+        for g in gears:
+            out.append(f"|c{g.name:<28}|n |gCategory:|n {g.category:<14} |gValue:|n |y{g.value} eb|n")
+            desc = wrap_ansi(g.description, 74) if g.description else "—"
+            out.append(f"  {desc}")
+        out.append(divider("", width=78))
+        return "\n".join(out) + "\n"
 
-    def display_ammo(self):
-        ammos = Ammunition.objects.all()
+    def display_ammo(self, subcategory=None):
+        ammos = list(Ammunition.objects.all().order_by('ammo_type', 'name'))
         if not ammos:
-            return divider("Ammunition", width=80, fillchar="|m-|n") + "\nNo ammunition found in the database.\n"
-        
-        output = [divider("Ammunition", width=80, fillchar="|m-|n")]
-        for ammo in ammos:
-            name_type = f"|c{ammo.name:<25}|n |gType:|n {ammo.ammo_type:<15}"
-            weapon_type = f"|gWeapon Type:|n {ammo.weapon_type}"
-            output.append(f"{name_type}{weapon_type:>35}")
-            damage_ap = f"|gDamage Mod:|n {ammo.damage_modifier:<5} |gAP:|n {ammo.armor_piercing:<5}"
-            cost = f"|gCost:|n |y{ammo.cost:>4} eb|n"
-            output.append(f"  {damage_ap}{cost:>53}")
-        output.append(divider("", width=80, fillchar="|m-|n"))
-        return "\n".join(output) + "\n"
+            return section_header("Ammunition", width=78) + "\nNo ammunition found.\n"
+        out = [section_header("Ammunition", width=78)]
+        for a in ammos:
+            out.append(f"|c{a.name:<28}|n |gType:|n {a.ammo_type:<16} |gCost:|n |y{a.cost} eb|n")
+        out.append(divider("", width=78))
+        return "\n".join(out) + "\n"
 
-    def display_cyberdecks(self):
-        cyberdecks = Cyberdeck.objects.all()
-        if not cyberdecks:
-            return divider("Cyberdecks", width=80, fillchar="|m-|n") + "\nNo cyberdecks found in the database.\n"
-        
-        output = [divider("Cyberdecks", width=80, fillchar="|m-|n")]
-        for deck in cyberdecks:
-            output.append(f"|c{deck.name:<80}|n")
-            slots = f"|gHardware Slots:|n {deck.hardware_slots:<5} |gProgram Slots:|n {deck.program_slots:<5} |gAny Slots:|n {deck.any_slots:<5}"
-            value = f"|gValue:|n |y{deck.value:>4} eb|n"
-            output.append(f"  {slots}{value:>27}")
-        output.append(divider("", width=80, fillchar="|m-|n"))
-        return "\n".join(output) + "\n"
+    def display_cyberdecks(self, subcategory=None):
+        decks = list(Cyberdeck.objects.all().order_by('name'))
+        if not decks:
+            return section_header("Cyberdecks", width=78) + "\nNo cyberdecks found.\n"
+        out = [section_header("Cyberdecks", width=78)]
+        for d in decks:
+            out.append(f"|c{d.name:<28}|n |gHW:|n {d.hardware_slots} |gProg:|n {d.program_slots} |gAny:|n {d.any_slots} |gValue:|n |y{d.value} eb|n")
+        out.append(divider("", width=78))
+        return "\n".join(out) + "\n"
+
+    def display_vehicles(self, subcategory=None):
+        qs = VehicleModel.objects.all().order_by('category', 'name')
+        if subcategory:
+            qs = qs.filter(category__iexact=subcategory)
+        vehicles = list(qs)
+        if not vehicles:
+            return section_header("Vehicles", width=78) + "\nNo vehicles found.\n"
+        out = [section_header("Vehicles", width=78)]
+        for v in vehicles:
+            out.append(f"|c{v.name:<28}|n |gCategory:|n {v.category:<8} |gSDP:|n {v.sdp} |gSeats:|n {v.seats} |gValue:|n |y{v.value} eb|n")
+        out.append(divider("", width=78))
+        return "\n".join(out) + "\n"
+
+    def display_attachments(self, subcategory=None):
+        atts = list(WeaponAttachment.objects.all().order_by('name'))
+        if not atts:
+            return section_header("Weapon Attachments", width=78) + "\nNo attachments found.\n"
+        out = [section_header("Weapon Attachments", width=78)]
+        for a in atts:
+            out.append(f"|c{a.name:<28}|n |gValue:|n |y{a.value} eb|n DV{a.install_dv} {a.install_skill}")
+            out.append(f"  {a.effect_description or a.description or '—'}")
+        out.append(divider("", width=78))
+        return "\n".join(out) + "\n"
 
 class CmdRemoveEquipment(Command):
     """
-    Remove a weapon, armor, or gear from a player's inventory.
+    Remove a weapon, armor, gear, or vehicle from a player's inventory.
 
     Usage:
       removeequip <player> <equipment_type> <equipment_name>
 
     Equipment types:
-      weapon, armor, gear
+      weapon, armor, gear, vehicle
 
     Examples:
       removeequip Bob weapon "Medium Pistol"
       removeequip Alice armor "Leather Jacket"
       removeequip Charlie gear "Agent"
+      removeequip Bob vehicle Roadbike
     """
     key = "removeequip"
     aliases = ["remove_equipment", "remequip"]
@@ -414,13 +538,13 @@ class CmdRemoveEquipment(Command):
             return
 
         player_name, equipment_type, equipment_name = self.args.split(None, 2)
-        player = self.caller.search(player_name)
+        player = self.caller.search(player_name, global_search=True)
         if not player:
             return
 
         equipment_type = equipment_type.lower()
-        if equipment_type not in ['weapon', 'armor', 'gear']:
-            self.caller.msg("Invalid equipment type. Use 'weapon', 'armor', or 'gear'.")
+        if equipment_type not in ['weapon', 'armor', 'gear', 'vehicle']:
+            self.caller.msg("Invalid equipment type. Use 'weapon', 'armor', 'gear', or 'vehicle'.")
             return
 
         try:
@@ -429,7 +553,7 @@ class CmdRemoveEquipment(Command):
             self.caller.msg(f"{player.name} doesn't have a character sheet.")
             return
 
-        inventory, created = Inventory.objects.get_or_create(character=character_sheet)
+        inventory, created = Inventory.get_or_create_for_character(player)
 
         if equipment_type == 'weapon':
             self.remove_weapon(inventory, equipment_name, player)
@@ -437,6 +561,8 @@ class CmdRemoveEquipment(Command):
             self.remove_armor(inventory, equipment_name, player)
         elif equipment_type == 'gear':
             self.remove_gear(inventory, equipment_name, player)
+        elif equipment_type == 'vehicle':
+            self.remove_vehicle(inventory, equipment_name, player)
 
     def remove_weapon(self, inventory, weapon_name, player):
         try:
@@ -464,3 +590,15 @@ class CmdRemoveEquipment(Command):
             player.msg(f"A {gear.name} has been removed from your inventory.")
         except Gear.DoesNotExist:
             self.caller.msg(f"Gear '{gear_name}' not found in {player.name}'s inventory.")
+
+    def remove_vehicle(self, inventory, vehicle_name, player):
+        """Remove vehicle from inventory."""
+        try:
+            vehicle_model = inventory.vehicles.get(name__iexact=vehicle_name.strip('"'))
+        except VehicleModel.DoesNotExist:
+            self.caller.msg(f"Vehicle '{vehicle_name}' not found in {player.name}'s inventory.")
+            return
+
+        inventory.vehicles.remove(vehicle_model)
+        self.caller.msg(f"Removed {vehicle_model.name} from {player.name}'s inventory.")
+        player.msg(f"Your {vehicle_model.name} has been removed from your inventory.")

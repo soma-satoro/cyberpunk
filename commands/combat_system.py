@@ -2,6 +2,7 @@ import random
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils.evtable import EvTable
 from world.cyberpunk_sheets.models import CharacterSheet
+from world.utils.character_utils import is_character_approved
 from world.inventory.models import Weapon, Armor, Inventory, Ammunition, AmmoType
 from enum import Enum
 
@@ -484,6 +485,9 @@ class CmdCombat(MuxCommand):
     help_category = "Combat"
 
     def func(self):
+        if not is_character_approved(self.caller):
+            self.caller.msg("You must be approved by staff before using the combat system.")
+            return
         if not self.caller.ndb.combat_handler:
             self.caller.msg("You are not in combat.")
             return

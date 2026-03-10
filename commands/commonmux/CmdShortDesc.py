@@ -47,7 +47,7 @@ class CmdShortDesc(MuxCommand):
                     return
 
                 # Find the target character
-                target = caller.search(self.target_name)
+                target = caller.search(self.target_name, global_search=True)
                 if not target:
                     return
 

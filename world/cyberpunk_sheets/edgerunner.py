@@ -1,6 +1,7 @@
 import random, logging
 import traceback
 from world.cyberpunk_constants import ROLES, STATS, ROLE_SKILLS, ROLE_SKILL_NAME_MAP, EQUIPMENT, ROLE_STAT_TABLES, ROLE_CYBERWARE
+DOUBLE_COST_SKILLS = ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
 from world.cyberpunk_constants import LANGUAGES as CYBERPUNK_LANGUAGES
 from world.inventory.models import Inventory, Weapon, Armor, Gear, CyberwareInstance, Ammunition, AmmoType
 from world.equipment_data import weapons, armors, gears, ammunition
@@ -11,6 +12,7 @@ from world.cyberware.utils import calculate_humanity_loss
 from evennia.utils import logger
 from django.core.exceptions import MultipleObjectsReturned
 from world.cyberpunk_sheets.services import CharacterMoneyService
+from typeclasses.npcs import is_npc
 
 logger = logging.getLogger('cyberpunk.chargen')
 
@@ -50,25 +52,27 @@ class EdgerunnerChargen:
                     cls.mirror_sheet_to_typeclass(sheet, sheet.character)
             
             logger.info(f"Edgerunner chargen completed for {full_name}")
-            
-            # Add money to the character
+
+            # Add leftover eurodollars (2550 starting - cost of assigned gear/cyberware)
+            package_cost = cls.calculate_edgerunner_package_cost(role)
+            remaining_eurodollars = max(0, 2550 - package_cost)
+            CharacterMoneyService.add_money(character, remaining_eurodollars)
+
             if hasattr(character, 'db'):
-                CharacterMoneyService.add_money(character, 500)
                 remaining_stat_points = cls.calculate_remaining_stat_points_typeclass(character)
                 remaining_skill_points = cls.calculate_remaining_skill_points_typeclass(character, role)
             else:
-                CharacterMoneyService.add_money(character, 500)
                 remaining_stat_points = cls.calculate_remaining_stat_points(character)
                 remaining_skill_points = cls.calculate_remaining_skill_points(character, role)
-            
-            logger.info(f"Added 500 Eurodollars to character {full_name}")
-            
+
+            logger.info(f"Added {remaining_eurodollars} Eurodollars to character {full_name}")
+
             # Prepare the final message
             final_message = (
                 f"Character created using the Edgerunner method for role: {role}.\n"
                 f"You have {remaining_stat_points} stat points and {remaining_skill_points} skill points left to allocate.\n"
-                f"500 Eurodollars have been added to your account and default inventory has been set.\n"
-                f"Use 'sheet' to view your full character details, 'inv' to view your inventory"
+                f"{remaining_eurodollars} Eurodollars have been added to your account (2550 - {package_cost} spent on gear and cyberware).\n"
+                f"Use 'sheet' to view your full character details, 'inv' to view your inventory "
                 f"and 'inv/balance' to check your money."
             )
             
@@ -192,13 +196,64 @@ class EdgerunnerChargen:
 
     @classmethod
     def calculate_remaining_skill_points_typeclass(cls, character, role):
-        """Calculate remaining skill points for a typeclass character"""
+        """Calculate remaining skill points for a typeclass character (role skills only, with double-cost)."""
         role_skills = ROLE_SKILLS.get(role, {})
-        if hasattr(character.db, 'skills'):
-            total_skills = sum([character.db.skills.get(skill, 0) for skill in role_skills])
-        else:
-            total_skills = 0
-        return max(0, 86 - total_skills)
+        skills_dict = character.db.skills or {}
+        total = 0
+        for orig_skill in role_skills:
+            mapped = ROLE_SKILL_NAME_MAP.get(orig_skill, orig_skill).lower().replace(' ', '_')
+            val = skills_dict.get(mapped, 0)
+            total += val * (2 if mapped in DOUBLE_COST_SKILLS else 1)
+        langs = getattr(character.db, 'languages', {}) or {}
+        lang_pts = sum(v for v in langs.values() if v)
+        return max(0, 86 - total - lang_pts)
+
+    @classmethod
+    def spend_remaining_points_for_npc(cls, character, role):
+        """Randomly spend remaining stat and skill points. For NPCs only (minor/major) - never for player characters."""
+        if not is_npc(character):
+            return
+        # Spend stat points: 62 total, stats cap at 10
+        total_stats = sum([getattr(character.db, s, 0) for s in STATS])
+        stat_points = max(0, 62 - total_stats)
+        eligible_stats = [s for s in STATS if getattr(character.db, s, 0) < 10]
+        for _ in range(stat_points):
+            if not eligible_stats:
+                break
+            stat = random.choice(eligible_stats)
+            current = getattr(character.db, stat, 0)
+            setattr(character.db, stat, current + 1)
+            if current + 1 >= 10:
+                eligible_stats = [s for s in eligible_stats if s != stat]
+
+        # Spend skill points: 86 total, role skills only, double-cost for some
+        role_skills = ROLE_SKILLS.get(role, {})
+        skills_dict = dict(character.db.skills or {})
+        for orig, val in role_skills.items():
+            mapped = ROLE_SKILL_NAME_MAP.get(orig, orig).lower().replace(' ', '_')
+            if mapped not in skills_dict:
+                skills_dict[mapped] = 0
+        spent = sum(
+            skills_dict.get(ROLE_SKILL_NAME_MAP.get(o, o).lower().replace(' ', '_'), 0) * (2 if ROLE_SKILL_NAME_MAP.get(o, o).lower().replace(' ', '_') in DOUBLE_COST_SKILLS else 1)
+            for o in role_skills
+        )
+        langs = getattr(character.db, 'languages', {}) or {}
+        lang_pts = sum(v for v in langs.values() if v)
+        skill_points = max(0, 86 - spent - lang_pts)
+
+        skill_keys = [ROLE_SKILL_NAME_MAP.get(o, o).lower().replace(' ', '_') for o in role_skills]
+        while skill_points >= 1:
+            affordable = [sk for sk in skill_keys if (2 if sk in DOUBLE_COST_SKILLS else 1) <= skill_points]
+            if not affordable:
+                break
+            sk = random.choice(affordable)
+            cost = 2 if sk in DOUBLE_COST_SKILLS else 1
+            skills_dict[sk] = skills_dict.get(sk, 0) + 1
+            skill_points -= cost
+        character.db.skills = skills_dict
+
+        if hasattr(character, 'recalculate_derived_stats'):
+            character.recalculate_derived_stats()
 
     @classmethod
     def calculate_remaining_stat_points(cls, sheet):
@@ -210,6 +265,46 @@ class EdgerunnerChargen:
         role_skills = ROLE_SKILLS.get(role, [])
         total_skills = sum([getattr(sheet, skill.lower()) for skill in role_skills])
         return max(0, 86 - total_skills)  # Assuming 86 is the total skill points available
+
+    @classmethod
+    def calculate_edgerunner_package_cost(cls, role):
+        """Calculate the total cost of weapons, armor, gear, ammo, and cyberware for Edgerunner chargen.
+        Characters start with 2550 eurodollars; this returns what is spent, so remainder goes to the character."""
+        total_cost = 0
+        role_equipment = EQUIPMENT.get(role, {})
+
+        # Weapons
+        for weapon_name in role_equipment.get("weapons", []):
+            weapon_stats = next((w for w in weapon_data if w["name"] == weapon_name), None)
+            if weapon_stats:
+                total_cost += weapon_stats.get("value", 0)
+
+        # Armor (including Virtuality Goggles which are in armors)
+        for armor_name in role_equipment.get("armor", []):
+            armor_stats = next((a for a in armor_data if a["name"] == armor_name), None)
+            if armor_stats:
+                total_cost += armor_stats.get("value", 0)
+
+        # Gear
+        for gear_name in role_equipment.get("gear", []):
+            gear_stats = next((g for g in gear_data if g["name"] == gear_name), None)
+            if gear_stats:
+                total_cost += gear_stats.get("value", 0)
+
+        # Ammunition: 50 rounds per weapon that uses ammo
+        for weapon_name in role_equipment.get("weapons", []):
+            weapon_type = weapon_name.split()[-1]  # "Very Heavy Pistol" -> "Pistol"
+            ammo = next((a for a in ammunition if a.get("weapon_type") == weapon_type), None)
+            if ammo and "cost" in ammo:
+                total_cost += 50 * ammo["cost"]
+
+        # Cyberware
+        for item_name in ROLE_CYBERWARE.get(role, []):
+            cw_data = CYBERWARE_DATA.get(item_name, {})
+            cost = cw_data.get("cost", CYBERWARE_COSTS.get(item_name, 100))
+            total_cost += cost
+
+        return total_cost
 
     @classmethod
     def edgerunner_chargen_for_typeclass(cls, character, role, full_name):
@@ -282,32 +377,24 @@ class EdgerunnerChargen:
 
     @classmethod
     def assign_languages_to_typeclass(cls, character, role):
-        """Assign languages to character typeclass"""
-        # Create languages dictionary if it doesn't exist
-        if not hasattr(character.db, 'languages'):
-            character.db.languages = {}
-            
-        # Add Streetslang
-        character.db.languages['Streetslang'] = 4
-        
-        # Get current language list
-        languages = character.db.languages
-        known_languages = [lang.lower() for lang in languages.keys()]
-        
-        # Find available languages not already known
-        available_languages = [lang for lang in CYBERPUNK_LANGUAGES if lang.lower() not in known_languages]
-        
+        """Assign languages to character typeclass: English and Streetslang at 4, then a random language."""
+        # Use Character.add_language for compatibility with pose/emit/say and CharacterSheet sync
+        character.add_language("English", 4)
+        character.add_language("Streetslang", 4)
+
+        # Get current language list (exclude English and Streetslang for random pick)
+        known_languages = [lang.lower() for lang in character.get_languages()]
+        available_languages = [
+            lang for lang in CYBERPUNK_LANGUAGES
+            if lang.lower() not in known_languages
+        ]
+
         # Add a random language
         if available_languages:
             random_lang = random.choice(available_languages)
             random_level = random.randint(1, 3)
-            character.db.languages[random_lang] = random_level
+            character.add_language(random_lang, random_level)
             logger.info(f"Added language {random_lang} (level {random_level}) to character")
-            
-            # Also update any character sheet that exists
-            if hasattr(character, 'character_sheet') and character.character_sheet:
-                for lang, level in character.db.languages.items():
-                    character.character_sheet.add_language(lang, level)
 
     @classmethod
     def assign_gear_to_typeclass(cls, character, role):
@@ -468,6 +555,10 @@ class EdgerunnerChargen:
             if hasattr(character, 'character_sheet') and character.character_sheet:
                 instance.character_sheet = character.character_sheet
                 instance.save()
+
+            # Add to inventory (same as vendor purchase) so it shows in inv/sheet
+            inventory, _ = Inventory.get_or_create_for_character(character)
+            inventory.cyberware.add(instance)
                 
             logger.info(f"Added cyberware instance: {item_name}")
 
@@ -488,18 +579,19 @@ class EdgerunnerChargen:
         
         # Calculate total humanity loss
         total_humanity_loss = sum(cw.cyberware.humanity_loss for cw in cyberware_instances)
-        
+        trauma_loss = getattr(character.db, 'trauma_humanity_loss', 0) or 0
+
         # Store total loss
         character.db.total_cyberware_humanity_loss = total_humanity_loss
-        
-        # Calculate humanity based on empathy
+
+        # Calculate humanity based on empathy (includes trauma)
         if not hasattr(character.db, 'empathy'):
             character.db.empathy = 1
-            
-        character.db.humanity = max(0, character.db.empathy * 10 - total_humanity_loss)
-        
+
+        character.db.humanity = max(0, character.db.empathy * 10 - total_humanity_loss - trauma_loss)
+
         # Recalculate empathy if humanity reduction is significant
-        if character.db.empathy * 10 <= total_humanity_loss:
+        if character.db.empathy * 10 <= total_humanity_loss + trauma_loss:
             character.db.empathy = max(1, character.db.humanity // 10)
             
         logger.info(f"Recalculated humanity for {character.name}: {character.db.humanity}")
@@ -650,6 +742,8 @@ class EdgerunnerChargen:
 
     @classmethod
     def assign_languages(cls, sheet, role):
+        """Assign English and Streetslang at 4, then a random language."""
+        sheet.add_language("English", 4)
         sheet.add_language("Streetslang", 4)
         logger.info(f"Language list: {sheet.language_list}")
         known_languages = [lang['name'].lower() if isinstance(lang, dict) else lang.lower() for lang in sheet.language_list]
@@ -665,8 +759,11 @@ class EdgerunnerChargen:
         logger.info(f"Starting assign_gear for role: {role}")
         from world.inventory.models import Inventory, Weapon, Armor, Gear, Ammunition, AmmoType
         
-        # Ensure the character has an inventory
-        inventory, created = Inventory.objects.get_or_create(character=sheet)
+        # Ensure the character has an inventory (use pk to avoid unsaved instance error)
+        sheet_pk = getattr(sheet, 'pk', None)
+        if sheet_pk is None:
+            raise ValueError("Character sheet must be saved before assigning gear")
+        inventory, created = Inventory.objects.get_or_create(character_id=sheet_pk)
         
         # Clear existing inventory
         inventory.weapons.clear()
@@ -791,11 +888,17 @@ class EdgerunnerChargen:
             if created:
                 logger.info(f"Created new Cyberware entry for {item_name}")
             
-            CyberwareInstance.objects.create(
+            sheet_pk = getattr(sheet, 'pk', None)
+            if sheet_pk is None:
+                raise ValueError("Character sheet must be saved before assigning cyberware")
+            cw_instance = CyberwareInstance.objects.create(
                 cyberware=cyberware_item,
-                character_sheet=sheet,
+                character_sheet_id=sheet_pk,
                 installed=True
             )
+            # Add to inventory (same as vendor purchase) so it shows in inv/sheet
+            inventory, _ = Inventory.objects.get_or_create(character_id=sheet_pk)
+            inventory.cyberware.add(cw_instance)
             logger.info(f"Added cyberware instance: {item_name}")
 
         logger.info("About to calculate humanity loss")
@@ -823,7 +926,7 @@ class EdgerunnerChargen:
                 setattr(sheet, sheet_skill_name, 0)
         
         # Clear languages
-        sheet.character_languages.all().delete()
+        sheet.sheet_language_proficiencies.all().delete()
         
         # Clear inventory
         if hasattr(sheet, 'inventory'):
@@ -831,8 +934,10 @@ class EdgerunnerChargen:
             sheet.inventory.armor.all().delete()
             sheet.inventory.gear.all().delete()
         
-        # Clear cyberware
-        CyberwareInstance.objects.filter(character_sheet=sheet).delete()
+        # Clear cyberware (use pk to avoid unsaved instance error)
+        sheet_pk = getattr(sheet, 'pk', None)
+        if sheet_pk is not None:
+            CyberwareInstance.objects.filter(character_sheet_id=sheet_pk).delete()
         
         # Reset money
         sheet.eurodollars = 0

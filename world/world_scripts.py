@@ -1,5 +1,5 @@
 from evennia import DefaultScript
-from world.missions import init_mission_system
+from world.mission_board.services import init_mission_system
 from world.bulletin_boards import init_bulletin_board_system
 from world.hustle_system import init_hustle_system
 from evennia.utils.logger import log_err

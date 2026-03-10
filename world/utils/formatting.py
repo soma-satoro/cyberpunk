@@ -49,6 +49,26 @@ def footer(width=78, fillchar="-"):
     """Create a footer with consistent width."""
     return "|b" + fillchar * width + "|n\n"
 
+
+def sheet_header(title, width=80):
+    """Character sheet header: '-------- Character Sheet for {name} --------' (80 chars)."""
+    from evennia.utils.ansi import ANSIString
+    clean_title = str(ANSIString(title).clean())
+    fill_len = max(0, width - len(clean_title) - 2)
+    half = fill_len // 2
+    return "|b" + "-" * half + "|n " + "|y" + clean_title + "|n " + "|b" + "-" * (fill_len - half) + "|n\n"
+
+
+def sheet_section(title, width=80):
+    """Character sheet section: '=====> Title <============...' (80 chars, blue/magenta)."""
+    from evennia.utils.ansi import ANSIString
+    clean_title = str(ANSIString(title).clean())
+    pattern = f"=====> {clean_title} <"
+    fill_len = max(0, width - len(pattern))
+    return "|b" + pattern + "|m" + "=" * fill_len + "|n\n"
+
+
+
 def divider(title, width=78, fillchar="-", color="|b", text_color="|y"):
     """Create a divider with consistent width."""
     if isinstance(fillchar, ANSIString):
@@ -76,3 +96,6 @@ def divider(title, width=78, fillchar="-", color="|b", text_color="|y"):
     else:
         # If no title, just create a line of fillchars
         return color + fillchar * width + "|n"
+
+
+section_header = divider  # Alias for backward compatibility

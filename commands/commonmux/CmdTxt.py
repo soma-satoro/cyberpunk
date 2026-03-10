@@ -4,7 +4,7 @@ Text messaging command - allows IC text messaging between characters
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils import create
 from evennia.comms.models import Msg
-from utils.search_helpers import search_character
+from world.utils.search_helpers import search_character
 from typeclasses.characters import Character
 
 class CmdText(MuxCommand):

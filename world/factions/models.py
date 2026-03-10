@@ -8,6 +8,11 @@ from django.db.models import JSONField
 
 from world.factions.faction_types import FACTION_TYPES
 
+# Lazy import to avoid circular imports - AccountDB used for staff_sponsor
+def _get_account_model():
+    from evennia.accounts.models import AccountDB
+    return AccountDB
+
 class Group(SharedMemoryModel):
     name = models.CharField(max_length=255, unique=True)
     description = models.TextField(blank=True)
@@ -115,6 +120,21 @@ class Faction(SharedMemoryModel):
     coleader = models.ForeignKey(ObjectDB, on_delete=models.SET_NULL, null=True, related_name='co_led_factions')
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # Public/private: when False, membership list is hidden (only staff sponsor visible)
+    members_public = models.BooleanField(default=True)
+    # Faction head: player character who is the IC leader (e.g. Saburo Arasaka)
+    faction_head = models.ForeignKey(
+        ObjectDB, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='headed_factions'
+    )
+    # Staff sponsor: staff account who oversees this faction (e.g. Soma)
+    staff_sponsor = models.ForeignKey(
+        'accounts.AccountDB', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='sponsored_factions'
+    )
+    # Channel dbref for faction chat (stored as int for the channel's id)
+    channel_id = models.IntegerField(null=True, blank=True)
+
     def __str__(self):
         return self.name
 
@@ -125,17 +145,50 @@ class Faction(SharedMemoryModel):
             return ", ".join(self.faction_type)
         return str(self.faction_type)
 
+    def get_character_display_name(self, obj):
+        """Get display name for a character ObjectDB."""
+        if not obj:
+            return "None"
+        if hasattr(obj.db, 'full_name') and obj.db.full_name:
+            return obj.db.full_name
+        if hasattr(obj, 'character_sheet') and obj.character_sheet:
+            return getattr(obj.character_sheet, 'full_name', obj.key) or obj.key
+        return obj.key
+
+
 class FactionReputation(SharedMemoryModel):
+    """Tracks reputation and notoriety with a faction for non-members."""
     character = models.ForeignKey(ObjectDB, on_delete=models.CASCADE)
     faction = models.ForeignKey(Faction, on_delete=models.CASCADE)
+    # Legacy field - kept for backward compat; use reputation_points/rep for positive standing
     reputation = models.IntegerField(default=0)
+    # Positive faction standing (100 pts = 1 rank, max 10)
+    reputation_points = models.IntegerField(default=0)
+    rep = models.IntegerField(default=0)
+    # Negative faction standing / notoriety (100 pts = 1 rank, max 10)
+    notoriety_points = models.IntegerField(default=0)
+    notoriety = models.IntegerField(default=0)
 
     class Meta:
         unique_together = ('character', 'faction')
 
     def __str__(self):
         character_name = self._get_character_name()
-        return f"{character_name} - {self.faction}: {self.reputation}"
+        return f"{character_name} - {self.faction}: rep {self.rep}, notoriety {self.notoriety}"
+
+    def update_rep(self):
+        """Update rep rank from reputation_points."""
+        new_rep = min(self.reputation_points // 100, 10)
+        if new_rep != self.rep:
+            self.rep = new_rep
+            self.save()
+
+    def update_notoriety(self):
+        """Update notoriety rank from notoriety_points."""
+        new_notoriety = min(self.notoriety_points // 100, 10)
+        if new_notoriety != self.notoriety:
+            self.notoriety = new_notoriety
+            self.save()
     
     def _get_character_name(self):
         """Get the character's name, either from typeclass or character sheet."""
@@ -150,6 +203,35 @@ class FactionReputation(SharedMemoryModel):
         
         # Default to character key
         return self.character.key
+
+
+class FactionItem(SharedMemoryModel):
+    """
+    Faction-exclusive items. When created, a voucher template is stored.
+    Faction members can buy/sell these only in rooms tagged with faction name + 'Vendor'.
+    """
+    ITEM_TYPES = [
+        ('weapon', 'Weapon'),
+        ('armor', 'Armor'),
+        ('gear', 'Gear'),
+        ('cyberware', 'Cyberware'),
+        ('vehicle', 'Vehicle'),
+    ]
+    faction = models.ForeignKey(Faction, on_delete=models.CASCADE, related_name='faction_items')
+    item_type = models.CharField(max_length=20, choices=ITEM_TYPES)
+    item_key = models.CharField(max_length=255, help_text="Key/name in equipment_data or cyberware_data")
+    display_name = models.CharField(max_length=255)
+    price = models.IntegerField(default=0, help_text="Price in eurodollars")
+    # Voucher template dbref - the source voucher that gets cloned for sales
+    voucher_id = models.IntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('faction', 'item_type', 'item_key')
+
+    def __str__(self):
+        return f"{self.faction.name}: {self.display_name}"
+
 
 class GroupInfo(TypedObject):
     """

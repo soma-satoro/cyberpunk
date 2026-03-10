@@ -1,6 +1,9 @@
 from .models import Program, Hardware
 
 """
+Black Chrome: No new programs/hardware/Black ICE. Netrunning-adjacent: Lotos Netsuit, Integrated Cyberdeck Upgrade.
+Edgerunners Mission Kit: quickhacks for 2070s Neuroport system (Interface vs target Neuroport).
+
 Model for Copy/paste
 "name": "",
 "type": "",
@@ -402,4 +405,21 @@ black_ice = [
     "cost": 1000,
     "icon": " Immense hulking cat with glowing white tusks.",
     }
+]
+
+# Edgerunners Mission Kit: Quickhacks (2070s Neuroport system)
+# Used when Netrunner Jacks In to target's Neuroport. Interface + 1d10 vs DV.
+# One Quickhack per target per Turn. Must Breach all Passwalls first.
+quickhacks = [
+    {"name": "Impair Movement", "dv": 6, "tier": "Simple", "effect": "Target's MOVE -1 for 60 seconds. 0 MOVE = no Move Action."},
+    {"name": "Sonic Shock", "dv": 6, "tier": "Simple", "effect": "Damaged Ear Critical Injury (no Bonus Damage) for 60 seconds."},
+    {"name": "Overheat", "dv": 8, "tier": "Standard", "effect": "Target on fire. 4 HP damage/turn end until Action to extinguish. Bypasses armor."},
+    {"name": "Short Circuit", "dv": 8, "tier": "Standard", "effect": "GM picks 3 cyberware (not arm/leg/eye/audio/Neuroport). Cease function 60 seconds."},
+    {"name": "Cyberware Malfunction", "dv": 10, "tier": "Difficult", "effect": "Netrunner picks 1 cyberware (not Neuroport/Deck Port). Inoperable 60 seconds. Limbs = Broken Arm/Leg."},
+    {"name": "Lure", "dv": 10, "tier": "Difficult", "effect": "Target's next Turn: forced Move Action (Netrunner controlled). Only if target unaware. No obvious danger."},
+    {"name": "Slow", "dv": 10, "tier": "Difficult", "effect": "Target's MOVE -1d6 for 60 seconds. 0 MOVE = no Move Action."},
+    {"name": "Synapse Burnout", "dv": 10, "tier": "Difficult", "effect": "3d6 damage directly to HP. Bypasses armor."},
+    {"name": "Puppet", "dv": 12, "tier": "Advanced", "effect": "Control target's Action and Move next Turn. Use target's STATs/Skills."},
+    {"name": "Shard Ejection", "dv": 12, "tier": "Advanced", "effect": "Eject 1 chipware to adjacent square. Fails if slot covered."},
+    {"name": "System Reset", "dv": 12, "tier": "Advanced", "effect": "Unconscious 60 seconds or until damage. Target falls Prone."},
 ]

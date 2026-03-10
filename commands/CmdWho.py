@@ -11,8 +11,6 @@ from world.utils.formatting import header, footer, divider
 from evennia.utils.utils import class_from_module
 from evennia.utils.ansi import strip_ansi
 from django.conf import settings
-from world.factions import faction, faction_list
-
 COMMAND_DEFAULT_CLASS = class_from_module(settings.COMMAND_DEFAULT_CLASS)
 
 class CmdWho(COMMAND_DEFAULT_CLASS):
@@ -215,7 +213,7 @@ class CmdCensus(COMMAND_DEFAULT_CLASS):
             if not splat or splat.lower() in ['none', 'unknown']:
                 continue
                 
-            normalized_faction = VALID_FACTIONS.get(faction.lower(), faction)
+            normalized_faction = VALID_FACTIONS.get(splat.lower(), splat)
             faction_counts[normalized_faction] += 1
                 
         return dict(faction_counts)

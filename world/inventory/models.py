@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.utils import IntegrityError
 from evennia.utils.idmapper.models import SharedMemoryModel
 from world.cyberware.models import Cyberware
 from django.db.models import JSONField  # If using PostgreSQL
@@ -8,16 +9,25 @@ class AmmoType(models.TextChoices):
     BASIC = 'Basic', 'Basic Ammunition'
     ARMOR_PIERCING = 'Armor-Piercing', 'Armor-Piercing Ammunition'
     BIOTOXIN = 'Biotoxin', 'Biotoxin Ammunition'
+    BURROWING = 'Burrowing', 'Burrowing Ammunition'
     EMP = 'EMP', 'EMP Ammunition'
+    EXPLOSIVE = 'Explosive', 'Explosive Ammunition'
     EXPANSIVE = 'Expansive', 'Expansive Ammunition'
     FLASHBANG = 'Flashbang', 'Flashbang Ammunition'
+    HIGH_PRECISION = 'High Precision', 'High Precision Ammunition'
+    HIGH_VELOCITY = 'High Velocity', 'High Velocity Ammunition'
+    HOLLOW_POINT = 'Hollow Point', 'Hollow Point Ammunition'
+    HYPER_EXPANSIVE = 'Hyper Expansive', 'Hyper Expansive Ammunition'
     INCENDIARY = 'Incendiary', 'Incendiary Ammunition'
     POISON = 'Poison', 'Poison Ammunition'
     RUBBER = 'Rubber', 'Rubber Ammunition'
+    SERRATED_ARROW = 'Serrated Arrow', 'Serrated Arrow Ammunition'
     SLEEP = 'Sleep', 'Sleep Ammunition'
     SMART = 'Smart', 'Smart Ammunition'
     SMOKE = 'Smoke', 'Smoke Ammunition'
     TEARGAS = 'Teargas', 'Teargas Ammunition'
+    TRACER = 'Tracer', 'Tracer Ammunition'
+    JUNK = 'Junk', 'Junk Ammunition'
 
 class Ammunition(SharedMemoryModel):
     name = models.CharField(max_length=100)
@@ -36,11 +46,13 @@ class Ammunition(SharedMemoryModel):
     def get_cost_category(cls, ammo_type):
         if ammo_type in ['Basic', 'Rubber']:
             return 10
-        elif ammo_type in ['Armor-Piercing', 'Expansive', 'Flashbang', 'Incendiary', 'Poison']:
+        elif ammo_type in ['Armor-Piercing', 'Expansive', 'Flashbang', 'Incendiary', 'Poison',
+                           'Burrowing', 'Explosive', 'High Precision', 'High Velocity',
+                           'Hyper Expansive', 'Serrated Arrow', 'Hollow Point']:
             return 100
         elif ammo_type in ['Biotoxin', 'EMP', 'Sleep', 'Smart']:
             return 500
-        elif ammo_type in ['Smoke', 'Teargas']:
+        elif ammo_type in ['Smoke', 'Teargas', 'Tracer']:
             return 50
         else:
             return 0  # or some default value
@@ -83,7 +95,7 @@ class CyberwareInstance(SharedMemoryModel):
         # Ensure at least one character field is populated
         constraints = [
             models.CheckConstraint(
-                check=models.Q(character_object__isnull=False) | models.Q(character_sheet__isnull=False),
+                condition=models.Q(character_object__isnull=False) | models.Q(character_sheet__isnull=False),
                 name='inventory_cyberware_instance_has_character'
             )
         ]
@@ -129,6 +141,32 @@ class CyberwareInstance(SharedMemoryModel):
             
         return character_instances
 
+class WeaponAttachment(SharedMemoryModel):
+    """Installable weapon attachment (Solo of Fortune 2045 / Interface RED Vol 5)."""
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    value = models.IntegerField(default=0)
+    # Eligible weapon categories: JSON list, e.g. ["handgun", "shoulder_arms"] or ["all_ranged_except_flamethrower"]
+    eligible_categories = models.JSONField(default=list)
+    requires_slot = models.BooleanField(default=False)  # Most SoF attachments don't use a slot
+    slot_type = models.CharField(max_length=50, blank=True)  # e.g. "scope" for Compatibility Rail
+    install_dv = models.IntegerField(default=17)  # Weaponstech DV
+    install_skill = models.CharField(max_length=50, default="Weaponstech")
+    effect_description = models.TextField(blank=True)
+
+    def __str__(self):
+        return self.name
+
+    def is_eligible_for_weapon(self, weapon):
+        """Check if this attachment can be installed on the given weapon."""
+        cats = self.eligible_categories
+        if not cats:
+            return False
+        if "all_ranged_except_flamethrower" in cats:
+            return weapon.category != "heavy_weapons" or "flamethrower" not in (weapon.name or "").lower()
+        return weapon.category in cats
+
+
 class Weapon(Item):
     damage = models.CharField(max_length=50)
     rof = models.CharField(max_length=50)
@@ -140,6 +178,7 @@ class Weapon(Item):
     max_ammo = models.PositiveIntegerField(default=0)
     clip = models.PositiveIntegerField(default=0)  # New field for clip size
     range_dvs = JSONField(default=dict)  # This will store the DVs for each range bracket
+    attachment_slots = models.PositiveIntegerField(default=0)  # Scope/barrel slots (Solo of Fortune 2045)
 
     def reload(self, ammunition):
         if ammunition.ammo_type == self.ammo_type and ammunition.quantity > 0:
@@ -183,6 +222,44 @@ class Gear(SharedMemoryModel):
     def is_cyberdeck(self):
         return 'cyberdeck' in self.name.lower()
 
+
+class Vehicle(SharedMemoryModel):
+    """Cyberpunk Red vehicle template - land, sea, or air."""
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    category = models.CharField(max_length=50)  # land, sea, air
+    sdp = models.PositiveIntegerField(default=35)  # Structural Damage Points
+    seats = models.PositiveIntegerField(default=2)
+    speed_combat = models.PositiveIntegerField(default=20)  # MOVE units
+    speed_narrative = models.CharField(max_length=50, default="")  # e.g. "100 MPH / 161 KPH"
+    value = models.IntegerField(default=0)
+
+    def __str__(self):
+        return self.name
+
+
+class InventoryWeapon(SharedMemoryModel):
+    """Through model for character weapon instances; supports installed attachments (Solo of Fortune 2045)."""
+    inventory = models.ForeignKey(
+        'Inventory',
+        on_delete=models.CASCADE,
+        related_name='inventory_weapons'
+    )
+    weapon = models.ForeignKey(
+        'Weapon',
+        on_delete=models.CASCADE,
+        related_name='inventory_instances'
+    )
+    installed_attachments = models.ManyToManyField(
+        WeaponAttachment,
+        blank=True,
+        related_name='installed_on_weapons'
+    )
+
+    class Meta:
+        unique_together = [['inventory', 'weapon']]
+
+
 class Inventory(SharedMemoryModel):
     # Keep for backward compatibility
     character = models.OneToOneField(
@@ -200,9 +277,15 @@ class Inventory(SharedMemoryModel):
         null=True,
         blank=True
     )
-    weapons = models.ManyToManyField('Weapon', blank=True)
+    weapons = models.ManyToManyField(
+        'Weapon',
+        through='InventoryWeapon',
+        through_fields=('inventory', 'weapon'),
+        blank=True
+    )
     armor = models.ManyToManyField('Armor', blank=True)
     gear = models.ManyToManyField('Gear', blank=True)
+    vehicles = models.ManyToManyField('Vehicle', blank=True)
     cyberware = models.ManyToManyField(CyberwareInstance, blank=True)
     ammunition = models.ManyToManyField(Ammunition, blank=True)
 
@@ -210,7 +293,7 @@ class Inventory(SharedMemoryModel):
         # Ensure at least one character field is populated
         constraints = [
             models.CheckConstraint(
-                check=models.Q(character_object__isnull=False) | models.Q(character__isnull=False),
+                condition=models.Q(character_object__isnull=False) | models.Q(character__isnull=False),
                 name='inventory_has_character'
             )
         ]
@@ -236,33 +319,62 @@ class Inventory(SharedMemoryModel):
     
     @classmethod
     def get_or_create_for_character(cls, character):
-        """Get or create inventory for character"""
-        # Try direct link to character object
-        try:
-            inventory = cls.objects.get(character_object=character)
-            return inventory, False
-        except cls.DoesNotExist:
-            pass
-            
-        # Try link via character sheet
-        if hasattr(character, 'character_sheet'):
+        """Get or create inventory for character. Prefers character_sheet link (same as +inventory)."""
+        char_pk = getattr(character, 'pk', None) or getattr(character, 'id', None)
+
+        # Prefer character sheet link first - matches +inventory display (character_sheet.inventory)
+        if hasattr(character, 'character_sheet') and character.character_sheet:
+            sheet = character.character_sheet
+            sheet_pk = getattr(sheet, 'pk', None)
+            if sheet_pk is not None:
+                try:
+                    inventory = cls.objects.get(character_id=sheet_pk)
+                    # Update with direct link for future lookups
+                    if char_pk is not None and inventory.character_object_id != char_pk:
+                        # Check for duplicate: another inventory may already have character_object_id
+                        duplicate = cls.objects.filter(character_object_id=char_pk).exclude(id=inventory.id).first()
+                        if duplicate:
+                            # Merge duplicate into canonical (sheet-linked) inventory
+                            for m2m in ['weapons', 'armor', 'gear', 'vehicles', 'cyberware', 'ammunition']:
+                                for obj in getattr(duplicate, m2m).all():
+                                    getattr(inventory, m2m).add(obj)
+                            duplicate.delete()
+                        inventory.character_object_id = char_pk
+                        try:
+                            inventory.save()
+                        except IntegrityError:
+                            # Duplicate exists - merge and retry (may have been missed or created by race)
+                            duplicate = cls.objects.filter(character_object_id=char_pk).exclude(id=inventory.id).first()
+                            if duplicate:
+                                for m2m in ['weapons', 'armor', 'gear', 'vehicles', 'cyberware', 'ammunition']:
+                                    for obj in getattr(duplicate, m2m).all():
+                                        getattr(inventory, m2m).add(obj)
+                                duplicate.delete()
+                            inventory.character_object_id = char_pk
+                            inventory.save()
+                    return inventory, False
+                except cls.DoesNotExist:
+                    pass
+
+        # Fallback: try direct link to character object
+        if char_pk is not None:
             try:
-                inventory = cls.objects.get(character=character.character_sheet)
-                # Update with direct link for future
-                inventory.character_object = character
-                inventory.save()
+                inventory = cls.objects.get(character_object_id=char_pk)
                 return inventory, False
             except cls.DoesNotExist:
                 pass
-        
-        # Create new inventory
-        inventory = cls.objects.create(character_object=character)
-        
+
+        # Create new inventory (character must have pk for FK)
+        if char_pk is not None:
+            inventory = cls.objects.create(character_object_id=char_pk)
+        else:
+            raise ValueError("Character must be saved before creating inventory")
+
         # Also link to character sheet if available
         if hasattr(character, 'character_sheet') and character.character_sheet:
             inventory.character = character.character_sheet
             inventory.save()
-            
+
         return inventory, True
 
 class Cyberdeck(SharedMemoryModel):

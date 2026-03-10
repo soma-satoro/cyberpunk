@@ -1,13 +1,14 @@
 # this is a typeclass for factions
 
-from .objects import ObjectParent
+from .objects import Object
 from evennia import search_object, create_object
+from evennia.objects.models import ObjectDB
 from world.factions.models import Faction as FactionModel, Group as GroupModel
 from world.factions.faction_types import FACTION_TYPES
 from evennia.utils import logger
 import random
 
-class Faction(ObjectParent):
+class Faction(Object):
     """
     Typeclass for faction objects.
     
@@ -93,9 +94,9 @@ class Faction(ObjectParent):
         members = []
         for member_id in self.db.members:
             try:
-                character = ObjectParent.objects.get(id=member_id)
+                character = ObjectDB.objects.get(id=member_id)
                 members.append(character)
-            except ObjectParent.DoesNotExist:
+            except ObjectDB.DoesNotExist:
                 # Clean up stale references
                 self.db.members.remove(member_id)
         return members
@@ -168,6 +169,8 @@ class Faction(ObjectParent):
     @classmethod
     def create_player_faction(cls, name, description="", ic_description="", creator=None, faction_type=None):
         """Create a new player faction."""
+        from world.factions.faction_utils import create_faction_channel, get_default_staff_sponsor
+
         # First, create the database model
         try:
             # Set default faction type if none provided
@@ -180,9 +183,18 @@ class Faction(ObjectParent):
                 name=name,
                 description=description,
                 ic_description=ic_description,
-                influence=FACTION_TYPES["edgerunner"]["influence_base"],
+                influence=FACTION_TYPES.get("edgerunner", {}).get("influence_base", 50),
                 faction_type=faction_type
             )
+            
+            # Create faction channel and set default sponsor
+            channel = create_faction_channel(name)
+            if channel:
+                faction_model.channel_id = channel.id
+            default_sponsor = get_default_staff_sponsor()
+            if default_sponsor:
+                faction_model.staff_sponsor = default_sponsor
+            faction_model.save()
             
             # Then create the typeclass object
             storage = cls.get_faction_storage()
@@ -224,9 +236,9 @@ class Faction(ObjectParent):
         # Remove faction affiliation from all members
         for member_id in self.db.members:
             try:
-                character = ObjectParent.objects.get(id=member_id)
+                character = ObjectDB.objects.get(id=member_id)
                 character.db.faction = None
-            except ObjectParent.DoesNotExist:
+            except ObjectDB.DoesNotExist:
                 pass
                 
         # Delete the database model if it exists

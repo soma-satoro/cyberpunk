@@ -31,14 +31,17 @@ class CharacterSheet(SharedMemoryModel):
                 'name': lang.language.name,
                 'level': lang.level
             }
-            for lang in self.character_languages.all()
+            for lang in self.sheet_language_proficiencies.all()
         ]
 
     def add_language(self, language_name, level):
         from world.languages.models import Language, CharacterLanguage
         language, _ = Language.objects.get_or_create(name=language_name)
+        sheet_pk = getattr(self, 'pk', None)
+        if sheet_pk is None:
+            return
         char_lang, _ = CharacterLanguage.objects.get_or_create(
-            character_sheet=self,
+            character_sheet_id=sheet_pk,
             language=language,
             defaults={'level': level}
         )
@@ -49,7 +52,9 @@ class CharacterSheet(SharedMemoryModel):
         from world.languages.models import Language, CharacterLanguage
         try:
             language = Language.objects.get(name__iexact=language_name)
-            CharacterLanguage.objects.filter(character_sheet=self, language=language).delete()
+            sheet_pk = getattr(self, 'pk', None)
+            if sheet_pk is not None:
+                CharacterLanguage.objects.filter(character_sheet_id=sheet_pk, language=language).delete()
         except Language.DoesNotExist:
             pass  # Language not found, nothing to remove
 
@@ -81,7 +86,7 @@ class CharacterSheet(SharedMemoryModel):
             ])
 
             # Add points from languages
-            language_points = sum(lang.level for lang in self.character_languages.all())
+            language_points = sum(lang.level for lang in self.sheet_language_proficiencies.all())
             
             total_skill_points = skill_points + language_points
             logger.log_info(f"Total skill points (including languages): {total_skill_points}")
@@ -128,6 +133,10 @@ class CharacterSheet(SharedMemoryModel):
     humanity = models.IntegerField(default=0)
     humanity_loss = models.IntegerField(default=0)
     total_cyberware_humanity_loss = models.IntegerField(default=0)
+    trauma_humanity_loss = models.PositiveIntegerField(
+        default=0,
+        help_text="Permanent humanity loss from removed/destroyed cyberware (e.g. plot removal)",
+    )
     death_save = models.PositiveIntegerField(default=0)
     serious_wounds = models.PositiveIntegerField(default=0)
     eqweapon = models.ForeignKey('inventory.Weapon', on_delete=models.SET_NULL, null=True, blank=True, related_name='equipped_by')
@@ -135,6 +144,8 @@ class CharacterSheet(SharedMemoryModel):
     eurodollars = models.IntegerField(default=0)
     reputation_points = models.IntegerField(default=0)
     rep = models.IntegerField(default=0)
+    notoriety_points = models.IntegerField(default=0)
+    notoriety = models.IntegerField(default=0)
     is_complete = models.BooleanField(default=False)
 
     # General lifepath fields
@@ -348,12 +359,28 @@ class CharacterSheet(SharedMemoryModel):
         except Language.DoesNotExist:
             logger.log_warn(f"Language {language_name} not found, nothing to remove")
 
+    def clear_cultural_languages(self, cultural_origin):
+        """
+        Remove languages that were granted from a given cultural origin.
+        Called when changing cultural origin to remove the previous origin's language.
+        """
+        from world.lifepath_dictionary import CULTURAL_ORIGIN_LANGUAGES
+        if not cultural_origin:
+            return
+        languages_to_remove = CULTURAL_ORIGIN_LANGUAGES.get(cultural_origin, [])
+        for lang_name in languages_to_remove:
+            self.remove_language(lang_name)
+
     def update_language_level(self, language_name, new_level):
         try:
             language = Language.objects.get(name=language_name)
-            char_lang = CharacterLanguage.objects.get(character_sheet=self, language=language)
-            char_lang.level = new_level
-            char_lang.save()
+            sheet_pk = getattr(self, 'pk', None)
+            if sheet_pk is None:
+                return
+            char_lang = CharacterLanguage.objects.filter(character_sheet_id=sheet_pk, language=language).first()
+            if char_lang:
+                char_lang.level = new_level
+                char_lang.save()
         except (Language.DoesNotExist, CharacterLanguage.DoesNotExist):
             pass  # Language or character-language relationship not found
 
@@ -498,44 +525,56 @@ class CharacterSheet(SharedMemoryModel):
         self.humanity = self.empathy * 10
         self.total_cyberware_humanity_loss = 0
 
-    def calculate_humanity_loss(self):
-        logger.info("Starting calculate_humanity_loss in CharacterSheet")
+    def calculate_humanity_loss(self, quiet=False):
+        if not quiet:
+            logger.info("Starting calculate_humanity_loss in CharacterSheet")
         # Use lazy import to avoid circular dependency
         CyberwareInstance = apps.get_model('inventory', 'CyberwareInstance')
-        installed_cyberware = CyberwareInstance.objects.filter(character=self, installed=True)
+        sheet_pk = getattr(self, 'pk', None)
+        if sheet_pk is None:
+            installed_cyberware = CyberwareInstance.objects.none()
+        else:
+            installed_cyberware = CyberwareInstance.objects.filter(character_sheet_id=sheet_pk, installed=True)
         total_cyberware_hl = sum(cw.cyberware.humanity_loss for cw in installed_cyberware)
-        
-        logger.info(f"Total cyberware humanity loss: {total_cyberware_hl}")
-        
-        # Calculate new humanity
-        new_humanity = max(0, self.empathy * 10 - total_cyberware_hl)
-        
-        logger.info(f"New calculated humanity: {new_humanity}")
-        
+        trauma_hl = getattr(self, "trauma_humanity_loss", 0) or 0
+
+        if not quiet:
+            logger.info(f"Total cyberware humanity loss: {total_cyberware_hl}, trauma: {trauma_hl}")
+
+        # Calculate new humanity (trauma = permanent loss from removed cyberware)
+        new_humanity = max(0, self.empathy * 10 - total_cyberware_hl - trauma_hl)
+
+        if not quiet:
+            logger.info(f"New calculated humanity: {new_humanity}")
+
         # Update humanity
         self.humanity = new_humanity
-        
+
         # Only update empathy if it's been reduced to 0
-        if self.empathy * 10 <= total_cyberware_hl:
+        if self.empathy * 10 <= total_cyberware_hl + trauma_hl:
             self.empathy = max(1, new_humanity // 10)
-        
+
         self.total_cyberware_humanity_loss = total_cyberware_hl
-        logger.info("About to recalculate derived stats")
+        if not quiet:
+            logger.info("About to recalculate derived stats")
         self.recalculate_derived_stats()
-        logger.info("Derived stats recalculated")
+        if not quiet:
+            logger.info("Derived stats recalculated")
         self.save()
-        logger.info("CharacterSheet saved")
-        
+        if not quiet:
+            logger.info("CharacterSheet saved")
+
     def recalculate_derived_stats(self):
         self._max_hp = 10 + (5 * ((self.body + self.willpower) // 2))
         self.death_save = self.body
         self.serious_wounds = self.body
-        
+
         total_cyberware_hl = self.calculate_total_cyberware_hl()
-        
-        # Calculate current humanity
-        self.humanity = max(0, self.empathy * 10 - total_cyberware_hl)
-        
+        trauma_hl = getattr(self, "trauma_humanity_loss", 0) or 0
+
+        # Calculate current humanity (includes trauma from removed cyberware)
+        self.humanity = max(0, self.empathy * 10 - total_cyberware_hl - trauma_hl)
+
         # Ensure _current_hp doesn't exceed _max_hp
         if self._current_hp > self._max_hp:
             self._current_hp = self._max_hp
@@ -551,7 +590,10 @@ class CharacterSheet(SharedMemoryModel):
     def calculate_total_cyberware_hl(self):
         # Use lazy import to avoid circular dependency
         CyberwareInstance = apps.get_model('inventory', 'CyberwareInstance')
-        installed_cyberware = CyberwareInstance.objects.filter(character=self, installed=True)
+        sheet_pk = getattr(self, 'pk', None)
+        if sheet_pk is None:
+            return 0
+        installed_cyberware = CyberwareInstance.objects.filter(character_sheet_id=sheet_pk, installed=True)
         return sum(cw.cyberware.humanity_loss for cw in installed_cyberware)
 
     def save(self, *args, **kwargs):
@@ -606,6 +648,23 @@ class CharacterSheet(SharedMemoryModel):
                  self.rep = new_rep
                  self.save()
 
+    def add_notoriety(self, amount):
+                """
+                Add notoriety points and update notoriety rank if necessary.
+                """
+                self.notoriety_points += amount
+                self.update_notoriety()
+                self.save()
+
+    def update_notoriety(self):
+                """
+                Update the notoriety rank based on notoriety points.
+                """
+                new_notoriety = min(self.notoriety_points // 100, 10)
+                if new_notoriety != self.notoriety:
+                 self.notoriety = new_notoriety
+                 self.save()
+
     def reset(self):
         """Reset all fields to their default values and clear cyberware, languages, and inventory."""
         self.role = ""
@@ -629,7 +688,7 @@ class CharacterSheet(SharedMemoryModel):
         CyberwareInstance.objects.filter(character=self).delete()
         
         # Clear existing languages
-        self.character_languages.all().delete()
+        self.sheet_language_proficiencies.all().delete()
         
         # Add default language (Streetslang)
         self.add_language("Streetslang", 4)
@@ -669,19 +728,20 @@ class CharacterSheet(SharedMemoryModel):
         self._max_hp = 10 + (5 * ((self.body + self.willpower) // 2))
         self.death_save = self.body
         self.serious_wounds = self.body
-        
+
         total_cyberware_hl = self.calculate_total_cyberware_hl()
-        
-        # Calculate current humanity
-        self.humanity = max(0, self.empathy * 10 - total_cyberware_hl)
-        
+        trauma_hl = getattr(self, "trauma_humanity_loss", 0) or 0
+
+        # Calculate current humanity (includes trauma from removed cyberware)
+        self.humanity = max(0, self.empathy * 10 - total_cyberware_hl - trauma_hl)
+
         # Ensure _current_hp doesn't exceed _max_hp
         if self._current_hp > self._max_hp:
             self._current_hp = self._max_hp
         # If _current_hp is 0, set it to _max_hp
         if self._current_hp == 0:
             self._current_hp = self._max_hp
-        # Ensure _current_hp is never negative   
+        # Ensure _current_hp is never negative
         self._current_hp = max(0, self._current_hp)
 
 @property

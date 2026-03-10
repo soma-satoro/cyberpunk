@@ -440,7 +440,7 @@ class CmdPlots(MuxCommand):
             return
 
         # Find character by name
-        char = self.caller.search(self.rhs)
+        char = self.caller.search(self.rhs, global_search=True)
         if not char:
             return
 
@@ -466,7 +466,7 @@ class CmdPlots(MuxCommand):
             return
 
         # Find character by name
-        char = self.caller.search(self.rhs)
+        char = self.caller.search(self.rhs, global_search=True)
         if not char:
             return
 

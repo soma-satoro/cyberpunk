@@ -47,9 +47,9 @@ class CmdAddCyberware(MuxCommand):
             return
 
         # Find the character
-        character = self.caller.search(character_name, typeclass="typeclasses.characters.Character")
+        character = self.caller.search(character_name, typeclass="typeclasses.characters.Character", global_search=True)
         if not character:
-            character = self.caller.search(character_name)
+            character = self.caller.search(character_name, global_search=True)
         if not character:
             return
 

@@ -1,6 +1,6 @@
 from evennia import default_cmds
-from evennia.utils import ansi
 from commands.CmdPose import PoseBreakMixin
+from utils.text import process_special_characters
 import re
 
 class CmdEmit(PoseBreakMixin, default_cmds.MuxCommand):
@@ -24,16 +24,9 @@ class CmdEmit(PoseBreakMixin, default_cmds.MuxCommand):
     """
 
     key = "@emit"
-    aliases = ["\\\\"]
+    aliases = ["\\\\", "emit"]
     locks = "cmd:all()"
     help_category = "RP Commands"
-
-    def process_special_characters(self, message):
-        """
-        Process %r and %t in the message, replacing them with appropriate ANSI codes.
-        """
-        message = message.replace('%r', '|/').replace('%t', '|-')
-        return message
 
     def func(self):
         """Execute the @emit command"""
@@ -48,8 +41,16 @@ class CmdEmit(PoseBreakMixin, default_cmds.MuxCommand):
             caller.msg("Usage: @emit <message>")
             return
 
+        # Normalize "text" for language to "~text" (alternative syntax)
+        args_normalized = re.sub(
+            r'"([^"]+)"\s+for\s+language\b',
+            r'"~\1"',
+            self.args,
+            flags=re.IGNORECASE
+        )
+
         # Process special characters in the message
-        processed_args = self.process_special_characters(self.args)
+        processed_args = process_special_characters(args_normalized)
 
         # Check if there's a language-tagged speech and set speaking language
         if "~" in processed_args or 'language' in self.switches:
@@ -58,17 +59,8 @@ class CmdEmit(PoseBreakMixin, default_cmds.MuxCommand):
                 caller.msg("You need to set a speaking language first with +language <language>")
                 return
 
-        # Filter receivers based on reality layers
-        filtered_receivers = []
-        for obj in caller.location.contents:
-            if not obj.has_account:
-                continue
-            
-            # Check if they share the same reality layer
-            if (caller.tags.get("in_umbra", category="state") and obj.tags.get("in_umbra", category="state")) or \
-               (caller.tags.get("in_material", category="state") and obj.tags.get("in_material", category="state")) or \
-               (caller.tags.get("in_dreaming", category="state") and obj.tags.get("in_dreaming", category="state")):
-                filtered_receivers.append(obj)
+        # Get receivers (Cyberpunk: all in room; WoD: same reality layer)
+        filtered_receivers = self.get_filtered_receivers()
 
         # Send pose break before the message
         self.send_pose_break()
@@ -76,17 +68,15 @@ class CmdEmit(PoseBreakMixin, default_cmds.MuxCommand):
         if 'language' in self.switches:
             # The entire emit is in the set language
             speaking_language = caller.get_speaking_language()
-            _, msg_understand, msg_not_understand, _ = caller.prepare_say(processed_args, language_only=True, skip_english=True)
+            _, msg_understand, msg_not_understand, language = caller.prepare_say(processed_args, language_only=True, skip_english=True)
 
             for receiver in filtered_receivers:
-                has_universal = any(
-                    merit.lower().replace(' ', '') == 'universallanguage'
-                    for category in receiver.db.stats.get('merits', {}).values()
-                    for merit in category.keys()
-                )
-                
+                # WoD Universal Language merit (no-op in Cyberpunk)
+                has_universal = self.receiver_has_universal_language(receiver)
                 if receiver == caller or has_universal or speaking_language in receiver.get_languages():
-                    receiver.msg(msg_understand)
+                    lang_name = str(speaking_language) if speaking_language else ''
+                    lang_indicator = f' (in {lang_name})' if lang_name else ''
+                    receiver.msg(msg_understand + lang_indicator)
                 else:
                     receiver.msg(msg_not_understand)
         else:
@@ -99,20 +89,16 @@ class CmdEmit(PoseBreakMixin, default_cmds.MuxCommand):
                         # Add text before the speech
                         parts.append(processed_args[current_pos:match.start()])
                         
-                        # Process the speech
-                        speech = match.group(1)
-                        _, msg_understand, msg_not_understand, _ = caller.prepare_say(speech, language_only=True, skip_english=True)
+                        # Process the speech - pass with ~ prefix so prepare_say recognizes it as language-tagged
+                        speech = "~" + match.group(1)
+                        _, msg_understand, msg_not_understand, language = caller.prepare_say(speech, language_only=True, skip_english=True)
                         
-                        # Check for Universal Language merit
-                        has_universal = any(
-                            merit.lower().replace(' ', '') == 'universallanguage'
-                            for category in receiver.db.stats.get('merits', {}).values()
-                            for merit in category.keys()
-                        )
-                        
+                        # WoD Universal Language merit (no-op in Cyberpunk)
+                        has_universal = self.receiver_has_universal_language(receiver)
                         speaking_language = caller.get_speaking_language()
                         if receiver == caller or has_universal or (speaking_language and speaking_language in receiver.get_languages()):
-                            parts.append(f'"{msg_understand}"')
+                            lang_indicator = f' (in {speaking_language})' if speaking_language else ''
+                            parts.append(f'"{msg_understand}"{lang_indicator}')
                         else:
                             parts.append(f'"{msg_not_understand}"')
                         
@@ -127,5 +113,5 @@ class CmdEmit(PoseBreakMixin, default_cmds.MuxCommand):
                     # No language-tagged content, send as is
                     receiver.msg(processed_args)
 
-        # Record scene activity
-        caller.record_scene_activity()
+        if hasattr(caller, 'record_scene_activity'):
+            caller.record_scene_activity()

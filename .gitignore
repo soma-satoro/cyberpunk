@@ -32,6 +32,24 @@ server/conf/secret_settings.py
 server/logs/*.log.*
 server/.static/*
 server/.media/*
+world/commerce/migrations/*
+world/cyberpunk_sheets/migrations/*
+world/cyberpunk/migrations/*
+world/cyberware/migrations/*
+world/elflines/migrations/*
+world/factions/migrations/*
+world/hangouts/migrations/*
+world/inventory/migrations/*
+world/jobs/migrations/*
+world/languages/migrations/*
+world/mail/migrations/*
+world/mission_board/migrations/*
+world/mystery/migrations/*
+world/netrunning/migrations/*
+world/plots/migrations/*
+world/requests/migrations/*
+world/utils/migrations/*
+world/voucher/migrations/*
 
 # Installer logs
 pip-log.txt

@@ -82,22 +82,28 @@ class HangoutDB(ObjectDB):
         )
         return hangout
 
-    def get_display_entry(self, show_restricted=False):
+    def get_display_entry(self, show_restricted=False, skip_migration=False):
         """
         Get the display entry for this hangout.
         
         Args:
             show_restricted (bool): Whether to show the restricted marker
+            skip_migration (bool): If True, do not migrate/write hangout_id during
+                display. Avoids DB writes during listing which can cause "Database is
+                locked" and character desync. Uses self.id as fallback when hangout_id
+                is None.
             
         Returns:
             tuple: (number, info_line, description_line)
         """
-        # Ensure we have a hangout_id
-        if self.db.hangout_id is None:
+        # Use hangout_id if set; avoid migrating during display to prevent DB writes
+        if self.db.hangout_id is not None:
+            hangout_id = self.db.hangout_id
+        elif skip_migration:
+            hangout_id = self.id  # Fallback for display only
+        else:
             self._migrate_to_hangout_id()
-        
-        # Get the hangout_id (this should never be None now)
-        hangout_id = self.db.hangout_id
+            hangout_id = self.db.hangout_id
         
         restricted_marker = "*" if self.db.restricted and show_restricted else " "
         name = self.key

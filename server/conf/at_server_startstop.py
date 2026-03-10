@@ -9,22 +9,59 @@ customization of these hooks.
 
 from evennia import AccountDB, create_script
 from evennia.utils import logger
+from evennia.utils.evmore import EvMore, CmdSetMore
+from evennia.scripts.models import ScriptDB
 from evennia.server.sessionhandler import SESSIONS
 from world.world_scripts import WorldScript
 from typeclasses.scripts import RentCollectionScript
 from typeclasses.rental import RentableRoom
-from world.equipment_data import initialize_weapons, initialize_armor, initialize_gear, initialize_ammunition
+from world.equipment_data import (
+    initialize_weapons,
+    initialize_armor,
+    initialize_gear,
+    initialize_ammunition,
+    initialize_vehicles,
+    initialize_weapon_attachments,
+)
 from world.cyberware.cyberware_data import initialize_cyberware
+from world.ip_config import IPConfigScript, get_ip_config
+from world.ip_weekly_script import IPWeeklyScript
+from world.mystery.focus_recovery_script import FocusRecoveryScript
 from typeclasses.factions import Faction
+from evennia.objects.models import ObjectDB
 
 
 import traceback
+
+def _patch_evmore_for_duplicate_pager_fix():
+    """
+    Patch EvMore.start() to remove any existing CmdSetMore before adding a new one.
+    Fixes 'More than one match for next' when multiple sessions trigger help pagination
+    (e.g. webclient + telnet both viewing help, or rapid double-invocation).
+    """
+    _original_start = EvMore.start
+
+    def _patched_start(self):
+        # Remove any orphaned CmdSetMore (from multiple sessions or rapid re-invocation)
+        for obj in (self._caller, getattr(self._caller, "account", None)):
+            if obj and hasattr(obj, "cmdset"):
+                try:
+                    obj.cmdset.remove(CmdSetMore)
+                except Exception:
+                    pass
+        return _original_start(self)
+
+    EvMore.start = _patched_start
+
 
 def at_server_start():
     """
     This is called every time the server starts up, regardless of
     how it was shut down.
     """
+    # Patch EvMore to prevent duplicate pagination commands (next/previous conflict)
+    _patch_evmore_for_duplicate_pager_fix()
+
     # Initialize the faction system
     logger.log_info("Initializing the faction system...")
     
@@ -34,7 +71,9 @@ def at_server_start():
         return
         
     # Check if we have a master faction object
-    master = Faction.objects.filter(db_key="FactionMaster").first()
+    master = ObjectDB.objects.filter(
+        db_key="FactionMaster", db_typeclass_path="typeclasses.factions.Faction"
+    ).first()
     if not master:
         from evennia import create_object
         master = create_object(
@@ -73,6 +112,19 @@ def at_server_start():
     
     if created_count > 0:
         logger.log_info(f"Created {created_count} default factions")
+
+    # Ensure all factions have channels (create missing, add aliases to existing)
+    from world.factions.faction_utils import create_faction_channel
+    for faction_model in FactionModel.objects.all():
+        if not getattr(faction_model, "channel_id", None):
+            channel = create_faction_channel(faction_model.name)
+            if channel:
+                faction_model.channel_id = channel.id
+                faction_model.save()
+                logger.log_info(f"Created channel for faction {faction_model.name}")
+        else:
+            create_faction_channel(faction_model.name)  # Ensure aliases on existing
+
     logger.log_info("Faction system initialization complete")
 
     # Start the WorldScript
@@ -85,10 +137,38 @@ def at_server_start():
             create_script(RentCollectionScript, obj=room)
 
     initialize_weapons()
+    initialize_weapon_attachments()
     initialize_armor()
     initialize_gear()
     initialize_ammunition()
+    initialize_vehicles()
     initialize_cyberware()
+
+    # IP system: ensure config and weekly script exist
+    try:
+        if not ScriptDB.objects.filter(db_key="IPConfig").exists():
+            create_script(IPConfigScript, key="IPConfig")
+            logger.log_info("Created IPConfig script.")
+        if not ScriptDB.objects.filter(db_key="IPWeeklyAllotment").exists():
+            create_script(IPWeeklyScript, key="IPWeeklyAllotment")
+            logger.log_info("Created IPWeeklyAllotment script.")
+        if not ScriptDB.objects.filter(db_key="FocusRecovery").exists():
+            create_script(FocusRecoveryScript, key="FocusRecovery")
+            logger.log_info("Created FocusRecovery script.")
+        # Ensure weekly script is running (it no-ops when allotment disabled)
+        try:
+            ws = ScriptDB.objects.filter(db_key="IPWeeklyAllotment").first()
+            if ws and hasattr(ws, "start") and callable(ws.start):
+                if not ws.is_active():
+                    ws.start()
+            fr = ScriptDB.objects.filter(db_key="FocusRecovery").first()
+            if fr and hasattr(fr, "start") and callable(fr.start):
+                if not fr.is_active():
+                    fr.start()
+        except Exception:
+            pass
+    except Exception as e:
+        logger.log_err(f"IP system init: {e}")
 
     logger.log_info("Server startup scripts have been initialized.")
 
@@ -99,18 +179,17 @@ def at_server_stop():
     of it being for a reload, reset or shutdown.
     """
     logger.log_info("Custom server shutdown initiated")
-    
-    for p in AccountDB.objects.all():
-        logger.log_info(f"Processing account: {p.id}, class: {p.__class__}, is custom: {isinstance(p, AccountDB)}")
-        
-        if hasattr(p, 'at_server_shutdown'):
-            logger.log_info(f"Calling at_server_shutdown for Account {p.id}")
-            p.at_server_shutdown()
-        else:
-            logger.log_warn(f"Account {p.id} does not have at_server_shutdown method")
-
-    # Remove the SESSIONS.disconnect_all_sessions call
-
+    # Only process connected accounts - iterating all AccountDB can hang with large DBs
+    seen = set()
+    for session in SESSIONS.get_sessions():
+        acc = getattr(session, "account", None)
+        if acc and acc.id not in seen:
+            seen.add(acc.id)
+            try:
+                if hasattr(acc, "at_server_shutdown"):
+                    acc.at_server_shutdown()
+            except Exception as e:
+                logger.log_err(f"at_server_shutdown for Account {acc.id}: {e}")
     logger.log_info("Custom server shutdown complete")
 
 def at_server_reload_start(account_sessions=None):
@@ -127,17 +206,19 @@ def at_server_reload_start(account_sessions=None):
 
 def at_server_reload_stop():
     """
-    This is called only time the server stops during a reload.
+    This is called only when the server stops during a reload.
     """
     logger.log_info("Custom server reload initiated")
-    for p in AccountDB.objects.all():
-        logger.log_info(f"Processing account: {p.id}, class: {p.__class__}, is custom: {isinstance(p, AccountDB)}")
-        
-        if hasattr(p, 'at_server_reload'):
-            p.at_server_reload()
-        else:
-            logger.log_warn(f"Account {p.id} does not have at_server_reload method")
-
+    seen = set()
+    for session in SESSIONS.get_sessions():
+        acc = getattr(session, "account", None)
+        if acc and acc.id not in seen:
+            seen.add(acc.id)
+            try:
+                if hasattr(acc, "at_server_reload"):
+                    acc.at_server_reload()
+            except Exception as e:
+                logger.log_err(f"at_server_reload for Account {acc.id}: {e}")
     logger.log_info("Custom server reload complete")
 
 def at_server_cold_start():

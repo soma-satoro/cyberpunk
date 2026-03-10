@@ -3,7 +3,7 @@ Watch command - tracks login/logout of friends
 """
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils.utils import make_iter
-from utils.search_helpers import search_character
+from world.utils.search_helpers import search_character
 from evennia.server.sessionhandler import SESSIONS
 from evennia.server.signals import SIGNAL_OBJECT_POST_PUPPET, SIGNAL_OBJECT_POST_UNPUPPET
 from django.dispatch import receiver

@@ -5,6 +5,7 @@ from world.languages.language_dictionary import LANGUAGES
 from evennia.commands.default.muxcommand import MuxCommand
 import re
 from world.cyberpunk_sheets.models import CharacterSheet
+from world.utils.formatting import sheet_header, sheet_section, footer
 from evennia.utils import logger
 
 def parse_language_segments(message, known_languages):
@@ -57,7 +58,7 @@ class CmdLanguage(MuxCommand):
     """
 
     key = "language"
-    aliases = ["lang"]
+    aliases = ["lang", "+language", "+lang", "+languages"]
     locks = "cmd:all()"
 
     def func(self):
@@ -80,6 +81,15 @@ class CmdLanguage(MuxCommand):
         if self.args.lower() == "all":
             self.list_all_languages()
             return
+
+        if self.args.lower() == "none":
+            try:
+                self.caller.set_speaking_language(None)
+                self.caller.msg("You are no longer speaking in any specific language.")
+            except (ValueError, AttributeError):
+                self.caller.attributes.add("selected_language", "None")
+                self.caller.msg("You are no longer speaking in any specific language.")
+            return
         
         language_name = self.args.strip().capitalize()
         try:
@@ -93,34 +103,47 @@ class CmdLanguage(MuxCommand):
             self.caller.msg(f"You don't know the language '{language_name}'. Learn it first.")
             return
 
-        self.caller.attributes.add("selected_language", language_name)
-        self.caller.msg(f"Language set to: {language_name}")
+        # Use character's set_speaking_language for pose/emit/say compatibility
+        try:
+            self.caller.set_speaking_language(language.name)
+        except ValueError:
+            self.caller.attributes.add("selected_language", language.name)
+        self.caller.msg(f"Language set to: {language.name}")
 
     def list_languages(self, sheet):
-        known_languages = CharacterLanguage.objects.filter(character_sheet=sheet)
-        if not known_languages:
-            self.caller.msg("You don't know any languages yet.")
-            return
+        known_languages = CharacterLanguage.objects.filter(character_sheet=sheet).select_related('language').order_by('language__name')
+        W = 80
+        display_name = getattr(self.caller.db, 'full_name', None) or self.caller.name
 
-        table = self.styled_table("Language", "Level")
-        for cl in known_languages:
-            table.add_row(cl.language.name, cl.level)
-        
-        self.caller.msg(table)
+        output = sheet_header(f"Languages for {display_name}", width=W)
+        output += sheet_section("Your Known Languages", width=W)
+
+        if not known_languages:
+            output += "|wYou don't know any languages yet.|n\n"
+        else:
+            output += f"|y{'Language':<30}{'Level':<15}|n\n"
+            for cl in known_languages:
+                output += f"|w{cl.language.name:<30}{cl.level:<15}|n\n"
+
+        output += footer(width=W, fillchar="-")
+        self.caller.msg(output)
 
     def list_all_languages(self):
-        all_languages = Language.objects.all().order_by('name')
-        if not all_languages:
-            self.caller.msg("No languages are available in the game world.")
-            return
+        all_languages = sorted(LANGUAGES, key=lambda lang: lang.name)
+        W = 80
 
-        table = self.styled_table("Language", "Local", "Corporate")
-        for lang in all_languages:
-            table.add_row(lang.name, "Yes" if lang.local else "No", "Yes" if lang.corporate else "No")
-        
-        self.caller.msg("|wAll available languages:|n")
-        self.caller.msg(table)
-        self.caller.msg("Use 'language <name>' to set your speaking language.")
+        output = sheet_header("All Available Languages", width=W)
+        output += sheet_section("Languages", width=W)
+
+        if not all_languages:
+            output += "|wNo languages are available in the game world.|n\n"
+        else:
+            output += f"|y{'Language':<25}{'Local':<15}{'Corporate':<15}|n\n"
+            for lang in all_languages:
+                output += f"|w{lang.name:<25}{'Yes' if lang.local else 'No':<15}{'Yes' if lang.corporate else 'No':<15}|n\n"
+        output += "\n|wUse 'language <name>' to set your speaking language.|n\n"
+        output += footer(width=W, fillchar="-")
+        self.caller.msg(output)
 
 
 class LanguageMixin:
@@ -180,7 +203,7 @@ class LanguageMixin:
             if not character_sheet:
                 return
 
-            known_languages = [cl.language.name.lower() for cl in character_sheet.character_languages.all()]
+            known_languages = [cl.language.name.lower() for cl in character_sheet.sheet_language_proficiencies.all()]
             known_languages.append("english")  # Always include English
             default_language = self.caller.attributes.get("selected_language", "English").lower()
             
@@ -258,7 +281,7 @@ class LanguagePoseBreakMixin(LanguageMixin, PoseBreakMixin):
             if not character_sheet:
                 return
 
-            known_languages = [cl.language.name.lower() for cl in character_sheet.character_languages.all()]
+            known_languages = [cl.language.name.lower() for cl in character_sheet.sheet_language_proficiencies.all()]
             known_languages.append("english")  # Always include English
             default_language = self.caller.attributes.get("selected_language", "English").lower()
             

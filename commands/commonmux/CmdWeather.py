@@ -133,7 +133,7 @@ class CmdWeather(MuxCommand):
 
         width = 78
         output = []
-        output.append(header(f"{settings.SERVERNAME} Weather", width=width, char="="))
+        output.append(header(f"{settings.SERVERNAME} Weather", width=width, fillchar="="))
         output.append(self.format_stat("Date", current_date, width=width))
         output.append(self.format_stat("Time", current_time, width=width))
 
@@ -197,7 +197,7 @@ class CmdWeather(MuxCommand):
             except requests.RequestException:
                 self.caller.msg("Sorry, there was an error connecting to the weather service.")
 
-        output.append(footer(width=width, char="="))
+        output.append(footer(width=width, fillchar="="))
         
         # Send the formatted output to the player
         self.caller.msg("\n".join(output))

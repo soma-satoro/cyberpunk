@@ -1,6 +1,6 @@
 from evennia import DefaultObject
 from evennia.utils import gametime
-from world.equipment_data import weapons, armors, gears
+from world.equipment_data import weapons, armors, gears, vehicles
 
 class Merchant(DefaultObject):
     """
@@ -24,7 +24,7 @@ class Merchant(DefaultObject):
         Set up the merchant with a specific type and initialize inventory.
         """
         merchant_type = str(merchant_type).lower()  # Ensure merchant_type is a lowercase string
-        valid_types = ["arms_dealer", "clothier", "gear_merchant"]
+        valid_types = ["arms_dealer", "clothier", "gear_merchant", "vehicle_dealer"]
         if merchant_type not in valid_types:
             raise ValueError(f"Invalid merchant type. Choose from: {', '.join(valid_types)}")
         
@@ -38,6 +38,8 @@ class Merchant(DefaultObject):
             self.db.inventory = armors.copy()
         elif merchant_type == "gear_merchant":
             self.db.inventory = gears.copy()
+        elif merchant_type == "vehicle_dealer":
+            self.db.inventory = vehicles.copy()
 
     def can_haggle(self, character):
         """Check if a character can haggle with this merchant."""
@@ -55,7 +57,8 @@ class Merchant(DefaultObject):
 
     def get_sell_price(self, item):
         """Get the sell price for an item."""
-        return int(item.get('value', 0) * 0.5)  # 50% of original value
+        value = item.get('value', 0) or getattr(item, 'value', 0)
+        return int(value * 0.5)  # 50% of original value
 
     def list_items(self):
         """List all items available from this merchant."""

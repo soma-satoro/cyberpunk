@@ -24,18 +24,28 @@ class Room(DefaultRoom):
     def get_display_name(self, looker, **kwargs):
         """
         Get the name to display for the character.
+        Includes district and area from location_hierarchy when set.
         """
-        
         name = self.key
-        
+
+        # Build location string: Room Name - District - Area
+        hierarchy = self.db.location_hierarchy
+        if hierarchy:
+            if hasattr(hierarchy, '__iter__') and not isinstance(hierarchy, (str, bytes)):
+                hierarchy = list(hierarchy)
+            if len(hierarchy) >= 2:
+                name = f"{name} - {hierarchy[0]} - {hierarchy[1]}"
+            elif len(hierarchy) == 1:
+                name = f"{name} - {hierarchy[0]}"
+
         if self.db.gradient_name:
             name = ANSIString(self.db.gradient_name)
-            if looker.check_permstring("builders"):
+            if looker and looker.check_permstring("builders"):
                 name += f"({self.dbref})"
             return name
-        
+
         # If the looker is builder+ show the dbref
-        if looker.check_permstring("builders"):
+        if looker and looker.check_permstring("builders"):
             name += f"({self.dbref})"
 
         return name
@@ -149,6 +159,13 @@ class Room(DefaultRoom):
             # Split into two columns
             string += self.format_two_columns(direction_strings)
 
+        # Area code footer (District - Area Code)
+        area_code = self.db.area_code or "XX00"
+        area_name = self.db.area_name or "Unknown Area"
+        is_ooc = self.tags.get("ooc", category=None) if hasattr(self, 'tags') else False
+        area_type = "OOC Area" if is_ooc else "IC Area"
+        area_footer = f"|m{area_type} - {area_code}|n"
+        string += divider(area_footer, width=78, fillchar=ANSIString("|m-|n")) + "\n"
         string += footer(width=78, fillchar=ANSIString("|m-|n"))
 
         return string
@@ -196,7 +213,10 @@ class Room(DefaultRoom):
         Called when the room is first created.
         """
         super().at_object_creation()
-        # Add any custom attributes or tags here
+        # Default attributes for room display (district/area)
+        self.db.area_name = "Unknown Area"
+        self.db.area_code = "XX00"
+        self.db.location_hierarchy = ["Unknown", "Unknown"]
         self.db.custom_info = "This is a custom room."
 
     def initialize(self):

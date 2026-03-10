@@ -4,7 +4,7 @@ from evennia.commands.default.muxcommand import MuxCommand
 from world.cyberpunk_sheets.models import CharacterSheet
 from world.inventory.models import Weapon, Armor, Gear, Inventory, Ammunition, CyberwareInstance
 from world.cyberpunk_sheets.services import CharacterSheetMoneyService
-from world.utils.formatting import header, footer, divider
+from world.utils.formatting import sheet_header, sheet_section, footer
 from world.utils.character_utils import get_character_sheet
 import logging
 
@@ -45,74 +45,124 @@ class CmdInventory(MuxCommand):
             return
 
         inv = character_sheet.inventory
+        W = 80
+        display_name = getattr(self.caller.db, 'full_name', None) or self.caller.name
 
-        output = header(f"Inventory for {self.caller.name}", width=78, fillchar="|m-|n") + "\n"
+        output = sheet_header(f"Inventory for {display_name}", width=W)
 
-        # Display balance and rep
+        # Currency and Reputation
         balance = CharacterSheetMoneyService.get_balance(character_sheet)
         logger.info(f"Retrieved balance for character sheet ID {character_sheet.id}: {balance}")
-        output += divider("Currency and Reputation", width=78, fillchar="|m-|n") + "\n"
-        output += f"|cCurrent Bank Balance:|n {balance} Eurodollars\n"
-        output += f"|cNight City Rep:|n Rank {character_sheet.rep}\n\n"
+        output += sheet_section("Currency and Reputation", width=W)
+        output += f"|yCurrent Bank Balance:|n |w{balance} Eurodollars|n\n"
+        rep = character_sheet.rep
+        pts = getattr(character_sheet, 'reputation_points', 0) or 0
+        if rep >= 10:
+            rep_str = f"Rank {rep} ({pts} pts, max rank)"
+        else:
+            next_threshold = (rep + 1) * 100
+            pts_needed = next_threshold - pts
+            rep_str = f"Rank {rep} ({pts} pts, {pts_needed} to Rank {rep + 1})"
+        output += f"|yNight City Rep:|n |w{rep_str}|n\n"
+        noto = getattr(character_sheet, 'notoriety', 0) or 0
+        noto_pts = getattr(character_sheet, 'notoriety_points', 0) or 0
+        if noto >= 10:
+            noto_str = f"Rank {noto} ({noto_pts} pts, max rank)"
+        elif noto_pts > 0:
+            next_threshold = (noto + 1) * 100
+            pts_needed = next_threshold - noto_pts
+            noto_str = f"Rank {noto} ({noto_pts} pts, {pts_needed} to Rank {noto + 1})"
+        else:
+            noto_str = "None"
+        output += f"|yNight City Notoriety:|n |w{noto_str}|n\n\n"
 
         # Weapons
-        output += divider("Weapons", width=78, fillchar="|m-|n") + "\n"
-        output += f"|c{'Weapon':<25}{'Damage':<20}{'ROF':<20}|n\n"
+        output += sheet_section("Weapons", width=W)
         weapons = inv.weapons.all()
         if weapons:
+            output += f"|y{'Weapon':<25}{'Damage':<20}{'ROF':<20}|n\n"
             for weapon in weapons:
-                output += f"{weapon.name:<25}{weapon.damage or 'N/A':<20}{weapon.rof or 'N/A':<20}\n"
+                output += f"|w{weapon.name:<25}{weapon.damage or 'N/A':<20}{weapon.rof or 'N/A':<20}|n\n"
         else:
-            output += "No weapons in inventory.\n"
+            output += "|wNo weapons in inventory.|n\n"
         output += "\n"
 
         # Armor
-        output += divider("Armor", width=78, fillchar="|m-|n") + "\n"
-        output += f"|c{'Armor':<20}{'SP':<15}{'EV':<15}{'Locations':<20}|n\n"
+        output += sheet_section("Armor", width=W)
         armors = inv.armor.all()
         if armors:
+            output += f"|y{'Armor':<20}{'SP':<15}{'EV':<15}{'Locations':<20}|n\n"
             for armor in armors:
-                output += f"{armor.name:<20}{armor.sp or 'N/A':<15}{armor.ev or 'N/A':<15}{armor.locations or 'N/A':<20}\n"
+                output += f"|w{armor.name:<20}{str(armor.sp) if armor.sp is not None else 'N/A':<15}{armor.ev or 'N/A':<15}{armor.locations or 'N/A':<20}|n\n"
         else:
-            output += "No armor in inventory.\n"
+            output += "|wNo armor in inventory.|n\n"
         output += "\n"
 
         # Gear
-        output += divider("Gear", width=78, fillchar="|m-|n") + "\n"
-        output += f"|c{'Gear':<25}{'Category':<20}{'Description':<30}|n\n"
+        output += sheet_section("Gear", width=W)
         gears = inv.gear.all()
         if gears:
+            output += f"|y{'Gear':<25}{'Category':<20}{'Description':<30}|n\n"
             for gear in gears:
-                description = gear.description[:27] + "..." if len(gear.description) > 30 else gear.description
-                output += f"{gear.name:<25}{gear.category:<20}{description:<30}\n"
+                description = (gear.description[:27] + "...") if len(gear.description or "") > 30 else (gear.description or "")
+                output += f"|w{gear.name:<25}{gear.category:<20}{description:<30}|n\n"
         else:
-            output += "No gear in inventory.\n"
+            output += "|wNo gear in inventory.|n\n"
         output += "\n"
 
         # Ammunition
-        output += divider("Ammunition", width=78, fillchar="|m-|n") + "\n"
-        output += f"|c{'Ammunition':<25}{'Weapon Type':<25}{'Quantity':<20}|n\n"
+        output += sheet_section("Ammunition", width=W)
         ammo = inv.ammunition.all()
         if ammo:
+            output += f"|y{'Ammunition':<25}{'Weapon Type':<25}{'Quantity':<20}|n\n"
             for a in ammo:
-                output += f"{a.name:<25}{a.weapon_type:<25}{a.quantity:<20}\n"
+                output += f"|w{a.name:<25}{a.weapon_type:<25}{a.quantity:<20}|n\n"
         else:
-            output += "No ammunition in inventory.\n"
+            output += "|wNo ammunition in inventory.|n\n"
+        output += "\n"
+
+        # Vehicles
+        output += sheet_section("Vehicles", width=W)
+        vehicles = inv.vehicles.all()
+        if vehicles:
+            output += f"|y{'Vehicle':<22}{'Category':<8}{'SDP':<6}{'Seats':<6}{'Speed':<18}{'Value':<10}|n\n"
+            for v in vehicles:
+                speed = (v.speed_narrative or "N/A")[:17]
+                output += f"|w{v.name:<22}{v.category:<8}{v.sdp:<6}{v.seats:<6}{speed:<18}{v.value or 0:<10}|n\n"
+        else:
+            output += "|wNo vehicles in inventory.|n\n"
         output += "\n"
 
         # Cyberware
-        output += divider("Cyberware", width=78, fillchar="|m-|n") + "\n"
-        output += f"|c{'Cyberware':<25}{'Type':<18}{'Status':<15}{'Humanity Loss':<15}|n\n"
-        cyberware = inv.cyberware.all()
+        output += sheet_section("Cyberware", width=W)
+        cyberware = inv.cyberware.filter(installed=True)
         if cyberware:
+            output += f"|y{'Cyberware':<25}{'Type':<18}{'Status':<15}{'Humanity Loss':<15}|n\n"
             for cw in cyberware:
                 status = "Installed" if cw.installed else "Uninstalled"
-                output += f"{cw.cyberware.name:<25}{cw.cyberware.type:<18}{status:<15}{cw.cyberware.humanity_loss:<15}\n"
+                output += f"|w{cw.cyberware.name:<25}{cw.cyberware.type:<18}{status:<15}{cw.cyberware.humanity_loss:<15}|n\n"
         else:
-            output += "No cyberware in inventory.\n"
+            output += "|wNo cyberware in inventory.|n\n"
         output += "\n"
 
-        output += footer(width=78, fillchar="|m-|n")
+        # Vouchers (physical IC objects - hide concealed from self-view, they're always visible to owner)
+        output += sheet_section("Vouchers", width=W)
+        try:
+            from typeclasses.vouchers import Voucher
+            vouchers = [o for o in self.caller.contents if o.is_typeclass("typeclasses.vouchers.Voucher")]
+            if vouchers:
+                output += f"|y{'Voucher':<30}{'Items':<15}{'Locked':<10}|n\n"
+                for v in vouchers:
+                    items = v.get_items() if hasattr(v, 'get_items') else []
+                    item_count = sum(it.get("quantity", 1) for it in items)
+                    locked = "Yes" if (v.db.locked if hasattr(v, 'db') else False) else "No"
+                    output += f"|w{v.key:<30}{item_count:<15}{locked:<10}|n\n"
+            else:
+                output += "|wNo vouchers in inventory.|n\n"
+        except ImportError:
+            pass
+
+        output += footer(width=W, fillchar="-")
         self.caller.msg(output)
         
     def equip_item(self):
@@ -196,7 +246,7 @@ class CmdEquip(Command):
             return
         
         player_name, item_name = self.args.split(None, 1)
-        player = self.caller.search(player_name)
+        player = self.caller.search(player_name, global_search=True)
         if not player:
             return
 
@@ -232,7 +282,7 @@ class CmdEquip(Command):
             return
 
         player_name, item_name = self.args.split(None, 1)
-        player = self.caller.search(player_name)
+        player = self.caller.search(player_name, global_search=True)
         if not player:
             return
         
@@ -259,7 +309,7 @@ class CmdEquip(Command):
             return
 
         player_name, weapon_name = self.args.split(None, 1)
-        player = self.caller.search(player_name)
+        player = self.caller.search(player_name, global_search=True)
         if not player:
             return
 
@@ -286,7 +336,7 @@ class CmdEquip(Command):
             return
 
         player_name, armor_name = self.args.split(None, 1)
-        player = self.caller.search(player_name)
+        player = self.caller.search(player_name, global_search=True)
         if not player:
             return
 
@@ -313,7 +363,7 @@ class CmdEquip(Command):
             return
 
         player_name, gear_name = self.args.split(None, 1)
-        player = self.caller.search(player_name)
+        player = self.caller.search(player_name, global_search=True)
         if not player:
             return
 

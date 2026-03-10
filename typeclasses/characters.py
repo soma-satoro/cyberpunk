@@ -26,7 +26,8 @@ class Character(DefaultCharacter):
         self.cmdset.add("commands.default_cmdsets.CharacterCmdSet", permanent=True)
         
         # Initialize character attributes directly on the typeclass
-        self.db.full_name = self.name
+        # Leave full_name empty - chargen will set it. Avoids false "already initialized" prompt.
+        self.db.full_name = ""
         self.db.handle = ""
         self.db.role = ""
         self.db.gender = ""
@@ -65,6 +66,15 @@ class Character(DefaultCharacter):
         self.db.eurodollars = 0
         self.db.reputation_points = 0
         self.db.rep = 0
+        self.db.notoriety_points = 0
+        self.db.notoriety = 0
+        
+        # Improvement Points (IP)
+        self.db.improvement_points = 0
+        self.db.ip_spent = 0
+        self.db.ip_staff_awarded = 0
+        self.db.ip_log = []
+        self.db.ip_last_purchase = None  # For refund: {stat, from_level, to_level, cost, timestamp}
         
         # Status flags
         self.db.is_complete = False
@@ -195,10 +205,11 @@ class Character(DefaultCharacter):
         # Initialize skill instances dictionary
         self.db.skill_instances = {}
 
-        # Only create a character sheet if we have an account
-        if self.account:
-            self.create_character_sheet(self.account)
-        # Skip character sheet creation during initial setup - it will be created when a player connects
+        # Do NOT create character sheet here - it is created when the player runs chargen
+        # for the first time. This prevents new characters from being prompted to reset.
+
+        # New characters start unapproved until staff approve them
+        self.tags.add("unapproved", category="approval")
         
         # Initialize notification settings
         self.db.notifications = {
@@ -325,9 +336,6 @@ class Character(DefaultCharacter):
                 )
             self.location.for_contents(message, exclude=[self], from_obj=self)
 
-            # Show room description
-            self.msg((self.at_look(self.location)))
-
         # Display login notifications
         logger.log_info(f"About to call display_login_notifications for {self.key}")
         self.display_login_notifications()
@@ -384,6 +392,22 @@ class Character(DefaultCharacter):
         # Otherwise check individual setting
         return settings.get(notification_type, True)
 
+    def _subscribe_to_default_channels(self):
+        """Subscribe this character's account to Public and Newbie channels."""
+        if not self.account:
+            return
+        try:
+            from evennia.comms.models import ChannelDB
+            for channel_name in ("Public", "Newbie"):
+                channels = ChannelDB.objects.channel_search(channel_name)
+                if channels:
+                    channel = channels[0]
+                    if not channel.has_connection(self.account):
+                        channel.connect(self.account)
+                        logger.info(f"Subscribed {self.account.username} to {channel_name} channel")
+        except Exception as e:
+            logger.error(f"Error subscribing to default channels: {e}")
+
     def display_login_notifications(self):
         """Display notifications upon login."""
         from evennia.utils import logger
@@ -392,16 +416,16 @@ class Character(DefaultCharacter):
         if self.account:
             # Check for first login notification
             if not self.attributes.has("first_login_complete"):
-                self.msg("|g=========================== Welcome to Your WoD Game! ===========================|n")
-                self.msg("|wYou have been automatically subscribed to the |cNewbie|w channel.|n")
-                self.msg("|wYou can talk on this channel using the |cnewb|w command, for example:|n")
-                self.msg("|c   newb Hello everyone! I'm new here.|n")
+                # Subscribe new character's account to Public and Newbie channels
+                self._subscribe_to_default_channels()
+                
+                self.msg("|g=========================== Welcome to Night City! ===========================|n")
+                self.msg("|wYou have been automatically subscribed to the |cPublic|w and |cNewbie|w channels.|n")
+                self.msg("|wYou can talk on Public using |cpublic <message>|w and on Newbie using |cnew <message>|w, for example:|n")
+                self.msg("|c   public Hello everyone!|n")
+                self.msg("|c   new I'm new here - any tips?|n")
                 self.msg("|wYou can see all your available channels with the |cchannel/list|w command.|n")
                 self.msg("|wFor help getting started, type |chelp|w or ask questions on the Newbie channel.|n")
-                self.msg("                                                                                  ")
-                self.msg("|bJust as a note: if you've logged in before and you're seeing this, it's because|n")
-                self.msg("|bthe typeclass has been updated. Don't worry, your character data is still here!|n")
-                self.msg("|bYou also haven't been added to the newbie channel. This will only show up once.|n")
                 self.msg("|g==============================================================================|n")
                 
                 # Mark first login as complete
@@ -479,6 +503,19 @@ class Character(DefaultCharacter):
         if self.character_sheet:
             self.character_sheet.reduce_humanity(amount)
 
+    def get_display_name(self, looker, **kwargs):
+        """Override: in Elflines rooms, show elfname instead of meat-world name."""
+        if self.location and getattr(self.location, 'is_elflines_room', False):
+            from world.elflines.services import get_elo_sheet_for_character
+            sheet = get_elo_sheet_for_character(self)
+            if sheet and sheet.elfname and sheet.elfname.strip():
+                return sheet.elfname
+        # Fallback: gradient_name (from +gradient) or default
+        gradient = self.attributes.get('gradient_name', default=None)
+        if gradient:
+            return gradient
+        return super().get_display_name(looker, **kwargs)
+
     def get_attribute(self, attr_name):
         """Get a character attribute value."""
         if attr_name in self.db.skills:
@@ -532,15 +569,16 @@ class Character(DefaultCharacter):
         """Calculate character's humanity based on empathy and installed cyberware."""
         # Get total humanity loss from cyberware
         total_humanity_loss = self.calculate_cyberware_humanity_loss()
-        
+        trauma_loss = getattr(self.db, "trauma_humanity_loss", 0) or 0
+
         # Base humanity is empathy * 10
         base_humanity = self.db.empathy * 10
-        
-        # Current humanity is base minus losses
-        self.db.humanity = max(0, base_humanity - total_humanity_loss)
+
+        # Current humanity is base minus losses (includes trauma from removed cyberware)
+        self.db.humanity = max(0, base_humanity - total_humanity_loss - trauma_loss)
         
         # Only update empathy if it's been significantly reduced
-        if base_humanity <= total_humanity_loss:
+        if base_humanity <= total_humanity_loss + trauma_loss:
             self.db.empathy = max(1, self.db.humanity // 10)
         
         # Store total loss for reference
@@ -550,19 +588,27 @@ class Character(DefaultCharacter):
         """Calculate total humanity loss from installed cyberware."""
         from django.apps import apps
         CyberwareInstance = apps.get_model('inventory', 'CyberwareInstance')
-        
-        # Get character sheet for backward compatibility during transition
-        try:
-            character_sheet = self.character_sheet
-            if character_sheet:
-                installed_cyberware = CyberwareInstance.objects.filter(
-                    character=character_sheet, installed=True
-                )
-            else:
-                return 0  # No character sheet, no cyberware
-        except Exception:
-            return 0  # Error accessing character sheet
-            
+
+        # Use pk to avoid "Model instances passed to related filters must be saved" error
+        char_pk = getattr(self, 'pk', None) or getattr(self, 'id', None)
+
+        if char_pk is not None:
+            installed_cyberware = CyberwareInstance.objects.filter(
+                character_object_id=char_pk, installed=True
+            )
+        else:
+            installed_cyberware = CyberwareInstance.objects.none()
+
+        if not installed_cyberware.exists():
+            try:
+                character_sheet = self.character_sheet
+                if character_sheet and getattr(character_sheet, 'pk', None):
+                    installed_cyberware = CyberwareInstance.objects.filter(
+                        character_sheet_id=character_sheet.pk, installed=True
+                    )
+            except Exception:
+                pass
+
         # Sum humanity loss from all installed cyberware
         return sum(cw.cyberware.humanity_loss for cw in installed_cyberware)
     
@@ -630,19 +676,115 @@ class Character(DefaultCharacter):
         if not self.character_sheet:
             return []
         return [f"{cl.language.name} (Level {cl.level})" 
-                for cl in self.character_sheet.character_languages.all()]
+                for cl in self.character_sheet.sheet_language_proficiencies.all()]
 
     def knows_language(self, language_name):
         if not self.character_sheet:
             return False
-        return self.character_sheet.character_languages.filter(
+        return self.character_sheet.sheet_language_proficiencies.filter(
             language__name__iexact=language_name
         ).exists()
+
+    # Language mixin methods for pose/emit/say system (binary: knows language or not)
+    def get_languages(self):
+        """Return list of language names the character knows. Binary check for pose/emit/say.
+        Merges character_sheet (CharacterLanguage) and db.languages for chargen compatibility."""
+        result = {}
+        if self.character_sheet:
+            for cl in self.character_sheet.sheet_language_proficiencies.all():
+                if cl.level > 0:
+                    result[cl.language.name] = True
+        if hasattr(self.db, "languages") and self.db.languages:
+            for name, level in self.db.languages.items():
+                if level > 0:
+                    result[name] = True
+        return list(result.keys())
+
+    def get_speaking_language(self):
+        """Get the character's currently selected speaking language."""
+        lang = self.attributes.get("selected_language", "None")
+        if not lang or str(lang) == "None":
+            return None
+        return str(lang)
+
+    def set_speaking_language(self, language):
+        """Set the character's speaking language. Must be a language they know, or None."""
+        if language is None:
+            self.attributes.add("selected_language", "None")
+            return
+        languages = self.get_languages()
+        for known in languages:
+            if known.lower() == str(language).lower():
+                self.attributes.add("selected_language", known)
+                return
+        raise ValueError(f"You don't know the language '{language}'.")
+
+    def prepare_say(
+        self, speech, viewer=None, language_only=False, skip_english=False
+    ):
+        """
+        Prepare say/pose/emit messages for language-tagged speech.
+        Speech with leading ~ is in the speaker's set language.
+        Returns (msg_self, msg_understand, msg_not_understand, language).
+        """
+        display_name = self.get_display_name(viewer or self)
+        is_speaker = viewer is None or viewer == self
+
+        # Check for language-tagged speech (leading ~)
+        if speech.strip().startswith("~"):
+            text = speech.strip()[1:].strip()
+            language = self.get_speaking_language()
+            if not language:
+                # No language set - treat as plain text
+                language = None
+                text = speech
+        else:
+            language = None
+            text = speech
+
+        # English / untagged - everyone understands. skip_english=True means process non-English languages properly.
+        if language is None or (language and language.lower() == "english" and not skip_english):
+            if language_only:
+                return (text, text, text, None)
+            if is_speaker:
+                return (f'You say, "{text}"', f'{display_name} says, "{text}"', f'{display_name} says, "{text}"', None)
+            return (f'You say, "{text}"', f'{display_name} says, "{text}"', f'{display_name} says, "{text}"', None)
+
+        # Language-tagged: check if viewer understands
+        understands = is_speaker
+        if viewer and viewer != self:
+            understands = language in viewer.get_languages()
+
+        garbled = f"[speaks in {language}]"
+        if language_only:
+            msg_understand = text
+            msg_not_understand = garbled
+            msg_self = text
+        else:
+            msg_understand = f'{display_name} says, "{text}"'
+            msg_not_understand = f'{display_name} says, "{garbled}"'
+            msg_self = f'You say, "{text}"' if is_speaker else msg_understand
+
+        if understands:
+            return (msg_self, msg_understand, msg_not_understand, language)
+        return (msg_self, msg_understand, msg_not_understand, language)
+
+    def record_scene_activity(self):
+        """Optional hook for scene/activity tracking. No-op for Cyberpunk by default."""
+        pass
 
     def at_post_move(self, source_location, **kwargs):
         super().at_post_move(source_location, **kwargs)
         if self.character_sheet:
             self.character_sheet.refresh_from_db()
+
+    def at_object_receive(self, moved_obj, source_location, **kwargs):
+        """When receiving a voucher, remove from our inventory any items that duplicate voucher contents."""
+        super().at_object_receive(moved_obj, source_location, **kwargs)
+        from typeclasses.vouchers import Voucher
+        if moved_obj and moved_obj.is_typeclass(Voucher):
+            from world.voucher.utils import remove_voucher_duplicates_from_inventory
+            remove_voucher_duplicates_from_inventory(self, moved_obj)
 
     def return_appearance(self, looker, **kwargs):
         """
@@ -733,6 +875,8 @@ class Character(DefaultCharacter):
         self.db.eurodollars = sheet.eurodollars
         self.db.reputation_points = sheet.reputation_points
         self.db.rep = sheet.rep
+        self.db.notoriety_points = getattr(sheet, 'notoriety_points', 0) or 0
+        self.db.notoriety = getattr(sheet, 'notoriety', 0) or 0
         
         # Character status
         self.db.is_complete = sheet.is_complete
@@ -801,6 +945,10 @@ class Character(DefaultCharacter):
         sheet.eurodollars = self.db.eurodollars
         sheet.reputation_points = self.db.reputation_points
         sheet.rep = self.db.rep
+        if hasattr(sheet, 'notoriety_points'):
+            sheet.notoriety_points = getattr(self.db, 'notoriety_points', 0) or 0
+        if hasattr(sheet, 'notoriety'):
+            sheet.notoriety = getattr(self.db, 'notoriety', 0) or 0
         
         # Character status
         sheet.is_complete = self.db.is_complete
@@ -945,19 +1093,58 @@ class Character(DefaultCharacter):
             self.character_sheet.add_language(language_name, level)
 
     def remove_language(self, language_name):
+        """Remove a language from the character (db.languages, CharacterSheet, CharacterLanguage)."""
+        # Update db.languages
+        if hasattr(self.db, 'languages') and self.db.languages and language_name in self.db.languages:
+            languages = dict(self.db.languages)
+            del languages[language_name]
+            self.db.languages = languages
+        # Remove from CharacterSheet (and CharacterLanguage)
+        if self.character_sheet and hasattr(self.character_sheet, 'remove_language'):
+            try:
+                self.character_sheet.remove_language(language_name)
+            except Exception:
+                pass
+        # Also delete CharacterLanguage records (handles both character and sheet links)
+        from django.db.models import Q
+        from evennia.utils import logger as ev_logger
         try:
             language = Language.objects.get(name__iexact=language_name)
-            CharacterLanguage.objects.filter(character_sheet=self, language=language).delete()
-            logger.log_info(f"Removed language {language_name} from character sheet")
+            q = Q(language=language)
+            char_pk = getattr(self, 'pk', None) or getattr(self, 'id', None)
+            sheet_pk = getattr(self.character_sheet, 'pk', None) if self.character_sheet else None
+            if char_pk is not None or sheet_pk is not None:
+                if char_pk is not None and sheet_pk is not None:
+                    q &= Q(character_id=char_pk) | Q(character_sheet_id=sheet_pk)
+                elif char_pk is not None:
+                    q &= Q(character_id=char_pk)
+                else:
+                    q &= Q(character_sheet_id=sheet_pk)
+                CharacterLanguage.objects.filter(q).delete()
+                ev_logger.log_info(f"Removed language {language_name} from character")
         except Language.DoesNotExist:
-            logger.log_warn(f"Language {language_name} not found, nothing to remove")
+            pass
 
     def update_language_level(self, language_name, new_level):
+        from django.db.models import Q
         try:
             language = Language.objects.get(name=language_name)
-            char_lang = CharacterLanguage.objects.get(character_sheet=self, language=language)
-            char_lang.level = new_level
-            char_lang.save()
+            char_pk = getattr(self, 'pk', None) or getattr(self, 'id', None)
+            sheet_pk = getattr(self.character_sheet, 'pk', None) if self.character_sheet else None
+            q = Q(language=language)
+            if char_pk is not None or sheet_pk is not None:
+                if char_pk is not None and sheet_pk is not None:
+                    q &= Q(character_id=char_pk) | Q(character_sheet_id=sheet_pk)
+                elif char_pk is not None:
+                    q &= Q(character_id=char_pk)
+                else:
+                    q &= Q(character_sheet_id=sheet_pk)
+            else:
+                return
+            char_lang = CharacterLanguage.objects.filter(q).first()
+            if char_lang:
+                char_lang.level = new_level
+                char_lang.save()
         except (Language.DoesNotExist, CharacterLanguage.DoesNotExist):
             pass  # Language or character-language relationship not found
 
@@ -1313,22 +1500,22 @@ class Character(DefaultCharacter):
         
         return True
 
-@classmethod
-def create_sheet(cls, account, character, **kwargs):
-    """Create a sheet for the character"""
-    # Get the CharacterSheet model
-    CharacterSheet = apps.get_model('cyberpunk_sheets', 'CharacterSheet')
-    sheet = CharacterSheet.objects.create(account=account, character=character, **kwargs)
-    if character:
-        character.db.character_sheet_id = sheet.id
-    return sheet
+    @classmethod
+    def create_sheet(cls, account, character, **kwargs):
+        """Create a sheet for the character"""
+        # Get the CharacterSheet model
+        CharacterSheet = apps.get_model('cyberpunk_sheets', 'CharacterSheet')
+        sheet = CharacterSheet.objects.create(account=account, character=character, **kwargs)
+        if character:
+            character.db.character_sheet_id = sheet.id
+        return sheet
 
-def get_remaining_points(self):
-    """Get remaining character points"""
-    stat_points_spent, skill_points_spent = self.calculate_spent_points()
-    remaining_stat_points = max(0, 62 - stat_points_spent)
-    remaining_skill_points = max(0, 86 - skill_points_spent)
-    return remaining_stat_points, remaining_skill_points
+    def get_remaining_points(self):
+        """Get remaining character points"""
+        stat_points_spent, skill_points_spent = self.calculate_spent_points()
+        remaining_stat_points = max(0, 62 - stat_points_spent)
+        remaining_skill_points = max(0, 86 - skill_points_spent)
+        return remaining_stat_points, remaining_skill_points
 
 class Note:
     def __init__(self, name, text, category="General", is_public=False, is_approved=False, 

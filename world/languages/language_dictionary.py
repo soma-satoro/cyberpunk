@@ -25,6 +25,7 @@ LANGUAGES = [
     Language(name="Korean", local=True, corporate=True),
     Language(name="Hebrew", local=False, corporate=True),
     Language(name="Tagalog", local=False, corporate=False),
+    Language(name="Creole", local=False, corporate=False),
     Language(name="Punjabi", local=False, corporate=False),
     Language(name="Malay", local=True, corporate=False),
     Language(name="Bengali", local=True, corporate=False),

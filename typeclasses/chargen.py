@@ -71,11 +71,19 @@ class ChargenRoom(DefaultRoom):
         if not looker:
             return ""
         
-        # Ensure the character sheet exists
+        # Ensure the character sheet exists (use pk to avoid "Model instances must be saved" error)
         if not hasattr(looker, 'character_sheet') or looker.character_sheet is None:
             from world.cyberpunk_sheets.models import CharacterSheet
-            sheet, created = CharacterSheet.objects.get_or_create(character=looker)
-            looker.db.character_sheet_id = sheet.id
+            looker_pk = getattr(looker, 'pk', None) or getattr(looker, 'id', None)
+            if looker_pk is not None:
+                defaults = {}
+                if hasattr(looker, 'account') and looker.account:
+                    defaults['account_id'] = looker.account.id
+                sheet, created = CharacterSheet.objects.get_or_create(
+                    character_id=looker_pk,
+                    defaults=defaults
+                )
+                looker.db.character_sheet_id = sheet.id
 
         # Now it's safe to refresh the character sheet
         if looker.character_sheet:

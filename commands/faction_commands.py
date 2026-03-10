@@ -20,18 +20,64 @@ provide in-game functionality.
 """
 
 from evennia import Command, CmdSet, create_object
+from evennia.objects.models import ObjectDB
 from evennia.commands.default.muxcommand import MuxCommand
 from world.cyberpunk_sheets.models import CharacterSheet
 from evennia.utils.evtable import EvTable
 from evennia.utils.search import search_account
 from evennia.utils import logger, crop
 from django.core.exceptions import ObjectDoesNotExist
-from world.factions.models import Group, Faction as FactionModel
+from world.factions.models import Group, Faction as FactionModel, FactionItem
+from world.mission_board.models import FactionMissionPoster
 from world.factions.models import FactionReputation, GroupRole, GroupMembership, GroupJoinRequest, GroupInfo
 from world.factions.faction_types import FACTION_TYPES
 from world.factions.default_faction_dictionary import default_faction_dictionary
+from world.factions.faction_utils import (
+    create_faction_channel,
+    get_default_staff_sponsor,
+    set_default_staff_sponsor,
+    room_has_faction_vendor_tags,
+    character_has_faction_rep,
+    subscribe_character_to_faction_channel,
+)
+from world.utils.formatting import sheet_header, sheet_section, footer
 from typeclasses.factions import Faction
 import random, textwrap
+
+WIDTH = 80
+
+# Abbreviations for faction types (long types truncated for 80-char table)
+FACTION_TYPE_ABBREV = {
+    "corporation": "corp",
+    "service": "svc",
+    "gang": "gang",
+    "nomad": "nomad",
+    "zoner": "zone",
+    "edgerunner": "edge",
+    "band": "band",
+    "reclaimer": "recl",
+    "reclaimers": "recl",
+}
+
+
+def _abbreviate_faction_types(ft_list):
+    """Convert faction type list to abbreviated string (e.g. ['corporation','service'] -> 'corp/svc')."""
+    if not ft_list:
+        return "?"
+    if isinstance(ft_list, str):
+        if ft_list.strip().startswith("["):
+            try:
+                import ast
+                ft_list = ast.literal_eval(ft_list)
+            except (ValueError, SyntaxError):
+                ft_list = [ft_list]
+        else:
+            ft_list = [ft_list]
+    if not isinstance(ft_list, (list, tuple)):
+        ft_list = [ft_list]
+    abbrevs = [FACTION_TYPE_ABBREV.get(str(t).lower(), str(t)[:4]) for t in ft_list]
+    result = "/".join(abbrevs)
+    return result[:10] if len(result) > 10 else result
 
 
 class CmdFaction(MuxCommand):
@@ -50,6 +96,12 @@ class CmdFaction(MuxCommand):
       faction/rep <n> - Check your reputation with a faction
       faction/influence - Check the current influence of all factions
       faction/mission <n> - Attempt a mission for a faction
+    faction/join <faction> - Request to join (creates job for staff sponsor and faction head)
+      
+    Staff/Faction head commands:
+      faction/add <faction>=<character> - Add a character to a faction
+      faction/remove <faction>=<character> - Remove a character from a faction
+      faction/missionposter <faction>=<add|remove|list> [character] - Designate who can post missions
       
     Admin commands:
       faction/create <n> - Create a new faction (admin only)
@@ -58,13 +110,17 @@ class CmdFaction(MuxCommand):
       faction/type/add <n>=<type> - Add another type to a faction
       faction/desc <n>=<description> - Set a description on a faction
       faction/desc/ic <n>=<description> - Set IC description on a faction
-      faction/modify <character> <faction> <amount> - Modify reputation
+      faction/modify <character>/<faction>=<amount> - Modify reputation
+      faction/modify/notoriety <character>/<faction>=<amount> - Modify notoriety
+      faction/sponsor <faction>=<staff> - Set staff sponsor
+      faction/head <faction>=<character> - Set faction head (IC leader)
       faction/init - Initialize default factions
       
     Note: Factions can have multiple types (e.g., both 'nomad' and 'gang'),
     which allows them to represent complex entities in the game world.
     """
     key = "faction"
+    aliases = ["+faction"]
     locks = "cmd:all()"
     help_category = "Factions and Groups"
 
@@ -83,7 +139,7 @@ class CmdFaction(MuxCommand):
         switch = self.switches[0]  # Use the first switch if multiple provided
         
         # Admin-only commands
-        admin_commands = ["create", "type", "desc", "modify", "init"]
+        admin_commands = ["create", "type", "desc", "modify", "init", "sponsor", "head", "public", "defaultsponsor", "item"]
         if switch in admin_commands and not self.caller.check_permstring("Admin"):
             self.caller.msg("This faction command is only available to administrators.")
             return
@@ -98,7 +154,7 @@ class CmdFaction(MuxCommand):
         elif switch == "list":
             self.cmd_list()
         elif switch == "join":
-            self.caller.msg("You cannot directly join major factions. Gain reputation with them through missions and roleplay.")
+            self.cmd_join()
         elif switch == "leave":
             self.caller.msg("You cannot directly leave major factions. Your reputation with them can change through your actions.")
         elif switch == "rep":
@@ -121,36 +177,84 @@ class CmdFaction(MuxCommand):
             self.cmd_modify()
         elif switch == "init":
             self.cmd_init()
+        elif switch == "replist":
+            self.cmd_replist()
+        elif switch == "sponsor":
+            self.cmd_sponsor()
+        elif switch == "head":
+            self.cmd_head()
+        elif switch == "public":
+            self.cmd_public()
+        elif switch == "defaultsponsor":
+            self.cmd_defaultsponsor()
+        elif switch == "item":
+            self.cmd_item()
+        elif switch == "buy":
+            self.cmd_buy()
+        elif switch == "sell":
+            self.cmd_sell()
+        elif switch == "items":
+            self.cmd_items()
+        elif switch == "missionposter":
+            self.cmd_missionposter()
+        elif switch == "add":
+            self.cmd_add_member()
+        elif switch == "remove":
+            self.cmd_remove_member()
         else:
             self.caller.msg(f"Unknown switch: /{switch}")
 
     def cmd_list(self):
         """List all factions."""
-        from typeclasses.factions import Faction as FactionTypeclass
         factions = FactionModel.objects.all().order_by('-influence')
 
         if not factions:
             self.caller.msg("There are no factions in the game yet.")
             return
 
-        table = EvTable("Faction", "Type", "Influence", "Members", border="cells")
-        
-        for faction in factions:
-            faction_obj = FactionTypeclass.get_faction(faction.name)
-            
-            # Handle multiple faction types
-            if faction_obj and faction_obj.db.faction_type:
-                if isinstance(faction_obj.db.faction_type, list):
-                    faction_type = ", ".join(faction_obj.db.faction_type)
-                else:
-                    faction_type = str(faction_obj.db.faction_type)
-            else:
-                faction_type = "Unknown"
-                
-            member_count = faction.factionreputation_set.count()
-            table.add_row(faction.name, faction_type, faction.influence, member_count)
+        default_sponsor = get_default_staff_sponsor()
+        default_sponsor_name = default_sponsor.username if default_sponsor else None
 
-        self.caller.msg(table)
+        output = sheet_header("Faction List", width=WIDTH)
+        output += sheet_section("All Factions", width=WIDTH)
+
+        # Column widths (total 80): Faction 22 | Type 10 | Infl 5 | Mem 4 | Head 15 | Sponsor 24
+        col = {"faction": 22, "type": 10, "infl": 5, "mem": 4, "head": 15, "sponsor": 24}
+        output += f"|y{'Faction':<22}{'Type':<10}{'Infl':<5}{'Mem':<4}{'Head':<15}{'Sponsor':<24}|n\n"
+
+        for faction in factions:
+            # Use model's faction_type (list); abbreviate for display
+            ft_raw = getattr(faction, "faction_type", None) or []
+            faction_type = _abbreviate_faction_types(ft_raw)
+
+            member_count = faction.factionreputation_set.count()
+
+            # Truncate names to column width
+            faction_name = faction.name
+            if len(faction_name) > col["faction"]:
+                faction_name = faction_name[: col["faction"] - 2] + ".."
+
+            head_name = "-"
+            if getattr(faction, "faction_head", None):
+                head_name = faction.get_character_display_name(faction.faction_head)
+            if len(head_name) > col["head"]:
+                head_name = head_name[: col["head"] - 2] + ".."
+
+            sponsor_name = "-"
+            if getattr(faction, "staff_sponsor", None):
+                sponsor_name = faction.staff_sponsor.username
+            elif default_sponsor_name:
+                sponsor_name = f"Default ({default_sponsor_name})"
+            if len(sponsor_name) > col["sponsor"]:
+                sponsor_name = sponsor_name[: col["sponsor"] - 2] + ".."
+
+            row_fmt = f"|w{{0:<{col['faction']}}}{{1:<{col['type']}}}{{2:<{col['infl']}}}{{3:<{col['mem']}}}{{4:<{col['head']}}}{{5:<{col['sponsor']}}}|n\n"
+            output += row_fmt.format(
+                faction_name, faction_type, faction.influence, member_count, head_name, sponsor_name
+            )
+
+        output += footer(width=WIDTH, fillchar="-")
+        self.caller.msg(output)
 
     def cmd_info(self, faction_name=None):
         """Display information about a faction."""
@@ -171,50 +275,78 @@ class CmdFaction(MuxCommand):
             self.caller.msg(f"No faction named '{faction_name}' exists.")
             return
 
-        # Get faction type and member count
-        if faction_obj and faction_obj.db.faction_type:
-            if isinstance(faction_obj.db.faction_type, list):
-                faction_type = ", ".join(faction_obj.db.faction_type)
-            else:
-                faction_type = str(faction_obj.db.faction_type)
+        # Get faction type (model stores list) and member count
+        ft = getattr(faction, "faction_type", None) or []
+        if isinstance(ft, list):
+            faction_type = ", ".join(ft) if ft else "Unknown"
         else:
-            faction_type = "Unknown"
-            
+            faction_type = str(ft) if ft else "Unknown"
+
         member_count = faction.factionreputation_set.count()
         
-        # Create a table for display
-        table = EvTable(border="table", width=78)
-        table.add_row("|cFaction Name|n", faction.name)
-        table.add_row("|cType|n", faction_type)
-        table.add_row("|cOOC Description|n", crop(faction.description or 'Not set', width=58))
-        table.add_row("|cInfluence|n", faction.influence)
-        table.add_row("|cMembers|n", member_count)
-        table.add_row("|cCreated|n", faction.created_at.strftime('%Y-%m-%d %H:%M:%S'))
-        
-        self.caller.msg(table)
+        # Build output with sheet-style UI
+        output = sheet_header(f"Faction: {faction.name}", width=WIDTH)
+        output += sheet_section("Overview", width=WIDTH)
+        output += f"|y{'Faction Name':<25}|n {faction.name}\n"
+        output += f"|y{'Type':<25}|n {faction_type}\n"
+        output += f"|y{'Influence':<25}|n {faction.influence}\n"
+        output += f"|y{'Members':<25}|n {member_count}\n"
+        output += f"|y{'Created':<25}|n {faction.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        output += f"|y{'Membership':<25}|n {'Public' if getattr(faction, 'members_public', True) else 'Private'}\n\n"
 
-        # IC Description
+        # Leadership: staff sponsor always visible; faction head only when members public
+        output += sheet_section("Leadership", width=WIDTH)
+        staff_sponsor = getattr(faction, 'staff_sponsor', None)
+        if staff_sponsor:
+            output += f"|y{'Staff Sponsor':<25}|n {staff_sponsor.username}\n"
+        else:
+            output += f"|y{'Staff Sponsor':<25}|n Not set\n"
+        if getattr(faction, 'members_public', True):
+            faction_head = getattr(faction, 'faction_head', None)
+            if faction_head:
+                head_name = faction.get_character_display_name(faction_head) if hasattr(faction, 'get_character_display_name') else (getattr(faction_head.db, 'full_name', None) or faction_head.key)
+                output += f"|y{'Faction Head':<25}|n {head_name}\n"
+            else:
+                output += f"|y{'Faction Head':<25}|n Not set\n"
+        output += "\n"
+
+        # Members list - only when public
+        if getattr(faction, 'members_public', True) and member_count > 0:
+            output += sheet_section("Members", width=WIDTH)
+            reps = faction.factionreputation_set.all()[:20]  # Limit display
+            for fr in reps:
+                name = faction.get_character_display_name(fr.character) if hasattr(faction, 'get_character_display_name') else (getattr(fr.character.db, 'full_name', None) or fr.character.key)
+                output += f"  |w{name}|n - Rep {fr.rep} ({fr.reputation_points} pts)"
+                if fr.notoriety_points > 0:
+                    output += f", Notoriety {fr.notoriety}"
+                output += "\n"
+            if member_count > 20:
+                output += f"  ... and {member_count - 20} more\n"
+            output += "\n"
+
+        output += sheet_section("OOC Description", width=WIDTH)
+        output += (crop(faction.description or 'Not set', width=76) + "\n\n")
+        output += sheet_section("IC Description", width=WIDTH)
         ic_description = faction.ic_description or 'Not set'
-        wrapped_description = textwrap.wrap(ic_description, width=76)
-        
-        ic_table = EvTable(border="table", width=78)
-        ic_table.add_row("|cIC Description|n")
-        for line in wrapped_description:
-            ic_table.add_row(line)
-        
-        self.caller.msg(ic_table)
-        
-        # If player is a member or has reputation with this faction, show it
-        character_sheet = self.caller.character_sheet
-        if character_sheet:
+        for line in textwrap.wrap(ic_description, width=76):
+            output += line + "\n"
+        output += "\n"
+
+        # Player's standing
+        char_obj = self.caller
+        if char_obj:
             try:
-                rep = FactionReputation.objects.get(
-                    character=character_sheet,
-                    faction=faction
-                )
-                self.caller.msg(f"Your reputation with {faction.name}: {rep.reputation}")
+                fr = FactionReputation.objects.get(character=char_obj, faction=faction)
+                output += sheet_section("Your Standing", width=WIDTH)
+                rep_str = f"Rep: Rank {fr.rep} ({fr.reputation_points} pts)"
+                if fr.notoriety_points > 0:
+                    rep_str += f" | Notoriety: Rank {fr.notoriety} ({fr.notoriety_points} pts)"
+                output += rep_str + "\n"
             except FactionReputation.DoesNotExist:
                 pass
+
+        output += footer(width=WIDTH, fillchar="|m-|n")
+        self.caller.msg(output)
 
     def cmd_create(self):
         """Create a new faction (admin only)."""
@@ -249,6 +381,8 @@ class CmdFaction(MuxCommand):
             
             self.caller.msg(f"You have created the {faction_type} faction '{name}'.")
             self.caller.msg("Use faction/type and faction/desc to set more details.")
+            self.caller.msg("|yRemember:|n Set the staff sponsor (faction/sponsor) and faction head (faction/head) for this faction.")
+            self.caller.msg("|yReminder:|n Set the staff sponsor (faction/sponsor {}=<staff>) and faction head (faction/head {}=<character>).".format(name, name))
         else:
             self.caller.msg("Error creating faction. Check logs for details.")
 
@@ -291,48 +425,108 @@ class CmdFaction(MuxCommand):
             faction.update_from_model()
             
             self.caller.msg(f"You have created the {faction_type} faction '{name}'.")
+            self.caller.msg("|yRemember:|n Set the staff sponsor (faction/sponsor) and faction head (faction/head) for this faction.")
         else:
             self.caller.msg("Error creating faction. Check logs for details.")
 
     def cmd_join(self):
-        """Join a faction."""
+        """Request to join a faction by creating a job for the staff sponsor and faction head."""
         if not self.args:
-            self.caller.msg("Usage: faction/join <name>")
+            self.caller.msg("Usage: faction/join <faction>")
             return
-            
-        # Request to join a faction
+
         faction_name = self.args.strip()
-        faction_obj = Faction.get_faction(faction_name)
-        
-        if not faction_obj:
+        try:
+            faction_model = FactionModel.objects.get(name__iexact=faction_name)
+        except FactionModel.DoesNotExist:
             self.caller.msg(f"No faction named '{faction_name}' exists.")
             return
-            
-        # Check if they're already a member
-        if hasattr(self.caller, 'db') and self.caller.db.faction == faction_name:
-            self.caller.msg(f"You are already a member of '{faction_name}'.")
+
+        faction_obj = Faction.get_faction(faction_name)
+        if not faction_obj:
+            self.caller.msg(f"Faction object for '{faction_name}' not found.")
             return
-            
-        # Only allow joining edgerunner factions directly
-        if faction_obj.db.faction_type != "edgerunner":
-            self.caller.msg(f"{faction_name} is a {faction_obj.db.faction_type} faction and cannot be joined directly. "
-                         f"You must gain reputation with them through roleplay.")
+
+        # Check if already a member
+        if hasattr(self.caller, 'db') and self.caller.db.faction == faction_obj.key:
+            self.caller.msg(f"You are already a member of '{faction_model.name}'.")
             return
-            
-        # Add them to the faction
-        if faction_obj.add_member(self.caller):
-            self.caller.msg(f"You have joined the {faction_name} faction.")
-            
-            # Create reputation entry
-            faction_model = faction_obj.model
-            if faction_model and self.caller.character_sheet:
-                FactionReputation.objects.get_or_create(
-                    character=self.caller.character_sheet,
-                    faction=faction_model,
-                    defaults={"reputation": 0}
-                )
-        else:
-            self.caller.msg(f"Failed to join {faction_name}. Please contact an admin.")
+
+        # Get requester account (player)
+        requester = getattr(self.caller, 'account', self.caller)
+        if not requester or not hasattr(requester, 'username'):
+            self.caller.msg("You need to be logged in to request faction membership.")
+            return
+
+        # Assignee: faction's staff sponsor, or default sponsor
+        assignee = faction_model.staff_sponsor
+        if not assignee:
+            assignee = get_default_staff_sponsor()
+        if not assignee:
+            self.caller.msg(f"Faction {faction_model.name} has no staff sponsor. Contact staff.")
+            return
+
+        # Build description
+        char_display = getattr(self.caller.db, 'full_name', None) or self.caller.key
+        description = (
+            f"{char_display} ({self.caller.key}) wishes to join the {faction_model.name} faction.\n\n"
+            f"Staff sponsor: {assignee.username}\n"
+            f"Faction head: {faction_model.get_character_display_name(faction_model.faction_head) if faction_model.faction_head else 'Not set'}\n\n"
+            f"When approved, use faction/add {faction_model.name}={char_display} to add them."
+        )
+
+        # Create job
+        from world.jobs.models import Job, Queue
+
+        queue, _ = Queue.objects.get_or_create(
+            name="FACTION",
+            defaults={"automatic_assignee": None}
+        )
+
+        job = Job.objects.create(
+            title=f"Faction Join: {faction_model.name}",
+            description=description,
+            requester=requester,
+            assignee=assignee,
+            queue=queue,
+            status="claimed",
+        )
+        job.participants.add(requester)
+
+        # Add faction head as participant if set
+        faction_head = faction_model.faction_head
+        if faction_head:
+            head_account = getattr(faction_head, 'account', None) or getattr(faction_head, 'db_account', None)
+            if head_account and head_account != requester:
+                job.participants.add(head_account)
+
+        # Notify assignee
+        if assignee != requester:
+            self.caller.execute_cmd(
+                f"@mail {assignee.username}=Faction Join Request: {faction_model.name}/"
+                f"{char_display} has submitted a request to join {faction_model.name}. "
+                f"Job #{job.id} has been assigned to you."
+            )
+
+        # Post to jobs channel
+        try:
+            from evennia.comms.models import ChannelDB
+            channel_names = ["Jobs", "Requests", "Req"]
+            channel = None
+            for name in channel_names:
+                found = ChannelDB.objects.channel_search(name)
+                if found:
+                    channel = found[0]
+                    break
+            if channel:
+                channel.msg(f"[Job System] {requester.username} created Job #{job.id} (Faction Join: {faction_model.name})")
+        except Exception:
+            pass
+
+        self.caller.msg(
+            f"|gFaction join request submitted.|n Job #{job.id} has been created and assigned to {assignee.username}. "
+            f"The faction head has been added as a participant. Staff will process your request."
+        )
 
     def cmd_leave(self):
         """Leave your current faction."""
@@ -355,9 +549,8 @@ class CmdFaction(MuxCommand):
             self.caller.msg(f"Failed to leave {faction_name}. Please contact an admin.")
 
     def cmd_rep(self):
-        """Check your reputation with a faction."""
+        """Check your reputation and notoriety with a faction."""
         if not self.args:
-            # If no faction specified, check current faction
             if not hasattr(self.caller, 'db') or not self.caller.db.faction:
                 self.caller.msg("You are not currently affiliated with any faction.")
                 return
@@ -365,9 +558,8 @@ class CmdFaction(MuxCommand):
         else:
             faction_name = self.args.strip()
 
-        character_sheet = self.caller.character_sheet
-        if not character_sheet:
-            self.caller.msg("You need a character sheet to check faction reputation.")
+        if not self.caller.character_sheet:
+            self.caller.msg("You need a character sheet to check faction standing.")
             return
 
         try:
@@ -376,12 +568,15 @@ class CmdFaction(MuxCommand):
             self.caller.msg(f"No faction named '{faction_name}' exists.")
             return
 
-        reputation, created = FactionReputation.objects.get_or_create(
-            character=character_sheet,
-            faction=faction
+        fr, created = FactionReputation.objects.get_or_create(
+            character=self.caller,
+            faction=faction,
+            defaults={"reputation_points": 0, "rep": 0, "notoriety_points": 0, "notoriety": 0}
         )
-
-        self.caller.msg(f"Your reputation with {faction.name}: {reputation.reputation}")
+        rep_str = f"Rep: Rank {fr.rep} ({fr.reputation_points} pts)"
+        if fr.notoriety_points > 0:
+            rep_str += f" | Notoriety: Rank {fr.notoriety} ({fr.notoriety_points} pts)"
+        self.caller.msg(f"Your standing with {faction.name}: {rep_str}")
 
     def cmd_influence(self):
         """Check the influence of all factions."""
@@ -427,10 +622,11 @@ class CmdFaction(MuxCommand):
             influence_gain = random.randint(1, 3)
 
             reputation, created = FactionReputation.objects.get_or_create(
-                character=character_sheet,
+                character=self.caller,
                 faction=faction
             )
-            reputation.reputation += reputation_gain
+            reputation.reputation_points += reputation_gain
+            reputation.update_rep()
             reputation.save()
 
             faction.influence += influence_gain
@@ -582,25 +778,45 @@ class CmdFaction(MuxCommand):
         logger.log_info(f"{self.caller.name} added type '{faction_type}' to {faction_name}")
 
     def cmd_modify(self):
-        """Modify a character's reputation with a faction (admin only)."""
-        if not self.args or len(self.args.split()) != 3:
-            self.caller.msg("Usage: faction/modify <character> <faction> <amount>")
+        """Modify a character's reputation or notoriety with a faction (admin only)."""
+        from commands.staff_commands import get_character_and_sheet
+
+        if not self.args or "=" not in self.args:
+            self.caller.msg(
+                "Usage: faction/modify <character>/<faction>=<amount>\n"
+                "       faction/modify/notoriety <character>/<faction>=<amount>"
+            )
             return
 
-        # Check permissions
         if not self.caller.check_permstring("Admin"):
-            self.caller.msg("Only admins can modify faction reputation.")
+            self.caller.msg("Only admins can modify faction standing.")
             return
 
-        char_name, faction_name, amount = self.args.split()
-
+        lhs, rhs = self.args.split("=", 1)
+        lhs = lhs.strip()
+        rhs = rhs.strip()
+        if "/" not in lhs:
+            self.caller.msg("Usage: faction/modify <character>/<faction>=<amount>")
+            return
+        char_name, faction_name = [p.strip() for p in lhs.split("/", 1)]
         try:
-            character = CharacterSheet.objects.get(full_name__iexact=char_name)
-            faction = FactionModel.objects.get(name__iexact=faction_name)
-            amount = int(amount)
-        except CharacterSheet.DoesNotExist:
+            amount = int(rhs)
+        except ValueError:
+            self.caller.msg("Amount must be a number.")
+            return
+        is_notoriety = "notoriety" in self.switches
+
+        character, char_sheet = get_character_and_sheet(self.caller, char_name)
+        if not character and not char_sheet:
             self.caller.msg(f"Character '{char_name}' not found.")
             return
+        char_obj = character or (getattr(char_sheet, 'character', None) if char_sheet else None)
+        if not char_obj:
+            self.caller.msg(f"Character '{char_name}' has no linked object.")
+            return
+
+        try:
+            faction = FactionModel.objects.get(name__iexact=faction_name)
         except FactionModel.DoesNotExist:
             self.caller.msg(f"Faction '{faction_name}' not found.")
             return
@@ -608,15 +824,459 @@ class CmdFaction(MuxCommand):
             self.caller.msg("Amount must be a number.")
             return
 
-        reputation, created = FactionReputation.objects.get_or_create(
-            character=character,
-            faction=faction
+        fr, created = FactionReputation.objects.get_or_create(
+            character=char_obj,
+            faction=faction,
+            defaults={"reputation_points": 0, "rep": 0, "notoriety_points": 0, "notoriety": 0}
         )
+        display_name = getattr(char_obj.db, 'full_name', None) or char_obj.key
 
-        reputation.reputation += amount
-        reputation.save()
+        if is_notoriety:
+            fr.notoriety_points = max(0, fr.notoriety_points + amount)
+            fr.update_notoriety()
+            fr.save()
+            self.caller.msg(
+                f"Modified {display_name}'s notoriety with {faction.name} by {amount}. "
+                f"Notoriety: Rank {fr.notoriety} ({fr.notoriety_points} pts)"
+            )
+        else:
+            fr.reputation_points = max(0, fr.reputation_points + amount)
+            fr.update_rep()
+            fr.save()
+            self.caller.msg(
+                f"Modified {display_name}'s reputation with {faction.name} by {amount}. "
+                f"Rep: Rank {fr.rep} ({fr.reputation_points} pts)"
+            )
+        # Subscribe character to faction channel when they have standing
+        subscribe_character_to_faction_channel(char_obj, faction)
 
-        self.caller.msg(f"Modified {character.full_name}'s reputation with {faction.name} by {amount}. New reputation: {reputation.reputation}")
+    def cmd_replist(self):
+        """Show all faction members and their rep/notoriety. Faction members only."""
+        faction_name = self.args.strip() if self.args else None
+        if not faction_name:
+            self.caller.msg("Usage: faction/replist <faction_name>")
+            return
+        try:
+            faction = FactionModel.objects.get(name__iexact=faction_name)
+        except FactionModel.DoesNotExist:
+            self.caller.msg(f"No faction named '{faction_name}' exists.")
+            return
+        # Must have rep with this faction to view
+        if not character_has_faction_rep(self.caller, faction):
+            self.caller.msg("You must have standing with this faction to view its reputation list.")
+            return
+        reputations = FactionReputation.objects.filter(faction=faction).order_by('-rep', '-notoriety')
+        output = sheet_header(f"Reputation List: {faction.name}", width=WIDTH)
+        output += sheet_section("Members and Standing", width=WIDTH)
+        output += f"|y{'Character':<30}{'Rep':<8}{'Pts':<8}{'Notoriety':<10}{'Pts':<8}|n\n"
+        for fr in reputations:
+            name = faction.get_character_display_name(fr.character) if hasattr(faction, 'get_character_display_name') else (getattr(fr.character.db, 'full_name', None) or fr.character.key)
+            name = (name or "?")[:29]
+            output += f"|w{name:<30}{fr.rep:<8}{fr.reputation_points:<8}{fr.notoriety:<10}{fr.notoriety_points:<8}|n\n"
+        output += footer(width=WIDTH, fillchar="|m-|n")
+        self.caller.msg(output)
+
+    def cmd_sponsor(self):
+        """Set staff sponsor for a faction. Usage: faction/sponsor <faction>=<staff_username>"""
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: faction/sponsor <faction>=<staff_username>")
+            return
+        faction_name, username = [p.strip() for p in self.args.split("=", 1)]
+        try:
+            faction = FactionModel.objects.get(name__iexact=faction_name)
+        except FactionModel.DoesNotExist:
+            self.caller.msg(f"No faction named '{faction_name}' exists.")
+            return
+        from evennia.accounts.models import AccountDB
+        if username.lower() in ("none", "clear", ""):
+            faction.staff_sponsor = None
+            faction.save()
+            self.caller.msg(f"Cleared staff sponsor for {faction.name}.")
+            return
+        try:
+            account = AccountDB.objects.get(username__iexact=username)
+        except AccountDB.DoesNotExist:
+            self.caller.msg(f"Account '{username}' not found.")
+            return
+        faction.staff_sponsor = account
+        faction.save()
+        self.caller.msg(f"Set {username} as staff sponsor for {faction.name}.")
+
+    def cmd_head(self):
+        """Set faction head (player character). Usage: faction/head <faction>=<character>"""
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: faction/head <faction>=<character>")
+            return
+        faction_name, char_name = [p.strip() for p in self.args.split("=", 1)]
+        try:
+            faction = FactionModel.objects.get(name__iexact=faction_name)
+        except FactionModel.DoesNotExist:
+            self.caller.msg(f"No faction named '{faction_name}' exists.")
+            return
+        if char_name.lower() in ("none", "clear", ""):
+            faction.faction_head = None
+            faction.save()
+            self.caller.msg(f"Cleared faction head for {faction.name}.")
+            return
+        from commands.staff_commands import get_character_and_sheet
+        character, _ = get_character_and_sheet(self.caller, char_name)
+        if not character:
+            self.caller.msg(f"Character '{char_name}' not found.")
+            return
+        faction.faction_head = character
+        faction.save()
+        display = getattr(character.db, 'full_name', None) or character.key
+        self.caller.msg(f"Set {display} as faction head for {faction.name}.")
+
+    def cmd_public(self):
+        """Set whether faction membership is public. Usage: faction/public <faction>=<on|off>"""
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: faction/public <faction>=<on|off>")
+            return
+        faction_name, val = [p.strip() for p in self.args.split("=", 1)]
+        try:
+            faction = FactionModel.objects.get(name__iexact=faction_name)
+        except FactionModel.DoesNotExist:
+            self.caller.msg(f"No faction named '{faction_name}' exists.")
+            return
+        faction.members_public = val.lower() in ("on", "yes", "1", "true")
+        faction.save()
+        status = "public" if faction.members_public else "private"
+        self.caller.msg(f"Faction {faction.name} membership is now {status}.")
+
+    def cmd_missionposter(self):
+        """Faction head: designate who can post missions. Usage: faction/missionposter <faction>=<add|remove|list> [character]"""
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: faction/missionposter <faction>=<add|remove|list> [character]")
+            return
+        faction_name, rest = [p.strip() for p in self.args.split("=", 1)]
+        parts = rest.split(None, 1)
+        subcmd = parts[0].lower() if parts else ""
+        char_name = parts[1].strip() if len(parts) > 1 else None
+        try:
+            faction = FactionModel.objects.get(name__iexact=faction_name)
+        except FactionModel.DoesNotExist:
+            self.caller.msg(f"No faction named '{faction_name}' exists.")
+            return
+        faction_obj = Faction.get_faction(faction_name)
+        if not faction_obj:
+            self.caller.msg("Faction object not found.")
+            return
+        is_head = faction.faction_head == self.caller
+        is_staff = self.caller.check_permstring("Builder")
+        if not (is_head or is_staff):
+            self.caller.msg("Only the faction head or staff can manage mission posters.")
+            return
+        if subcmd == "list":
+            posters = FactionMissionPoster.objects.filter(faction=faction)
+            if not posters:
+                self.caller.msg(f"No designated mission posters for {faction.name}.")
+                return
+            names = []
+            for p in posters:
+                d = getattr(p.character.db, 'full_name', None) or p.character.key
+                names.append(d)
+            self.caller.msg(f"Mission posters for {faction.name}: {', '.join(names)}")
+        elif subcmd == "add":
+            if not char_name:
+                self.caller.msg("Usage: faction/missionposter <faction>=add <character>")
+                return
+            from commands.staff_commands import get_character_and_sheet
+            character, _ = get_character_and_sheet(self.caller, char_name)
+            if not character:
+                self.caller.msg(f"Character '{char_name}' not found.")
+                return
+            _, created = FactionMissionPoster.objects.get_or_create(faction=faction, character=character)
+            if created:
+                self.caller.msg(f"Added {character.key} as mission poster for {faction.name}.")
+            else:
+                self.caller.msg(f"{character.key} is already a mission poster for {faction.name}.")
+        elif subcmd == "remove":
+            if not char_name:
+                self.caller.msg("Usage: faction/missionposter <faction>=remove <character>")
+                return
+            from commands.staff_commands import get_character_and_sheet
+            character, _ = get_character_and_sheet(self.caller, char_name)
+            if not character:
+                self.caller.msg(f"Character '{char_name}' not found.")
+                return
+            deleted, _ = FactionMissionPoster.objects.filter(faction=faction, character=character).delete()
+            if deleted:
+                self.caller.msg(f"Removed {character.key} from mission posters for {faction.name}.")
+            else:
+                self.caller.msg(f"{character.key} was not a mission poster for {faction.name}.")
+        else:
+            self.caller.msg("Use add, remove, or list.")
+
+    def cmd_add_member(self):
+        """Staff or faction head: Add a character to a faction. Usage: faction/add <faction>=<character>"""
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: faction/add <faction>=<character>")
+            return
+        faction_name, char_name = [p.strip() for p in self.args.split("=", 1)]
+        try:
+            faction_model = FactionModel.objects.get(name__iexact=faction_name)
+        except FactionModel.DoesNotExist:
+            self.caller.msg(f"No faction named '{faction_name}' exists.")
+            return
+        faction_obj = Faction.get_faction(faction_name)
+        if not faction_obj:
+            self.caller.msg("Faction object not found.")
+            return
+        is_head = faction_model.faction_head == self.caller
+        is_staff = self.caller.check_permstring("Builder")
+        if not (is_head or is_staff):
+            self.caller.msg("Only the faction head or staff can add members to a faction.")
+            return
+        from commands.staff_commands import get_character_and_sheet
+        character, _ = get_character_and_sheet(self.caller, char_name)
+        if not character:
+            self.caller.msg(f"Character '{char_name}' not found.")
+            return
+        if character.id in (faction_obj.db.members or []):
+            display = getattr(character.db, 'full_name', None) or character.key
+            self.caller.msg(f"{display} is already a member of {faction_model.name}.")
+            return
+        if faction_obj.add_member(character):
+            display = getattr(character.db, 'full_name', None) or character.key
+            # Ensure reputation entry exists for the character (ObjectDB)
+            FactionReputation.objects.get_or_create(
+                character=character,
+                faction=faction_model,
+                defaults={"reputation_points": 0, "rep": 0, "notoriety_points": 0, "notoriety": 0}
+            )
+            self.caller.msg(f"Added {display} to {faction_model.name}.")
+            logger.log_info(f"{self.caller.key} added {character.key} to faction {faction_model.name}")
+        else:
+            self.caller.msg("Failed to add member.")
+
+    def cmd_remove_member(self):
+        """Staff or faction head: Remove a character from a faction. Usage: faction/remove <faction>=<character>"""
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: faction/remove <faction>=<character>")
+            return
+        faction_name, char_name = [p.strip() for p in self.args.split("=", 1)]
+        try:
+            faction_model = FactionModel.objects.get(name__iexact=faction_name)
+        except FactionModel.DoesNotExist:
+            self.caller.msg(f"No faction named '{faction_name}' exists.")
+            return
+        faction_obj = Faction.get_faction(faction_name)
+        if not faction_obj:
+            self.caller.msg("Faction object not found.")
+            return
+        is_head = faction_model.faction_head == self.caller
+        is_staff = self.caller.check_permstring("Builder")
+        if not (is_head or is_staff):
+            self.caller.msg("Only the faction head or staff can remove members from a faction.")
+            return
+        from commands.staff_commands import get_character_and_sheet
+        character, _ = get_character_and_sheet(self.caller, char_name)
+        if not character:
+            self.caller.msg(f"Character '{char_name}' not found.")
+            return
+        if character.id not in (faction_obj.db.members or []):
+            display = getattr(character.db, 'full_name', None) or character.key
+            self.caller.msg(f"{display} is not a member of {faction_model.name}.")
+            return
+        if faction_obj.remove_member(character):
+            display = getattr(character.db, 'full_name', None) or character.key
+            self.caller.msg(f"Removed {display} from {faction_model.name}.")
+            logger.log_info(f"{self.caller.key} removed {character.key} from faction {faction_model.name}")
+        else:
+            self.caller.msg("Failed to remove member.")
+
+    def cmd_defaultsponsor(self):
+        """Set default staff sponsor for new factions. Usage: faction/defaultsponsor [=username]"""
+        if self.rhs:
+            username = self.rhs.strip()
+            from evennia.accounts.models import AccountDB
+            try:
+                account = AccountDB.objects.get(username__iexact=username)
+            except AccountDB.DoesNotExist:
+                self.caller.msg(f"Account '{username}' not found.")
+                return
+            if set_default_staff_sponsor(account):
+                self.caller.msg(f"Default staff sponsor set to {username}.")
+            else:
+                self.caller.msg("Failed to set default sponsor.")
+        else:
+            sponsor = get_default_staff_sponsor()
+            if sponsor:
+                self.caller.msg(f"Current default staff sponsor: {sponsor.username}")
+            else:
+                self.caller.msg("No default staff sponsor set. Use faction/defaultsponsor=<username> to set one.")
+
+    def cmd_item(self):
+        """Staff: Add a faction-exclusive item. Usage: faction/item <faction>=<type>/<item_key>/<display_name>/<price>"""
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: faction/item <faction>=<type>/<item_key>/<display_name>/<price>")
+            self.caller.msg("Types: weapon, armor, gear, cyberware, vehicle")
+            return
+        from world.factions.models import FactionItem
+        faction_name, rest = [p.strip() for p in self.args.split("=", 1)]
+        parts = [p.strip() for p in rest.split("/")]
+        if len(parts) != 4:
+            self.caller.msg("Usage: faction/item <faction>=<type>/<item_key>/<display_name>/<price>")
+            return
+        item_type, item_key, display_name, price_str = parts
+        try:
+            price = int(price_str)
+        except ValueError:
+            self.caller.msg("Price must be a number.")
+            return
+        if item_type not in [c[0] for c in FactionItem.ITEM_TYPES]:
+            self.caller.msg(f"Invalid type. Use: {', '.join(c[0] for c in FactionItem.ITEM_TYPES)}")
+            return
+        try:
+            faction = FactionModel.objects.get(name__iexact=faction_name)
+        except FactionModel.DoesNotExist:
+            self.caller.msg(f"No faction named '{faction_name}' exists.")
+            return
+        fi, created = FactionItem.objects.get_or_create(
+            faction=faction, item_type=item_type, item_key=item_key,
+            defaults={"display_name": display_name, "price": price}
+        )
+        if not created:
+            fi.display_name = display_name
+            fi.price = price
+            fi.save()
+        self.caller.msg(f"{'Created' if created else 'Updated'} faction item: {display_name} ({price} eb) for {faction.name}. Use +voucher to create the voucher template, then faction/item/setvoucher to link it.")
+
+    def cmd_buy(self):
+        """Buy a faction item (faction members only, in faction vendor rooms). Usage: faction/buy <faction>=<item_name>"""
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: faction/buy <faction>=<item_name>")
+            return
+        faction_name, item_name = [p.strip() for p in self.args.split("=", 1)]
+        try:
+            faction = FactionModel.objects.get(name__iexact=faction_name)
+        except FactionModel.DoesNotExist:
+            self.caller.msg(f"No faction named '{faction_name}' exists.")
+            return
+        if not character_has_faction_rep(self.caller, faction):
+            self.caller.msg("You must have standing with this faction to buy their items.")
+            return
+        if not self.caller.location:
+            self.caller.msg("You must be in a room to buy.")
+            return
+        if not room_has_faction_vendor_tags(self.caller.location, faction.name):
+            self.caller.msg(f"You must be in a room tagged with '{faction.name}' and 'Vendor' to buy faction items.")
+            return
+        from world.factions.models import FactionItem
+        from world.cyberpunk_sheets.services import CharacterSheetMoneyService
+        item = FactionItem.objects.filter(
+            faction=faction,
+            display_name__icontains=item_name
+        ).first()
+        if not item:
+            self.caller.msg(f"No faction item matching '{item_name}' found for {faction.name}. Use faction/items {faction.name} to list.")
+            return
+        char_sheet = getattr(self.caller, 'character_sheet', None)
+        if not char_sheet:
+            self.caller.msg("You need a character sheet to buy.")
+            return
+        balance = CharacterSheetMoneyService.get_balance(char_sheet)
+        if balance < item.price:
+            self.caller.msg(f"You need {item.price} eb but only have {balance} eb.")
+            return
+        if not item.voucher_id:
+            self.caller.msg(f"Faction item '{item.display_name}' has no voucher template yet. Staff must set it with faction/item/setvoucher.")
+            return
+        from evennia import search_object
+        voucher = search_object(f"#{item.voucher_id}")
+        if not voucher:
+            self.caller.msg("The faction item voucher template could not be found.")
+            return
+        voucher = voucher[0]
+        from typeclasses.vouchers import Voucher
+        if not voucher.is_typeclass(Voucher):
+            self.caller.msg("Invalid voucher template.")
+            return
+        # Clone voucher and give to player; deduct money
+        new_voucher = voucher.copy()
+        if new_voucher:
+            new_voucher.location = self.caller
+        if new_voucher:
+            CharacterSheetMoneyService.deduct_money(char_sheet, item.price)
+            self.caller.msg(f"You bought {item.display_name} for {item.price} eb.")
+        else:
+            self.caller.msg("Failed to create the item. Contact staff.")
+
+    def cmd_sell(self):
+        """Sell a faction voucher back (faction members only, in faction vendor rooms). Usage: faction/sell <faction>=<voucher>"""
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: faction/sell <faction>=<voucher>")
+            return
+        faction_name, voucher_arg = [p.strip() for p in self.args.split("=", 1)]
+        try:
+            faction = FactionModel.objects.get(name__iexact=faction_name)
+        except FactionModel.DoesNotExist:
+            self.caller.msg(f"No faction named '{faction_name}' exists.")
+            return
+        if not character_has_faction_rep(self.caller, faction):
+            self.caller.msg("You must have standing with this faction to sell to them.")
+            return
+        if not self.caller.location:
+            self.caller.msg("You must be in a room to sell.")
+            return
+        if not room_has_faction_vendor_tags(self.caller.location, faction.name):
+            self.caller.msg(f"You must be in a room tagged with '{faction.name}' and 'Vendor' to sell faction items.")
+            return
+        from commands.voucher_commands import find_voucher
+        voucher = find_voucher(self.caller, voucher_arg)
+        if not voucher:
+            self.caller.msg("Voucher not found.")
+            return
+        if voucher.location != self.caller:
+            self.caller.msg("You must be holding the voucher to sell it.")
+            return
+        from world.factions.models import FactionItem
+        from world.cyberpunk_sheets.services import CharacterSheetMoneyService
+        # Find matching faction item (by voucher contents or we'd need to track which FactionItem this came from)
+        # For now, we'll match by checking if any FactionItem has this voucher_id - or we accept any voucher and pay a fraction
+        # Simplified: match FactionItems by voucher_id, pay back half price
+        items = FactionItem.objects.filter(faction=faction, voucher_id=voucher.id)
+        if not items.exists():
+            items = FactionItem.objects.filter(faction=faction)
+            if not items:
+                self.caller.msg(f"{faction.name} has no items configured for buyback.")
+                return
+            refund = min(i.price // 2 for i in items)  # Default half of cheapest
+        else:
+            item = items.first()
+            refund = item.price // 2
+        char_sheet = getattr(self.caller, 'character_sheet', None)
+        if not char_sheet:
+            self.caller.msg("You need a character sheet.")
+            return
+        voucher.delete()
+        CharacterSheetMoneyService.add_money(char_sheet, refund)
+        self.caller.msg(f"You sold the item for {refund} eb.")
+
+    def cmd_items(self):
+        """List faction-exclusive items. Usage: faction/items <faction>"""
+        faction_name = self.args.strip() if self.args else None
+        if not faction_name:
+            self.caller.msg("Usage: faction/items <faction_name>")
+            return
+        try:
+            faction = FactionModel.objects.get(name__iexact=faction_name)
+        except FactionModel.DoesNotExist:
+            self.caller.msg(f"No faction named '{faction_name}' exists.")
+            return
+        from world.factions.models import FactionItem
+        items = FactionItem.objects.filter(faction=faction)
+        if not items:
+            self.caller.msg(f"{faction.name} has no faction-exclusive items.")
+            return
+        output = sheet_header(f"Faction Items: {faction.name}", width=WIDTH)
+        output += sheet_section("Available Items", width=WIDTH)
+        output += f"|y{'Item':<30}{'Type':<12}{'Price':<12}|n\n"
+        for fi in items:
+            output += f"|w{fi.display_name:<30}{fi.item_type:<12}{fi.price:<12}|n\n"
+        output += footer(width=WIDTH, fillchar="|m-|n")
+        self.caller.msg(output)
 
     def cmd_init(self):
         """Initialize default factions (admin only)."""
@@ -636,7 +1296,9 @@ class CmdFaction(MuxCommand):
         self.caller.msg("Creating default factions...")
         
         # Create a master faction object to handle initialization
-        master = Faction.objects.filter(db_key="FactionMaster").first()
+        master = ObjectDB.objects.filter(
+            db_key="FactionMaster", db_typeclass_path="typeclasses.factions.Faction"
+        ).first()
         if not master:
             master = create_object(
                 "typeclasses.factions.Faction",
@@ -672,6 +1334,22 @@ class CmdFaction(MuxCommand):
                 faction_obj.db.faction_type = faction_type
                 faction_obj.link_to_model(faction_model.id)
                 created_count += 1
+
+        # Ensure all factions have channels (create missing, add aliases to existing)
+        channel_count = 0
+        for faction_model in FactionModel.objects.all():
+            needs_channel = not getattr(faction_model, "channel_id", None)
+            if needs_channel:
+                channel = create_faction_channel(faction_model.name)
+                if channel:
+                    faction_model.channel_id = channel.id
+                    faction_model.save()
+                    channel_count += 1
+            else:
+                create_faction_channel(faction_model.name)  # Ensure aliases on existing
+
+        if channel_count:
+            self.caller.msg(f"Created {channel_count} faction channels.")
                 
         if created_count:
             self.caller.msg(f"Created {created_count} default factions.")
@@ -679,7 +1357,9 @@ class CmdFaction(MuxCommand):
             self.caller.msg("All default factions already exist.")
             
         # List all factions for verification
-        all_factions = Faction.objects.filter(db_typeclass_path="typeclasses.factions.Faction")
+        all_factions = ObjectDB.objects.filter(
+            db_typeclass_path="typeclasses.factions.Faction"
+        )
         self.caller.msg(f"Total faction objects: {all_factions.count()}")
         for faction in all_factions:
             model_id = faction.db.model_id if hasattr(faction.db, 'model_id') else "None"
@@ -1524,7 +2204,9 @@ class CmdInitFactions(Command):
         self.caller.msg("Creating default factions...")
         
         # Create a master faction object to handle initialization
-        master = Faction.objects.filter(db_key="FactionMaster").first()
+        master = ObjectDB.objects.filter(
+            db_key="FactionMaster", db_typeclass_path="typeclasses.factions.Faction"
+        ).first()
         if not master:
             master = create_object(
                 "typeclasses.factions.Faction",
@@ -1560,6 +2242,22 @@ class CmdInitFactions(Command):
                 faction_obj.db.faction_type = faction_type
                 faction_obj.link_to_model(faction_model.id)
                 created_count += 1
+
+        # Ensure all factions have channels (create missing, add aliases to existing)
+        channel_count = 0
+        for faction_model in FactionModel.objects.all():
+            needs_channel = not getattr(faction_model, "channel_id", None)
+            if needs_channel:
+                channel = create_faction_channel(faction_model.name)
+                if channel:
+                    faction_model.channel_id = channel.id
+                    faction_model.save()
+                    channel_count += 1
+            else:
+                create_faction_channel(faction_model.name)  # Ensure aliases on existing
+
+        if channel_count:
+            self.caller.msg(f"Created {channel_count} faction channels.")
                 
         if created_count:
             self.caller.msg(f"Created {created_count} default factions.")
@@ -1567,7 +2265,9 @@ class CmdInitFactions(Command):
             self.caller.msg("All default factions already exist.")
             
         # List all factions for verification
-        all_factions = Faction.objects.filter(db_typeclass_path="typeclasses.factions.Faction")
+        all_factions = ObjectDB.objects.filter(
+            db_typeclass_path="typeclasses.factions.Faction"
+        )
         self.caller.msg(f"Total faction objects: {all_factions.count()}")
         for faction in all_factions:
             model_id = faction.db.model_id if hasattr(faction.db, 'model_id') else "None"

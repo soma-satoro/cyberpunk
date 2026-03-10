@@ -129,7 +129,7 @@ class CmdNotes(MuxCommand):
     def view_note(self):
         if "/" in self.args:
             target_name, note_identifier = self.args.split("/", 1)
-            target = self.caller.search(target_name)
+            target = self.caller.search(target_name, global_search=True)
             if not target:
                 return
         else:
@@ -213,7 +213,7 @@ class CmdNotes(MuxCommand):
             return
 
         for target_name in targets:
-            target = self.caller.search(target_name)
+            target = self.caller.search(target_name, global_search=True)
             if target:
                 self.display_note(note, target)
                 self.caller.msg(f"Note '{note_name}' shown to {target.name}.")
@@ -236,7 +236,7 @@ class CmdNotes(MuxCommand):
             category = None
             target_name, note_identifier = args
 
-        target = self.caller.search(target_name)
+        target = self.caller.search(target_name, global_search=True)
         if not target:
             return
 

@@ -20,11 +20,29 @@ from .character_commands import CmdSheet, CmdRoll, CmdLuck, CmdShortDesc, CmdOOC
 from .chargen import CmdChargen, CmdListCharacterSheets, CmdLifepath, CmdSelfStat, CmdSetLanguage
 from .admin_commands import CmdStat, CmdHeal, CmdApprove, CmdUnapprove, CmdSpawnRipperdoc, CmdGradientName, CmdClearAllStates, CmdClearRental, CmdCleanupDuplicates, CmdExamine, CmdAssociateAllCharacterSheets, CmdViewCharacterSheetID, CmdSetCharacterSheetID, CmdAllSheets, CmdViewSheetAttributes, CmdSyncLanguages, CmdJoin, CmdSummon
 from .inventory_commands import CmdInventory
-from .equipment_commands import CmdAddWeapon, CmdAddArmor, CmdAddGear, CmdPopulateWeapons, CmdPopulateArmor, CmdPopulateGear, CmdViewEquipment, CmdPopulateAllEquipment, CmdRemoveEquipment, CmdPopulateCyberware, CmdDepopulateAllEquipment, CmdYes
+from .voucher_commands import CmdVoucher, CmdConceal, CmdOwner
+from .equipment_commands import CmdAddWeapon, CmdAddArmor, CmdAddGear, CmdAddVehicle, CmdRemoveVehicle, CmdPopulateWeapons, CmdPopulateArmor, CmdPopulateGear, CmdPopulateVehicles, CmdViewEquipment, CmdPopulateAllEquipment, CmdRemoveEquipment, CmdPopulateCyberware, CmdDepopulateAllEquipment
+from .list_commands import CmdLookup
+from .mystery_commands import (
+    CmdMystery,
+    CmdInvestigate,
+    CmdAddClue,
+    CmdClues,
+    CmdCreateMystery,
+    CmdCreateClue,
+    CmdDestroyClue,
+    CmdLinkClue,
+    CmdMysteryLink,
+)
+from .cyberware_admin_commands import CmdAddCyberware
+from .staff_commands import CmdRemoveCyberware, CmdSetLifepath, CmdReputation, CmdNotoriety, CmdConfig
 from .economy import CmdAdminMoney, CmdGiveMoney, CmdBalance, CmdRentRoom, CmdLeaveRental
-from .mission_commands import CmdListMissions, CmdAcceptMission, CmdCompleteMission, CmdMissionStatus, CmdCreateMission, CmdListEvents, CmdCreateEvent, CmdEventInfo, CmdJoinEvent, CmdLeaveEvent, CmdStartEvent, CmdCompleteEvent
+from world.cyberpunk_sheets.commerce import CmdBuy, CmdListItems, CmdGive, CmdSellItem, CmdHaggle
+from .ip_commands import CmdIP
+from .vote_commands import CmdVote
+from .mission_commands import CmdMission
 from .bbs.bbs_all_commands import CmdBBS, CmdBBPost, CmdBBRead
-from .hustle_commands import CmdHustle, CmdDebugHustle, CmdClearHustleAttempt, CmdRegenerateHustles
+from .hustle_commands import CmdHustle, CmdDebugHustle, CmdClearHustleAttempt, CmdResetHustles
 from .faction_commands import (
     CmdFaction, CmdGroup, CmdInitFactions
 )
@@ -34,11 +52,11 @@ from .cyberware_commands import CmdCyberware
 from .netrun_commands import CmdNet
 from .netrun_admin_commands import CmdArchitecture
 from .combat_system import CmdCombat
-from .language_commands import CmdLanguage, CmdMaskedSay, CmdMaskedEmit, CmdMaskedPose
-from .building import CmdManageBuilding
+from .language_commands import CmdLanguage
+from .building import CmdManageBuilding, CmdRoom, CmdAreaManage
 from .notes import CmdNotes
 from evennia.contrib.base_systems.mux_comms_cmds import CmdSetLegacyComms
-from evennia import default_cmds
+
 from .CmdAlts import CmdAlts
 from .CmdEmit import CmdEmit
 from .CmdPose import CmdPose
@@ -52,6 +70,11 @@ from .CmdFinger import CmdFinger
 from .CmdGradient import CmdGradientName
 from .where import CmdWhere
 from .CmdWho import CmdWho
+from .commonmux.CmdPage import CmdPage
+#from .vehicle_commands import CmdEnterVehicle, CmdExitVehicle
+from .dice_commands import CmdDice
+from .npc_commands import CmdNpc
+from .elflines_commands import CmdElo, CmdElfline, CmdEloSetup
 
 from commands.bbs.bbs_admin_commands import CmdResetBBS
 
@@ -87,9 +110,17 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdLifepath())
         self.add(CmdLuck())
         self.add(CmdInventory())
+        self.add(CmdVoucher())
+        self.add(CmdConceal())
+        self.add(CmdOwner())
         self.add(CmdViewEquipment())
+        self.add(CmdLookup())
+        self.add(CmdMystery())
+        self.add(CmdInvestigate())
         self.add(CmdChargen())
         self.add(CmdManageBuilding())
+        self.add(CmdRoom())
+        self.add(CmdAreaManage())
         self.add(CmdCombat())
         self.add(CmdAlts())
         self.add(CmdEmit())
@@ -106,20 +137,18 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdGradientName())
         self.add(CmdBalance())
         self.add(CmdGiveMoney())
-        self.add(CmdListMissions())
-        self.add(CmdAcceptMission())
-        self.add(CmdCompleteMission())
-        self.add(CmdMissionStatus())
-        self.add(CmdCreateMission())
-        self.add(CmdListEvents())
-        self.add(CmdCreateEvent())
-        self.add(CmdEventInfo())
-        self.add(CmdJoinEvent())
-        self.add(CmdLeaveEvent())
-        self.add(CmdStartEvent())
-        self.add(CmdCompleteEvent())
+        self.add(CmdBuy())
+        self.add(CmdListItems())
+        self.add(CmdGive())
+        self.add(CmdSellItem())
+        self.add(CmdHaggle())
+        self.add(CmdMission())
         self.add(CmdHustle())
-        
+        self.add(CmdDice())
+        self.add(CmdNpc())
+        self.add(CmdElo())
+        self.add(CmdElfline())
+
         # Add faction and group commands
         self.add(CmdFaction())
         self.add(CmdGroup())
@@ -135,9 +164,10 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdNet())
         self.add(CmdArchitecture())
         self.add(CmdLanguage())
-        self.add(CmdMaskedSay())
-        self.add(CmdMaskedPose())
-        self.add(CmdMaskedEmit())
+        # CmdSay, CmdPose, CmdEmit (added above) handle say/pose/emit with pose breaks and ~language
+        # CmdMaskedSay/Pose/Emit removed - they overrode with wrong format ("says:" vs "says, \"\"")
+        #self.add(CmdEnterVehicle())
+        #self.add(CmdExitVehicle())
         self.add(CmdRentRoom())
         self.add(CmdLeaveRental())
         self.add(CmdOOC())
@@ -145,6 +175,8 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdPlusIc())
         self.add(CmdMeet())
         self.add(CmdNotes())
+        self.add(CmdIP())
+        self.add(CmdVote())
         self.add(CmdBBS())
         self.add(CmdResetBBS())
         self.add(CmdCreateBoard())
@@ -156,6 +188,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdUnpinPost())
         self.add(CmdEditBoard())
         self.add(CmdGrantAccess())
+        self.add(CmdPage())
 
 class AccountCmdSet(default_cmds.AccountCmdSet):
     """
@@ -179,13 +212,28 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdAddWeapon())
         self.add(CmdAddArmor())
         self.add(CmdAddGear())
+        self.add(CmdAddVehicle())
+        self.add(CmdRemoveVehicle())
         self.add(CmdPopulateWeapons())
         self.add(CmdPopulateArmor())
         self.add(CmdPopulateGear())
+        self.add(CmdPopulateVehicles())
         self.add(CmdPopulateAllEquipment())
         self.add(CmdDepopulateAllEquipment())
-        self.add(CmdYes())
         self.add(CmdRemoveEquipment())
+        self.add(CmdAddCyberware())
+        self.add(CmdRemoveCyberware())
+        self.add(CmdAddClue())
+        self.add(CmdClues())
+        self.add(CmdCreateMystery())
+        self.add(CmdCreateClue())
+        self.add(CmdDestroyClue())
+        self.add(CmdLinkClue())
+        self.add(CmdMysteryLink())
+        self.add(CmdSetLifepath())
+        self.add(CmdReputation())
+        self.add(CmdNotoriety())
+        self.add(CmdConfig())
         self.add(CmdApprove())
         self.add(CmdUnapprove())
         self.add(CmdPopulateCyberware())
@@ -193,11 +241,12 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdSpawnRipperdoc())
         self.add(CmdClearHustleAttempt())
         self.add(CmdDebugHustle())
-        self.add(CmdRegenerateHustles())
+        self.add(CmdResetHustles())
         
         # Add admin faction commands
         self.add(CmdInitFactions())
-        
+        self.add(CmdEloSetup())
+
         self.add(CmdGradientName())
         self.add(CmdClearAllStates())
         self.add(CmdListCharacterSheets())

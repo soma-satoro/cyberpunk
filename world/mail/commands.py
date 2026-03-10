@@ -44,7 +44,7 @@ class CmdMail(Command):
         # Validate recipients
         valid_recipients = []
         for recipient in recipients:
-            player = self.caller.search(recipient)
+            player = self.caller.search(recipient, global_search=True)
             if player:
                 valid_recipients.append(player)
             else:

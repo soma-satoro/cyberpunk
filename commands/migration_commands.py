@@ -54,7 +54,7 @@ class CmdMigrateCharacterSheets(MuxCommand):
                 return
                 
             # Find the character
-            char = caller.search(args)
+            char = caller.search(args, global_search=True)
             if not char:
                 return
                 

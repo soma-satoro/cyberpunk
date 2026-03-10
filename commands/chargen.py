@@ -3,12 +3,13 @@ from django.conf import settings
 from evennia import Command, CmdSet
 from world.jobs.models import Job
 from world.languages.language_dictionary import LANGUAGES
-from world.languages.models import Language
+from world.languages.models import Language, CharacterLanguage
 from world.utils.character_utils import ALL_ATTRIBUTES, SKILL_MAPPING, STAT_MAPPING, get_full_attribute_name
 from world.cyberpunk_sheets.models import CharacterSheet
 from evennia.utils import evmenu
 from world.cyberpunk_constants import ROLE_SKILLS, ROLE_SKILL_NAME_MAP
 from world.cyberpunk_sheets.edgerunner import EdgerunnerChargen
+from world.cyberpunk_sheets.services import CharacterMoneyService
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils import logger
 from typeclasses.chargen import ChargenRoom
@@ -78,9 +79,19 @@ class ChargenManager:
             setattr(sheet, skill, 2)
             sheet.skill_points -= 2
 
-        # Add Streetslang as a default language
+        # Add English and Streetslang as default languages at 4, then a random language
+        sheet.add_language("English", 4)
         sheet.add_language("Streetslang", 4)
-        sheet.skill_points -= 4
+        sheet.skill_points -= 8
+        from world.cyberpunk_constants import LANGUAGES as CYBERPUNK_LANGUAGES
+        import random
+        known = [lang['name'].lower() if isinstance(lang, dict) else str(lang).lower() for lang in sheet.language_list]
+        available = [l for l in CYBERPUNK_LANGUAGES if l.lower() not in known]
+        if available:
+            random_lang = random.choice(available)
+            random_level = random.randint(1, 3)
+            sheet.add_language(random_lang, random_level)
+            sheet.skill_points -= random_level
 
         sheet.save()
 
@@ -143,6 +154,9 @@ class CmdChargen(MuxCommand):
 
         method, role, full_name = args
         method = method.lower()
+        # Normalize aliases for complete_package
+        if method in ("complete", "completepackage"):
+            method = "complete_package"
         role = role.capitalize()
         full_name = full_name.strip('"')  # Remove quotes if present
 
@@ -158,18 +172,25 @@ class CmdChargen(MuxCommand):
 
         logger.info(f"Chargen command called with method: {method}, role: {role}, full_name: {full_name}")
 
-        # Check for existing character initialization
-        if self.caller.db.role or self.caller.db.full_name:
+        # Check for existing character initialization - only role indicates chargen was completed
+        # (full_name default was removed; empty role means first-time chargen)
+        if self.caller.db.role:
             self.caller.msg("You already have a character initialized. Use 'chargen/reset' to reset it or type 'chargen yes' to confirm overwriting it.")
             self.caller.ndb._chargen_confirm = (method, role, full_name)
             logger.info("Waiting for user confirmation.")
             return
 
-        # Also check for sheet for backwards compatibility
+        # Check for sheet - only prompt for reset if sheet has been through chargen (has role set)
+        # Empty sheets (from old auto-creation or migration) get a free first-time chargen
         try:
-            existing_sheets = CharacterSheet.objects.filter(character=self.caller)
-            if existing_sheets.exists():
-                self.caller.msg(f"You have {existing_sheets.count()} existing character sheet(s). Use 'chargen/reset' to reset it or type 'chargen yes' to confirm overwriting it.")
+            caller_pk = getattr(self.caller, 'pk', None) or getattr(self.caller, 'id', None)
+            if caller_pk is None:
+                existing_completed_sheets = CharacterSheet.objects.none()
+            else:
+                existing_sheets = CharacterSheet.objects.filter(character_id=caller_pk)
+                existing_completed_sheets = [s for s in existing_sheets if getattr(s, 'role', None) and str(s.role).strip()]
+            if existing_completed_sheets:
+                self.caller.msg(f"You have existing character sheet(s) with completed chargen. Use 'chargen/reset' to reset it or type 'chargen yes' to confirm overwriting it.")
                 self.caller.ndb._chargen_confirm = (method, role, full_name)
                 logger.info("Waiting for user confirmation.")
                 return
@@ -183,15 +204,30 @@ class CmdChargen(MuxCommand):
         logger.info(f"Creating character with method: {method}, role: {role}, full_name: {full_name}")
         try:
             char = self.caller
-            
-            # Set basic character attributes (full_name is stored but does not change char.key)
+
+            # Ensure character is persisted before any DB operations (fixes "Model instances
+            # passed to related filters must be saved" - caller may be unsaved in some setups)
+            char_pk = getattr(char, 'pk', None) or getattr(char, 'id', None)
+            if char_pk is None and hasattr(char, 'save'):
+                char.save()
+                char_pk = getattr(char, 'pk', None) or getattr(char, 'id', None)
+            if char_pk is None:
+                raise ValueError(
+                    "Character must be saved before chargen. Ensure you are puppeting a character "
+                    "in the chargen room, not connecting OOC."
+                )
+
+            # Set basic character attributes (full_name is stored in db - never change char.key)
             char.db.full_name = full_name
             char.db.role = role
             char.db.gender = char.db.gender or "Other"  # Set default gender if not set
             
             # For backward compatibility, also update/create character sheet
             if not hasattr(char, 'character_sheet') or char.character_sheet is None:
-                sheet = CharacterSheet.objects.create(character=char, account=self.caller.account)
+                sheet = CharacterSheet.objects.create(
+                    character_id=char_pk,
+                    account=self.caller.account
+                )
                 char.db.character_sheet_id = sheet.id
                 logger.info(f"Created new character sheet with ID {sheet.id}")
             else:
@@ -257,9 +293,21 @@ class CmdChargen(MuxCommand):
         # Assign gear and cyberware
         EdgerunnerChargen.assign_gear(sheet, role)  # Still using sheet for now
         EdgerunnerChargen.assign_cyberware(sheet, role)  # Still using sheet for now
+
+        # Allot leftover eurodollars (2550 starting - cost of assigned gear/cyberware)
+        package_cost = EdgerunnerChargen.calculate_edgerunner_package_cost(role)
+        remaining_eurodollars = max(0, 2550 - package_cost)
+        CharacterMoneyService.add_money(char, remaining_eurodollars)
         
-        # Initialize default language
+        # Initialize default languages: English and Streetslang at 4, then a random language
+        char.add_language("English", 4)
         char.add_language("Streetslang", 4)
+        from world.cyberpunk_constants import LANGUAGES as CYBERPUNK_LANGUAGES
+        known = [l.lower() for l in char.get_languages()]
+        available = [l for l in CYBERPUNK_LANGUAGES if l.lower() not in known]
+        if available:
+            import random
+            char.add_language(random.choice(available), random.randint(1, 3))
         
         # Save the sheet again after all assignments (for backward compatibility)
         sheet.save()
@@ -275,7 +323,12 @@ class CmdChargen(MuxCommand):
         for name, value, row in zip(stat_names, final_stats, rows_selected):
             detailed_info += f"{name.capitalize()}: {value} (Row {row})\n"
         
-        return f"Character created using the Edgerunner method for role: {role}.\nYour stats have been assigned as follows:\n{stat_display}\n{detailed_info}\nUse 'sheet' to view your full character details."
+        return (
+            f"Character created using the Edgerunner method for role: {role}.\n"
+            f"Your stats have been assigned as follows:\n{stat_display}\n{detailed_info}\n"
+            f"{remaining_eurodollars} Eurodollars have been added to your account (2550 - {package_cost} spent on gear and cyberware).\n"
+            f"Use 'sheet' to view your full character details, 'inv/balance' to check your money."
+        )
 
     def complete_package_chargen(self, char, sheet):
         """Create character using complete package method."""
@@ -294,13 +347,21 @@ class CmdChargen(MuxCommand):
         for skill in default_skills:
             char.set_skill(skill, 2)
         
-        # Add Streetslang as a default language
+        # Add default languages: English and Streetslang at 4, then a random language
+        char.add_language("English", 4)
         char.add_language("Streetslang", 4)
-        
+        from world.cyberpunk_constants import LANGUAGES as CYBERPUNK_LANGUAGES
+        known = [l.lower() for l in char.get_languages()]
+        available = [l for l in CYBERPUNK_LANGUAGES if l.lower() not in known]
+        if available:
+            import random
+            char.add_language(random.choice(available), random.randint(1, 3))
+
         # For compatibility
         sheet.eurodollars = 2550
         for skill in default_skills:
             setattr(sheet, skill, 2)
+        sheet.add_language("English", 4)
         sheet.add_language("Streetslang", 4)
         sheet.save()
         
@@ -319,7 +380,9 @@ class CmdChargen(MuxCommand):
         
         # Delete any remaining sheets for this character (handles stale refs) and clear the ID
         try:
-            CharacterSheet.objects.filter(character=char).delete()
+            char_pk = getattr(char, 'pk', None) or getattr(char, 'id', None)
+            if char_pk is not None:
+                CharacterSheet.objects.filter(character_id=char_pk).delete()
         except Exception:
             pass
         char.db.character_sheet_id = None
@@ -373,7 +436,18 @@ class CmdChargen(MuxCommand):
         
         # Reset languages
         char.db.languages = {}
-        
+
+        # Delete CharacterLanguage records linked to this character (handles both character and sheet links)
+        try:
+            char_pk = getattr(char, 'pk', None) or getattr(char, 'id', None)
+            if char_pk is not None:
+                CharacterLanguage.objects.filter(character_id=char_pk).delete()
+        except Exception:
+            pass
+
+        # Clear lifepath data
+        char.db.lifepath = {}
+
         self.caller.msg("Your character has been reset to default values.")
 
     def finish_chargen(self):
@@ -441,7 +515,7 @@ class CmdConfirmReset(Command):
             self.caller.cmdset.remove(ConfirmCmdSet)
             chargen_cmd = CmdChargen()
             chargen_cmd.caller = self.caller
-            chargen_cmd.create_character_sheet(method, role, full_name)
+            chargen_cmd.create_character(method, role, full_name)
         else:
             self.caller.msg("There's nothing to confirm.")
 
@@ -469,7 +543,8 @@ class CmdListCharacterSheets(Command):
             self.caller.msg("You can only use this command in a character generation room.")
             return
 
-        sheets = CharacterSheet.objects.filter(character=self.caller)
+        caller_pk = getattr(self.caller, 'pk', None) or getattr(self.caller, 'id', None)
+        sheets = CharacterSheet.objects.filter(character_id=caller_pk) if caller_pk else []
         if sheets:
             self.caller.msg("Character sheets associated with your character:")
             for sheet in sheets:
@@ -479,11 +554,12 @@ class CmdListCharacterSheets(Command):
 
 class CmdSelfStat(MuxCommand):
     """
-    Set a stat, skill, or topsheet attribute for your character.
+    Set a stat, skill, topsheet attribute, or language for your character.
 
     Usage:
       selfstat <attribute>=<value>
       selfstat <skill>(instance)=<value>
+      selfstat <language>=<rank>
 
     Examples:
       selfstat INT=5
@@ -492,6 +568,10 @@ class CmdSelfStat(MuxCommand):
       selfstat AGE=25
       selfstat charismatic impact=6
       selfstat play instrument(guitar)=3
+      selfstat Spanish=4
+      selfstat Japanese=6
+
+    Languages cost 1 skill point per rank (max rank 6). Use +lang all to see available languages.
     """
 
     key = "selfstat"
@@ -531,13 +611,48 @@ class CmdSelfStat(MuxCommand):
             attr = attr.replace(" ", "_")
 
         full_attr_name = get_full_attribute_name(attr)
+        char = self.caller
+
+        # Check if this is a language (before rejecting unknown attributes)
         if not full_attr_name:
-            self.caller.msg(f"Invalid attribute name. Choose from: {', '.join(ALL_ATTRIBUTES.values())}")
+            lang_match = next((l for l in LANGUAGES if l.name.lower() == attr.lower()), None)
+            if lang_match:
+                # Handle language assignment: 1 skill point per rank, max rank 6
+                try:
+                    value = int(value)
+                    if value < 0 or value > 6:
+                        self.caller.msg("Language rank must be between 0 and 6. Use 0 to remove a language.")
+                        return
+                except ValueError:
+                    self.caller.msg("You must specify an integer value (0-6) for language rank.")
+                    return
+
+                lang_name = lang_match.name
+                current_level = char.get_language_level(lang_name) if hasattr(char, 'get_language_level') else char.languages.get(lang_name, 0)
+                points_needed = value - current_level
+
+                _, skill_points_spent = char.calculate_spent_points()
+                remaining_skill_points = max(0, 86 - skill_points_spent)
+
+                if points_needed > remaining_skill_points:
+                    self.caller.msg(f"Not enough skill points. You need {points_needed} but only have {remaining_skill_points}.")
+                    return
+
+                if value == 0:
+                    char.remove_language(lang_name)
+                    self.caller.msg(f"Removed {lang_name} from your languages.")
+                else:
+                    char.add_language(lang_name, value)
+                    self.caller.msg(f"Set {lang_name} to rank {value}.")
+
+                new_remaining_stat_points, new_remaining_skill_points = char.get_remaining_points()
+                self.caller.msg(f"You have {new_remaining_stat_points} stat points and {new_remaining_skill_points} skill points remaining to spend.")
+                return
+
+        if not full_attr_name:
+            self.caller.msg(f"Invalid attribute name. Choose from: {', '.join(ALL_ATTRIBUTES.values())} or a language from +lang all.")
             return
 
-        # Get the character object (caller)
-        char = self.caller
-        
         # Check if this is a core stat
         if full_attr_name in STAT_MAPPING.values():
             try:
@@ -766,10 +881,5 @@ class CmdLifepath(Command):
     help_category = "Character"
 
     def func(self):
-       evmenu.EvMenu(self.caller, 
-               "commands.lifepath_functions",
-               startnode="start_lifepath",
-               cmdset_mergetype="Replace",
-               cmdset_priority=1,
-               auto_quit=True,
-               cmd_on_exit=None)
+        from commands.lifepath_menu import start_lifepath_menu
+        start_lifepath_menu(self.caller)

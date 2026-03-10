@@ -1,7 +1,7 @@
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils.search import search_object
 from typeclasses.characters import Character
-from utils.search_helpers import search_character
+from world.utils.search_helpers import search_character
 
 class CmdAlias(MuxCommand):
     """

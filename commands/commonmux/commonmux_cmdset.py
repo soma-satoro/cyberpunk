@@ -8,15 +8,15 @@ from evennia.commands.cmdset import CmdSet
 
 from commands.commonmux.CmdAlias import CmdAlias
 from commands.commonmux.CmdAlts import CmdAlts
-from commands.commonmux.CmdEmit import CmdEmit
-from commands.commonmux.CmdLanguage import CmdLanguage
-from commands.commonmux.CmdOOCChat import CmdOOCChat, CmdUnpuppet
+#from commands.commonmux.CmdEmit import CmdEmit
+#from commands.commonmux.CmdLanguage import CmdLanguage
+#from commands.commonmux.CmdOOCChat import CmdOOCChat, CmdUnpuppet
 from commands.commonmux.CmdPage import CmdPage
-from commands.commonmux.CmdPool import CmdPool, CmdGain, CmdSpend
-from commands.commonmux.CmdPose import CmdPose
-from commands.commonmux.CmdSay import CmdSay
-from commands.commonmux.CmdShortDesc import CmdShortDesc
-from commands.commonmux.CmdStaff import CmdStaff
+#from commands.commonmux.CmdPool import CmdPool, CmdGain, CmdSpend
+#from commands.commonmux.CmdPose import CmdPose
+#from commands.commonmux.CmdSay import CmdSay
+#from commands.commonmux.CmdShortDesc import CmdShortDesc
+#from commands.commonmux.CmdStaff import CmdStaff
 from commands.commonmux.CmdTableTalk import CmdTableTalk
 from commands.commonmux.CmdTxt import CmdText
 from commands.commonmux.CmdWatch import CmdWatch

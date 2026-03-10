@@ -6,6 +6,7 @@ from evennia import Command, CmdSet
 from evennia.utils.evtable import EvTable
 from evennia.utils.utils import list_to_string
 from world.hangouts.models import HangoutDB, HANGOUT_CATEGORIES
+from world.utils.character_utils import is_character_approved
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils import search
 
@@ -91,7 +92,7 @@ class CmdHangout(MuxCommand):
         if not hangout.db.required_splats:
             return True
             
-        # Get character's splat from the stats structure
+        # Get character's splat from the stats structure (read-only; no .deserialize needed)
         try:
             stats = self.caller.db.stats
             if stats and 'other' in stats:
@@ -178,15 +179,14 @@ class CmdHangout(MuxCommand):
             return
 
         # Group hangouts by district
+        # NOTE: Do NOT write hangout_id during display - it causes excessive DB writes
+        # and can contribute to "Database is locked" / character desync. Use h.id as
+        # fallback for display when hangout_id is None.
         district_groups = {}
         for h in hangouts:
             # Skip if hangout is hidden and user doesn't have splat access
             if h.db.hidden and h.db.required_splats and not self._has_splat_access(h):
                 continue
-                
-            # Ensure hangout has an ID before displaying
-            if h.db.hangout_id is None:
-                h.attributes.add("hangout_id", HangoutDB._get_next_hangout_id())
             
             # Check if the hangout has players before adding to district group
             room = h.db.room
@@ -215,13 +215,19 @@ class CmdHangout(MuxCommand):
             self.caller.msg(self._format_separator())
             self.caller.msg(f"|w{district}|n")
             
-            # Display hangouts in this district, sorted by hangout_id
-            district_hangouts = sorted(district_groups[district], key=lambda x: x[0].db.hangout_id)
+            # Display hangouts in this district, sorted by hangout_id (use id as fallback)
+            district_hangouts = sorted(
+                district_groups[district],
+                key=lambda x: x[0].db.hangout_id if x[0].db.hangout_id is not None else x[0].id
+            )
             for hangout, player_count in district_hangouts:
-                number, info_line, desc_line = hangout.get_display_entry(show_restricted=True)
+                number, info_line, desc_line = hangout.get_display_entry(
+                    show_restricted=True, skip_migration=True
+                )
                 
-                # Format the hangout ID to be right-aligned in 3 spaces
-                formatted_id = str(hangout.db.hangout_id).rjust(3)
+                # Format the hangout ID to be right-aligned (use id if hangout_id is None)
+                display_id = hangout.db.hangout_id if hangout.db.hangout_id is not None else hangout.id
+                formatted_id = str(display_id).rjust(3)
                 self.caller.msg(f"{formatted_id} | {info_line}")
                 self.caller.msg(desc_line)
 
@@ -270,6 +276,9 @@ class CmdHangout(MuxCommand):
 
         # Handle teleport switches
         if any(switch in ["jump", "tel", "join", "visit"] for switch in self.switches):
+            if not is_character_approved(self.caller):
+                self.caller.msg("You must be approved by staff before jumping to hangouts.")
+                return
             try:
                 # Check if player is in an OOC area
                 current_location = self.caller.location
@@ -295,18 +304,12 @@ class CmdHangout(MuxCommand):
                     self.caller.msg("That hangout's location is not properly set up.")
                     return
                 
-                # Store the current location before moving
+                # Capture location refs before move - reduces desync risk
+                # (DB write from move_to can fail under load; minimize other writes nearby)
                 old_location = self.caller.location
                 
-                # Announce departure to the old room
+                # Announce departure to the old room (before move)
                 old_location.msg_contents(f"{self.caller.name} has left for hangout {hangout_id}.")
-                    
-                # Ensure we're not leaving a ghost character behind by clearing any session references
-                # to the old location
-                for session in self.caller.sessions.all():
-                    if hasattr(session, 'puppet') and session.puppet == self.caller:
-                        # Make sure the session knows we're moving
-                        session.msg(text=f"Moving to {hangout.key}...")
                 
                 # Move the character
                 self.caller.move_to(room, quiet=True)

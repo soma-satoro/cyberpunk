@@ -2,24 +2,166 @@ from evennia import CmdSet
 from evennia import create_object
 from typeclasses.rental import RentableRoom
 from evennia.utils import search, delay
+from evennia.utils.search import search_object
 from evennia import Command
 from world.utils.formatting import divider, footer, format_stat, header 
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils.evtable import EvTable
 
-class CmdRoom(MuxCommand):
+try:
+    from world.area_manager import get_area_manager
+except ImportError:
+    get_area_manager = None
+
+
+class CmdAreaManage(MuxCommand):
     """
-    Set various room attributes and properties.
+    Manage game areas and their codes for room organization.
 
     Usage:
-      +room/res <room dbref or here>=<value>      - Set room resources
-      +room/type <room dbref or here>=<type>      - Set room type
-      +room/unfindable <room dbref or here>=<on/off> - Set room findability
+      +area/list - List all defined areas
+      +area/add <code>=<name>/<description> - Add a new area
+      +area/remove <code> - Remove an area (if no rooms use it)
+      +area/info <code> - Show detailed info about an area
+      +area/rooms <code> - List all rooms in an area
+      +area/init - Initialize/reset area manager (admin only)
 
     Examples:
-      +room/res here=4                - Set current room's resources to 4
-      +room/type #123=Beach Town     - Set room #123's type to Beach Town
-      +room/unfindable here=on       - Make current room unfindable
+      +area/list
+      +area/add NC=Night City/A sprawling metropolis
+      +area/info NC
+      +area/rooms NC
+    """
+
+    key = "+area"
+    locks = "cmd:perm(Builder)"
+    help_category = "Building and Housing"
+
+    def func(self):
+        if not get_area_manager:
+            self.caller.msg("Area manager is not available.")
+            return
+
+        caller = self.caller
+        area_manager = get_area_manager()
+
+        if not self.switches:
+            caller.msg("Usage: +area/list, +area/add, +area/remove, +area/info, +area/rooms, +area/init")
+            return
+
+        switch = self.switches[0].lower()
+
+        if switch == "list":
+            areas = area_manager.get_areas()
+            table = EvTable("Code", "Name", "Rooms", "Next #", border="cells")
+            for code, info in sorted(areas.items()):
+                room_count = len(info['rooms'])
+                next_num = info['next_room']
+                table.add_row(code, info['name'], room_count, f"{code}{next_num:02d}")
+            caller.msg(f"Defined Areas:\n{table}")
+
+        elif switch == "add":
+            if not self.args or "=" not in self.args:
+                caller.msg("Usage: +area/add <code>=<name>/<description>")
+                return
+            code, rest = self.args.split("=", 1)
+            code = code.strip().upper()
+            if "/" in rest:
+                name, description = rest.split("/", 1)
+                name, description = name.strip(), description.strip()
+            else:
+                name, description = rest.strip(), ""
+            if len(code) != 2:
+                caller.msg("Area code must be exactly 2 characters.")
+                return
+            success, message = area_manager.add_area(code, name, description)
+            caller.msg(message)
+
+        elif switch == "remove":
+            if not self.args:
+                caller.msg("Usage: +area/remove <code>")
+                return
+            code = self.args.strip().upper()
+            success, message = area_manager.remove_area(code)
+            caller.msg(message)
+
+        elif switch == "info":
+            if not self.args:
+                caller.msg("Usage: +area/info <code>")
+                return
+            code = self.args.strip().upper()
+            info = area_manager.get_area_info(code)
+            if not info:
+                caller.msg(f"Area code {code} not found.")
+                return
+            caller.msg(f"|wArea Information: {code}|n")
+            caller.msg(f"Name: {info['name']}")
+            caller.msg(f"Description: {info['description'] or 'No description set'}")
+            caller.msg(f"Next Room Number: {code}{info['next_room']:02d}")
+            caller.msg(f"Total Rooms: {len(info['rooms'])}")
+            if info['rooms']:
+                caller.msg(f"\nRoom Numbers: {', '.join([f'{code}{num:02d}' for num in sorted(info['rooms'].keys())])}")
+
+        elif switch == "rooms":
+            if not self.args:
+                caller.msg("Usage: +area/rooms <code>")
+                return
+            code = self.args.strip().upper()
+            info = area_manager.get_area_info(code)
+            if not info:
+                caller.msg(f"Area code {code} not found.")
+                return
+            rooms = info['rooms']
+            if not rooms:
+                caller.msg(f"No rooms found in area {code}.")
+                return
+            table = EvTable("Room Code", "Room Name", "DB#", border="cells")
+            for room_num in sorted(rooms.keys()):
+                room_id = rooms[room_num]
+                room_obj = search_object(f"#{room_id}")
+                room_code = f"{code}{room_num:02d}"
+                room_name = room_obj[0].name if room_obj else "|rDeleted Room|n"
+                table.add_row(room_code, room_name, f"#{room_id}")
+            caller.msg(f"Rooms in Area {code} ({info['name']}):\n{table}")
+
+        elif switch == "init":
+            if not self.caller.check_permstring("admin"):
+                caller.msg("Only administrators can initialize the area manager.")
+                return
+            area_manager._init_default_areas()
+            areas = area_manager.get_areas()
+            caller.msg(f"Area manager initialized. Areas: {', '.join(areas.keys())}")
+
+        else:
+            caller.msg("Valid switches: /list, /add, /remove, /info, /rooms, /init")
+
+
+class CmdRoom(MuxCommand):
+    """
+    Comprehensive room setup and display properties.
+
+    Usage:
+      +room                          - Show current room settings
+      +room/res <target>=<value>     - Set room resources
+      +room/type <target>=<type>     - Set room type
+      +room/unfindable <target>=<on/off> - Set room findability
+      +room/area <target>=<code>     - Set area and auto-assign room code (e.g. NC)
+      +room/code <target>=<code>     - Manual room code override (e.g. NC01)
+      +room/hierarchy <target>=<district>,<area> - Set location hierarchy for display
+      +room/tag <target>=<tag1>,<tag2> - Set room tags
+      +room/tags <target>            - View room tags
+      +room/coords <target>=<x>,<y>  - Set coordinates for mapping
+      +room/chargen <target>=<on/off> - Convert room to/from ChargenRoom typeclass
+
+    Target: 'here', room name, or #dbref
+
+    Examples:
+      +room/res here=4
+      +room/type here=Beach Town
+      +room/area here=NC
+      +room/hierarchy here=Watson,Northside
+      +room/tag here=bar,nightlife
+      +room/tags here
     """
 
     key = "+room"
@@ -30,71 +172,222 @@ class CmdRoom(MuxCommand):
         """Helper method to get target room from args."""
         if not args:
             return self.caller.location
-        
-        target = args.strip().lower()
-        if target == "here":
+
+        target = args.strip()
+        if target.lower() == "here":
             return self.caller.location
-            
+
+        # Handle database reference (#123)
+        if target.startswith('#'):
+            try:
+                dbref = int(target[1:])
+                objs = search_object(f"#{dbref}")
+                if objs and hasattr(objs[0], 'location') and objs[0].location is None:
+                    return objs[0]
+            except ValueError:
+                pass
+
         room = self.caller.search(target)
         if not room:
             return None
-            
-        # Verify the target is actually a room
-        if not room.is_typeclass("typeclasses.rooms.Room") and not room.is_typeclass("typeclasses.rooms.RoomParent"):
+
+        # Verify the target is actually a room (Room, RoomParent, or ChargenRoom)
+        if not (room.is_typeclass("typeclasses.rooms.Room") or room.is_typeclass("typeclasses.rooms.RoomParent") or
+                room.is_typeclass("typeclasses.chargen.ChargenRoom")):
             self.caller.msg("That is not a room.")
             return None
-            
+
         return room
+
+    def display_current_settings(self, room):
+        """Display the current room settings."""
+        table = EvTable("Setting", "Value", border="cells")
+        table.add_row("Area Name", room.db.area_name or "Not set")
+        table.add_row("Area Code", room.db.area_code or "Not set")
+        hierarchy = room.db.location_hierarchy
+        if hierarchy:
+            hierarchy = list(hierarchy) if hasattr(hierarchy, '__iter__') and not isinstance(hierarchy, (str, bytes)) else hierarchy
+            table.add_row("Hierarchy", " - ".join(hierarchy))
+        else:
+            table.add_row("Hierarchy", "Not set")
+        table.add_row("Resources", str(room.db.resources) if room.db.resources is not None else "Not set")
+        table.add_row("Room Type", room.db.roomtype or "Not set")
+        table.add_row("Unfindable", "Yes" if room.db.unfindable else "No")
+        tags = getattr(room.db, 'tags', []) or []
+        table.add_row("Tags", ", ".join(tags) if tags else "None")
+        if hasattr(room.db, 'map_x') and hasattr(room.db, 'map_y'):
+            table.add_row("Coords", f"({room.db.map_x}, {room.db.map_y})")
+        else:
+            table.add_row("Coords", "Not set")
+        self.caller.msg(f"Room Settings for {room.name}:\n{table}")
 
     def func(self):
         if not self.switches:
-            self.caller.msg("Usage: +room/<switch> [<room>]=<value>")
+            room = self.get_target_room(self.args or "here")
+            if not room:
+                self.caller.msg("You must be in a room or specify a valid room.")
+                return
+            self.display_current_settings(room)
             return
 
-        switch = self.switches[0]
+        switch = self.switches[0].lower()
+
+        # /tags doesn't require a value
+        if switch == "tags":
+            room = self.get_target_room(self.lhs or self.args or "here")
+            if not room:
+                self.caller.msg("You must be in a room or specify a valid room.")
+                return
+            tags = getattr(room.db, 'tags', []) or []
+            room_info = f"#{room.id}" if room != self.caller.location else "here"
+            if tags:
+                self.caller.msg(f"Room tags for {room.name} ({room_info}): {', '.join(tags)}")
+            else:
+                self.caller.msg(f"No tags set for room {room.name} ({room_info})")
+            return
 
         # All other switches require a value
         if not self.rhs:
-            self.caller.msg(f"Usage: +room/{switch} [<room>]=<value>")
+            self.caller.msg(f"Usage: +room/{switch} <target>=<value>")
             return
 
-        # Get target room
         room = self.get_target_room(self.lhs)
         if not room:
             return
 
-        # Handle each switch type
+        value = self.rhs
+        room_info = f"#{room.id}" if room != self.caller.location else "here"
+
         if switch == "res":
             try:
-                value = int(self.rhs)
-                room.db.resources = value
-                self.caller.msg(f"Set resources to {value} for {room.get_display_name(self.caller)}.")
+                val = int(value)
+                room.db.resources = val
+                self.caller.msg(f"Set resources to {val} for {room.get_display_name(self.caller)}.")
             except ValueError:
                 self.caller.msg("The resources value must be an integer.")
 
         elif switch == "type":
-            room.db.roomtype = self.rhs
-            self.caller.msg(f"Set room type to '{self.rhs}' for {room.get_display_name(self.caller)}.")
+            room.db.roomtype = value
+            self.caller.msg(f"Set room type to '{value}' for {room.get_display_name(self.caller)}.")
 
         elif switch == "unfindable":
-            setting = self.rhs.lower()
+            setting = value.lower()
             if setting not in ["on", "off"]:
                 self.caller.msg("Please specify either 'on' or 'off'.")
                 return
-                
             room.db.unfindable = (setting == "on")
             self.caller.msg(f"{room.get_display_name(self.caller)} is now {'unfindable' if setting == 'on' else 'findable'}.")
 
+        elif switch == "area":
+            if not get_area_manager:
+                self.caller.msg("Area manager is not available. Use +area/init first.")
+                return
+            area_manager = get_area_manager()
+            if len(value) != 2:
+                self.caller.msg("Area code must be exactly 2 letters (e.g., NC, WB). Use '+area/list' to see areas.")
+                return
+            area_code = value.upper()
+            if not area_manager.validate_area_code(area_code):
+                self.caller.msg(f"Area code {area_code} is not defined. Use '+area/list' to see areas.")
+                return
+            area_info = area_manager.get_area_info(area_code)
+            full_code = area_manager.get_next_room_number(area_code)
+            room.db.area_name = area_info['name']
+            room.db.area_code = full_code
+            room_number = int(full_code[2:])
+            area_manager.register_room(area_code, room_number, room.id)
+            self.caller.msg(f"Room assigned to area '{area_info['name']}' with code {full_code} ({room_info})")
+
+        elif switch == "code":
+            if not get_area_manager:
+                self.caller.msg("Area manager is not available.")
+                return
+            area_manager = get_area_manager()
+            if len(value) != 4:
+                self.caller.msg("Room code must be 4 characters (e.g., NC01). Use '+room/area here=NC' for auto-assign.")
+                return
+            area_code = value[:2].upper()
+            try:
+                room_number = int(value[2:])
+                full_code = f"{area_code}{room_number:02d}"
+            except ValueError:
+                self.caller.msg("Invalid room code format.")
+                return
+            if not area_manager.validate_area_code(area_code):
+                self.caller.msg(f"Area code {area_code} is not defined.")
+                return
+            area_rooms = area_manager.get_area_rooms(area_code)
+            if room_number in area_rooms and area_rooms[room_number] != room.id:
+                self.caller.msg(f"Room code {full_code} is already assigned to another room.")
+                return
+            room.db.area_code = full_code
+            area_info = area_manager.get_area_info(area_code)
+            if area_info:
+                room.db.area_name = area_info['name']
+            area_manager.register_room(area_code, room_number, room.id)
+            self.caller.msg(f"Room code set to {full_code} ({room_info})")
+
+        elif switch == "hierarchy":
+            hierarchy = [item.strip() for item in value.split(",")]
+            if len(hierarchy) != 2:
+                self.caller.msg("Hierarchy must be: <district>,<area> (e.g., Watson,Northside)")
+                return
+            room.db.location_hierarchy = hierarchy
+            self.caller.msg(f"Location hierarchy set to '{' - '.join(hierarchy)}' ({room_info})")
+
+        elif switch == "tag":
+            tags = [t.strip() for t in value.split(",") if t.strip()]
+            room.db.tags = tags
+            self.caller.msg(f"Room tags set to: {', '.join(tags)} ({room_info})")
+
+        elif switch == "coords":
+            if not get_area_manager:
+                self.caller.msg("Area manager is not available.")
+                return
+            area_manager = get_area_manager()
+            if "," not in value:
+                self.caller.msg("Usage: +room/coords <target>=<x>,<y>")
+                return
+            try:
+                x_str, y_str = value.split(",", 1)
+                x, y = int(x_str.strip()), int(y_str.strip())
+            except ValueError:
+                self.caller.msg("Coordinates must be integers.")
+                return
+            if area_manager.set_room_coordinates(room.id, x, y):
+                self.caller.msg(f"Room coordinates set to ({x}, {y}) ({room_info})")
+            else:
+                self.caller.msg("Error setting coordinates.")
+
+        elif switch == "chargen":
+            # Convert room to/from ChargenRoom typeclass
+            value_lower = value.lower()
+            if value_lower in ["on", "true", "yes", "1"]:
+                if room.is_typeclass("typeclasses.chargen.ChargenRoom"):
+                    self.caller.msg(f"Room {room.name} ({room_info}) is already a ChargenRoom.")
+                    return
+                room.swap_typeclass("typeclasses.chargen.ChargenRoom", clean_attributes=False)
+                room.tags.add("chargen")
+                room.tags.add("ooc")
+                self.caller.msg(f"Room {room.name} ({room_info}) converted to ChargenRoom.")
+                self.caller.msg("Tags 'chargen' and 'ooc' have been applied. Character generation progress will display for characters present.")
+            elif value_lower in ["off", "false", "no", "0"]:
+                if not room.is_typeclass("typeclasses.chargen.ChargenRoom"):
+                    self.caller.msg(f"Room {room.name} ({room_info}) is not a ChargenRoom.")
+                    return
+                room.swap_typeclass("typeclasses.rooms.Room", clean_attributes=False)
+                room.tags.remove("chargen")
+                room.tags.remove("ooc")
+                self.caller.msg(f"Room {room.name} ({room_info}) converted back to normal Room.")
+            else:
+                self.caller.msg("Chargen setting must be 'on' or 'off'.")
+
+        else:
+            self.caller.msg("Valid switches: res, type, unfindable, area, code, hierarchy, tag, tags, coords, chargen")
+
     def access(self, srcobj, access_type="cmd", default=False):
-        """
-        Override the access check. Allow if:
-        1) They have general command access (cmd:all())
-        2) They are trying to describe themselves
-        """
         if access_type != "cmd":
             return super().access(srcobj, access_type, default)
-            
-        # Always allow access - we'll do specific permission checks in func()
         return True
 
 class CmdView(MuxCommand):

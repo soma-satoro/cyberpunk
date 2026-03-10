@@ -3,7 +3,7 @@ from world.cyberpunk_sheets.models import CharacterSheet
 from world.inventory.models import CyberwareInstance
 from world.cyberware.models import Cyberware
 from evennia.commands.default.muxcommand import MuxCommand
-from world.utils.formatting import header, footer, divider
+from world.utils.formatting import sheet_header, footer, header, divider
 from django.db.models import Q
 
 class CmdCyberware(MuxCommand):
@@ -57,15 +57,16 @@ class CmdCyberware(MuxCommand):
             self.caller.msg("You have no cyberware installed.")
             return
 
-        output = header("Installed Cyberware", width=78, fillchar="|m-|n") + "\n"
-        output += f"|c{'Name':<20}{'Type':<15}{'Humanity Loss':<15}{'Description':<25}|n\n"
+        W = 80
+        output = sheet_header("Installed Cyberware", width=W)
+        output += f"|y{'Name':<20}{'Type':<15}{'Humanity Loss':<15}{'Description':<25}|n\n"
 
         for instance in installed_cyberware:
             cyberware = instance.cyberware
-            description = cyberware.description[:22] + "..." if len(cyberware.description) > 25 else cyberware.description
-            output += f"{cyberware.name:<20}{cyberware.type:<15}{cyberware.humanity_loss:<15}{description:<25}\n"
+            description = (cyberware.description[:22] + "...") if len(cyberware.description or "") > 25 else (cyberware.description or "")
+            output += f"|w{cyberware.name:<20}{cyberware.type:<15}{cyberware.humanity_loss:<15}{description:<25}|n\n"
 
-        output += footer(width=78, fillchar="|m-|n")
+        output += footer(width=W, fillchar="-")
         output += "\nUse 'cyberware <name>' to view full details of a specific piece of cyberware."
         self.caller.msg(output)
 

@@ -6,6 +6,7 @@ from world.netrunning.models import Cyberdeck, NetArchitecture, NetrunSession, N
 from world.cyberpunk_sheets.models import CharacterSheet
 from world.inventory.models import Gear, CyberwareInstance, Inventory
 from world.netrunning.interface import NetrunnerActions, NetCombat
+from world.utils.character_utils import is_character_approved
 from evennia import DefaultCharacter
 from typeclasses.net_architecture import NetArchitecture  # Adjust import path as needed
 
@@ -31,6 +32,9 @@ class CmdNet(MuxCommand):
     switch_options = ("run", "install", "programs", "list")
 
     def func(self):
+        if not is_character_approved(self.caller):
+            self.caller.msg("You must be approved by staff before using netrunning.")
+            return
         if not self.switches:
             self.caller.msg(self.__doc__)
             return

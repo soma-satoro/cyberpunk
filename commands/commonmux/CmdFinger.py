@@ -2,7 +2,7 @@ from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils.search import search_object
 from evennia.utils import utils
 from evennia import SESSION_HANDLER
-from utils.search_helpers import search_character
+from world.utils.search_helpers import search_character
 from world.utils.formatting import header, footer, divider
 from evennia.utils.ansi import strip_ansi, ANSIString
 import time

@@ -5,7 +5,7 @@ from evennia.utils import logger
 import uuid
 from time import time
 from world.utils.formatting import footer
-from utils.search_helpers import search_character
+from world.utils.search_helpers import search_character
 
 class CmdAlts(MuxCommand):
     """

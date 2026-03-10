@@ -2,6 +2,67 @@
 from world.cyberpunk_sheets.models import CharacterSheet
 
 
+def is_character_approved(obj):
+    """
+    Check if a character is approved by staff. Unapproved characters cannot use
+    certain in-character systems (missions, hangouts, combat, mysteries, IP spending,
+    voting, Elflines, netrunning, NPC creation, hustles).
+
+    Staff (Builder+) bypass this check - they can use any command regardless of
+    approval status.
+
+    Args:
+        obj: A Character (or Account with character) to check.
+
+    Returns:
+        bool: True if the character is staff or has the 'approved' tag; False otherwise.
+    """
+    if not obj:
+        return False
+    char = obj
+    if hasattr(obj, "character") and obj.character:
+        char = obj.character
+    # Staff bypass: Builder, Admin, Developer can do anything
+    acct = getattr(char, "account", None)
+    if acct and (
+        getattr(acct, "is_superuser", False)
+        or (hasattr(acct, "check_permstring") and acct.check_permstring("Builder"))
+    ):
+        return True
+    if not hasattr(char, "tags"):
+        return False
+    return char.tags.has("approved", category="approval")
+
+
+def is_staff(obj):
+    """
+    Check if a character/account is staff (Builder+ or superuser).
+    Staff bypass approval for using commands but cannot receive IP from vote or weekly allotment.
+    """
+    if not obj:
+        return False
+    char = obj
+    if hasattr(obj, "character") and obj.character:
+        char = obj.character
+    acct = getattr(char, "account", None)
+    if not acct:
+        return False
+    return (
+        getattr(acct, "is_superuser", False)
+        or (hasattr(acct, "check_permstring") and acct.check_permstring("Builder"))
+    )
+
+
+def can_receive_ip(obj):
+    """
+    Check if a character can receive IP from vote or weekly allotment.
+    Must be approved and NOT staff. Staff do not receive IP from these sources.
+    """
+    if not obj or is_staff(obj):
+        return False
+    return is_character_approved(obj)
+
+
 STAT_MAPPING = {
     'INT': 'intelligence',
     'REF': 'reflexes',
@@ -122,18 +183,37 @@ for mapping in [STAT_MAPPING, SKILL_MAPPING, TOPSHEET_MAPPING]:
     for abbr, full in mapping.items():
         REVERSE_MAPPING[abbr] = full
         REVERSE_MAPPING[full.upper()] = full
+        # Add space-separated form (e.g. "SHOULDER ARMS" -> shoulder_arms)
+        if '_' in full:
+            REVERSE_MAPPING[full.replace('_', ' ').upper()] = full
+        # Add plural form for skills (e.g. HANDGUNS -> handgun)
+        if mapping is SKILL_MAPPING and not full.endswith('s'):
+            REVERSE_MAPPING[(full + 's').upper()] = full
         # Add partial matches
         for i in range(1, len(abbr)):
             REVERSE_MAPPING[abbr[:i]] = full
         for i in range(3, len(full)):  # Start from 3 to avoid very short matches
             REVERSE_MAPPING[full[:i].upper()] = full
 
+def format_skill_display(name):
+    """Convert internal skill/stat name (e.g. shoulder_arms) to display form (Shoulder Arms)."""
+    if not name:
+        return ""
+    return name.replace('_', ' ').title()
+
 def get_full_attribute_name(input_str):
     """
     Get the full attribute name from various input options.
+    Accepts underscores or spaces: "Shoulder Arms" and "shoulder_arms" both resolve to shoulder_arms.
     """
-    input_str = input_str.upper()
-    return REVERSE_MAPPING.get(input_str)
+    if not input_str:
+        return None
+    normalized = input_str.strip().upper()
+    result = REVERSE_MAPPING.get(normalized)
+    if result is None and ' ' in normalized:
+        # Try with spaces replaced by underscores
+        result = REVERSE_MAPPING.get(normalized.replace(' ', '_'))
+    return result
 
 def get_character_sheet(character):
     try:

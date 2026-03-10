@@ -49,6 +49,10 @@ class CmdGiveMoney(Command):
     help_category = "Economy"
 
     def func(self):
+        from typeclasses.npcs import is_npc
+        if is_npc(self.caller):
+            self.caller.msg("NPCs cannot give money to people.")
+            return
         if not self.args or "to" not in self.args:
             self.caller.msg("Usage: transfer <amount> to <character>")
             return
@@ -60,7 +64,7 @@ class CmdGiveMoney(Command):
             self.caller.msg("Please provide a valid amount.")
             return
 
-        target = self.caller.search(target.strip())
+        target = self.caller.search(target.strip(), global_search=True)
         if not target:
             return
 
@@ -99,7 +103,7 @@ class CmdAdminMoney(Command):
             return
 
         target, amount = [part.strip() for part in self.args.split("=")]
-        target = self.caller.search(target)
+        target = self.caller.search(target, global_search=True)
         if not target:
             return
 

@@ -1,4 +1,5 @@
 import random
+import re
 from evennia import Command, logger, search_object, default_cmds
 from world.utils.character_utils import get_full_attribute_name, ALL_ATTRIBUTES, TOPSHEET_MAPPING
 from world.utils.calculation_utils import get_remaining_points, STAT_MAPPING, SKILL_MAPPING
@@ -10,11 +11,12 @@ from evennia.utils import create
 from world.cyberpunk_sheets.models import CharacterSheet
 from world.languages.models import Language
 from evennia.utils.evtable import EvTable
-from world.utils.formatting import header, footer, divider
+from world.utils.formatting import footer, sheet_header, sheet_section
 from world.utils.ansi_utils import wrap_ansi
 from world.inventory.models import Weapon, Armor, Gear, Inventory
 from evennia.commands.default.muxcommand import MuxCommand
 from world.lifepath_dictionary import CULTURAL_ORIGINS, PERSONALITIES, CLOTHING_STYLES, HAIRSTYLES, AFFECTATIONS, MOTIVATIONS, LIFE_GOALS, ROLE_SPECIFIC_LIFEPATHS, VALUED_PERSON, VALUED_POSSESSION, FAMILY_BACKGROUND, ENVIRONMENT, FAMILY_CRISIS
+from world.utils.difficulty_values import parse_dv
 from math import ceil
 
 class CmdSheet(MuxCommand):
@@ -24,10 +26,12 @@ class CmdSheet(MuxCommand):
     Usage:
       sheet
       sheet/lifepath
+      sheet/elo
       sheet <character name>
 
     Switches:
       lifepath - Show detailed lifepath information
+      elo      - Elflines Online character generation (stats, skills, elfname, equipment)
 
     Staff members can view the character sheet of other characters by specifying their name.
     """
@@ -55,6 +59,8 @@ class CmdSheet(MuxCommand):
     def func(self):
         if "lifepath" in self.switches:
             self.view_lifepath()
+        elif "elo" in self.switches:
+            self.view_elo_chargen()
         else:
             self.view_sheet()
 
@@ -71,28 +77,56 @@ class CmdSheet(MuxCommand):
             return None
         
         # Search for the target character
-        target = caller.search(self.target_name)
+        target = caller.search(self.target_name, global_search=True)
         if not target:
             # caller.search already sends a message if no match found
             return None
             
         return target
 
+    def view_elo_chargen(self):
+        """Launch Elflines Online character generation EvMenu."""
+        from world.elflines.chargen_menu import start_elo_chargen
+        start_elo_chargen(self.caller)
+
     def view_lifepath(self):
         target = self.get_target_character()
         if not target:
             return
-            
-        # Use character object directly instead of character_sheet
+
+        # Check for new lifepath format (db.lifepath dict with cultural_region, friends, etc.)
+        lp = target.db.lifepath or {}
+        if lp.get("cultural_region") or lp.get("friends") is not None or lp.get("enemies") is not None:
+            from world.lifepath import format_lifepath
+            display_name = getattr(target.db, 'full_name', None) or target.key
+            sheet = getattr(target, 'character_sheet', None)
+            if sheet and getattr(sheet, 'full_name', None):
+                display_name = sheet.full_name
+            output = sheet_header(f"Lifepath for {display_name}", width=80)
+            output += format_lifepath(lp) + "\n"
+            output += footer(width=80, fillchar="-")
+            self.caller.msg(output)
+            return
+
+        # Legacy: lifepath data on CharacterSheet
+        sheet = getattr(target, 'character_sheet', None)
+        if not sheet:
+            self.caller.msg("No character sheet found. Create one with the chargen command first.")
+            return
+
         width = 80
-        title_width = 30
         output = ""
 
-        # Main header
-        output += header(f"Lifepath for {target.db.full_name}", width=width, fillchar="|m-|n") + "\n"
+        # Main header - use sheet full_name or fall back to target
+        display_name = getattr(sheet, 'full_name', None) or getattr(target.db, 'full_name', None) or target.key
+        output += sheet_header(f"Lifepath for {display_name}", width=width)
+
+        def get_sheet_value(field):
+            val = getattr(sheet, field, None)
+            return (val or "").strip() or "Not set"
 
         # Present Section
-        output += divider("|yPresent|n", width=width, fillchar="|m=|n") + "\n"
+        output += sheet_section("Present", width=width)
         present_fields = [
             ("Cultural Origin", "cultural_origin"),
             ("Personality", "personality"),
@@ -104,12 +138,12 @@ class CmdSheet(MuxCommand):
             ("Most Valued Person", "valued_person"),
         ]
         for title, field in present_fields:
-            value = target.attributes.get(field, "Not set")
-            output += self.wrap_field(title, value, width, title_width)
+            value = get_sheet_value(field)
+            output += self._sheet_field(title, value, width)
         output += "\n"
 
         # Past Section
-        output += divider("|yPast|n", width=width, fillchar="|m=|n") + "\n"
+        output += sheet_section("Past", width=width)
         past_fields = [
             ("Valued Possession", "valued_possession"),
             ("Family Background", "family_background"),
@@ -117,13 +151,14 @@ class CmdSheet(MuxCommand):
             ("Family Crisis", "family_crisis")
         ]
         for title, field in past_fields:
-            value = target.attributes.get(field, "Not set")
-            output += self.wrap_field(title, value, width, title_width)
+            value = get_sheet_value(field)
+            output += self._sheet_field(title, value, width)
         output += "\n"
 
-        # Role Section
-        if target.db.role:
-            output += divider(f"|yRole: {target.db.role}|n", width=width, fillchar="|m=|n") + "\n"
+        # Role Section - read role from sheet
+        role = getattr(sheet, 'role', None) or ""
+        if role:
+            output += sheet_section(f"Role: {role}", width=width)
             role_specific_fields = {
                 "Rockerboy": [
                     "what_kind_of_rockerboy_are_you",
@@ -184,38 +219,40 @@ class CmdSheet(MuxCommand):
                     "is_your_pack_based_on_land_air_or_sea"
                 ]
             }
-            for field in role_specific_fields.get(target.db.role, []):
-                value = target.attributes.get(field, None)
-                if value:
+            for field in role_specific_fields.get(role, []):
+                value = get_sheet_value(field)
+                if value and value != "Not set":
                     title = field.replace('_', ' ').title()
-                    output += self.wrap_field(title, value, width, title_width)
+                    output += self._sheet_field(title, value, width)
             output += "\n"
 
-        output += footer(width=width, fillchar="|m-|n")
+        output += footer(width=width, fillchar="-")
         
         # Send the formatted output to the caller
         self.caller.msg(output)
 
-    def wrap_field(self, title, value, width=80, title_width=30):
-        wrapped_title = wrap_ansi(title, width=title_width)
-        wrapped_value = wrap_ansi(value, width=width-title_width-1)
-        
-        title_lines = wrapped_title.split('\n')
+    def _sheet_field(self, title, value, width=80, label_width=20):
+        """Format a label-value pair like the main sheet (|yLabel:|n value)."""
+        wrapped_value = wrap_ansi(value, width=width - label_width - 1)
         value_lines = wrapped_value.split('\n')
-        
         output = ""
-        for i in range(max(len(title_lines), len(value_lines))):
-            title_line = title_lines[i] if i < len(title_lines) else ""
-            value_line = value_lines[i] if i < len(value_lines) else ""
-            
+        label = f"{title}:"
+        for i, value_line in enumerate(value_lines):
             if i == 0:
-                output += f"|c{title_line:<{title_width}}|n {value_line}\n"
+                output += f"|y{label:<{label_width}}|n {value_line}\n"
             else:
-                output += f"|c{title_line:<{title_width}}|n {value_line}\n"
-        
+                output += f"{' ' * label_width} {value_line}\n"
         return output
     
     def view_sheet(self):
+        # Check for voucher first (anyone can +sheet a voucher they have or that's in the room)
+        if self.target_name:
+            from commands.voucher_commands import find_voucher
+            v = find_voucher(self.caller, self.target_name, quiet=True)
+            if v and (v.location == self.caller or v.location == self.caller.location):
+                self.caller.msg(v.format_sheet())
+                return
+
         target = self.get_target_character()
         if not target:
             return
@@ -223,142 +260,174 @@ class CmdSheet(MuxCommand):
         # Recalculate humanity from cyberware before display (CharacterSheet is source of truth)
         if hasattr(target, 'character_sheet') and target.character_sheet:
             sheet = target.character_sheet
-            sheet.calculate_humanity_loss()
+            sheet.calculate_humanity_loss(quiet=True)
             target.db.humanity = sheet.humanity
             target.db.total_cyberware_humanity_loss = sheet.total_cyberware_humanity_loss
             
-        # Main header
-        output = header(f"Character Sheet for {target.db.full_name}", width=80, fillchar="|m-|n") + "\n"
+        W = 80
+        full_name = target.db.full_name or "Unknown"
+
+        # Main header (80 chars, blue/magenta/yellow - no pipes)
+        output = sheet_header(f"Character Sheet for {full_name}", width=W)
 
         # Basic Information
-        output += divider("Basic Information", width=80, fillchar="|m-|n") + "\n"
+        output += sheet_section("Basic Information", width=W)
         basic_info = [
-            ("Full Name:", target.db.full_name, "Gender:", target.db.gender),
-            ("Handle:", target.db.handle, "Age:", target.db.age),
-            ("Hometown:", target.db.hometown, "Height:", f"{target.db.height} cm"),
-            ("Night City Rep:", target.db.rep, "Weight:", f"{target.db.weight} kg"),
-            ("Role:", target.db.role, "Luck:", f"{target.db.current_luck}/{target.db.luck}")
+            ("Full Name:", full_name, "Gender:", target.db.gender or ""),
+            ("Handle:", target.db.handle or "", "Age:", target.db.age or 0),
+            ("Hometown:", target.db.hometown or "", "Height:", f"{target.db.height or 0} cm"),
+            ("Night City Rep:", target.db.rep or 0, "Notoriety:", target.db.notoriety or 0),
+            ("Weight:", f"{target.db.weight or 0} kg", "Luck:", f"{target.db.current_luck or 1}/{target.db.luck or 1}"),
         ]
         for row in basic_info:
-            output += f"|c{row[0]:<20}|n {row[1]:<20} |c{row[2]:<15}|n {row[3]:<20}\n"
+            output += f"|y{row[0]:<18}|n {str(row[1]):<18} |y{row[2]:<15}|n {str(row[3]):<18}\n"
+        # Role on its own line (full width) - includes secondary roles from role abilities
+        display_roles = self.get_display_roles(target)
+        output += f"|yRole:|n {display_roles}\n"
 
         # Stats
-        output += divider("STATS", width=80, fillchar="|m-|n") + "\n"
+        output += sheet_section("STATS", width=W)
         stats = [
             ("Intelligence:", target.db.intelligence, "Technology:", target.db.technology, "Move:", target.db.move),
             ("Reflexes:", target.db.reflexes, "Cool:", target.db.cool, "Body:", target.db.body),
             ("Dexterity:", target.db.dexterity, "Willpower:", target.db.willpower, "Empathy:", target.db.empathy)
         ]
         for row in stats:
-            output += "".join(f"|c{label:<13}|n {value:<8}" for label, value in zip(row[::2], row[1::2])) + "\n"
-        output += "\n"
+            output += "".join(f"|y{label:<13}|n {value:<8}" for label, value in zip(row[::2], row[1::2])) + "\n"
 
         # Skills
-        output += divider("SKILLS", width=80, fillchar="|m-|n") + "\n"
+        output += sheet_section("SKILLS", width=W)
         active_skills = self.get_active_skills(target)
         for i in range(0, len(active_skills), 3):
             row = active_skills[i:i+3]
-            output += "".join(f"|c{skill:<20}|n {value:<5}" for skill, value in row).ljust(80) + "\n"
-        output += "\n"
+            output += "".join(f"|y{skill:<20}|n {value:<5}" for skill, value in row).ljust(80) + "\n"
 
         # Derived Stats
-        output += divider("Derived Statistics", width=80, fillchar="|m-|n") + "\n"
+        output += sheet_section("Derived Statistics", width=W)
+        sheet = target.character_sheet if hasattr(target, 'character_sheet') and target.character_sheet else None
+        unarmed_die = getattr(sheet, 'unarmed_damage_die_type', None) if sheet else None
+        unarmed_dice = getattr(sheet, 'unarmed_damage_dice', None) if sheet else None
+        if unarmed_die is None:
+            unarmed_die = getattr(target.db, 'unarmed_damage_die_type', 6)
+        if unarmed_dice is None:
+            unarmed_dice = getattr(target.db, 'unarmed_damage_dice', 1)
+        unarmed_die_display = f"d{unarmed_die}"
         derived_stats = [
             ("Hit Points:", f"{target.db.current_hp}/{target.db.max_hp}", "Death Save:", target.db.death_save),
-            ("Serious Wounds:", target.db.serious_wounds, "Humanity:", target.db.humanity)
+            ("Serious Wounds:", target.db.serious_wounds, "Humanity:", target.db.humanity),
+            ("Unarmed Damage:", unarmed_die_display, "Unarmed Dice:", unarmed_dice)
         ]
         for row in derived_stats:
-            output += "".join(f"|c{label:<16}|n {value:<18}" for label, value in zip(row[::2], row[1::2])) + "\n"
+            output += "".join(f"|y{label:<16}|n {value:<18}" for label, value in zip(row[::2], row[1::2])) + "\n"
         output += "\n"
 
-        # Equipment
-        output += divider("Equipment", width=80, fillchar="|m-|n") + "\n"
+        # Equipment (use same inventory source as +inventory: character_sheet.inventory)
+        output += sheet_section("Equipment", width=W)
         try:
             from world.inventory.models import Inventory
-            inv, _ = Inventory.get_or_create_for_character(target)
+            inv = None
+            sheet = target.character_sheet if hasattr(target, 'character_sheet') and target.character_sheet else None
+            if sheet:
+                try:
+                    inv = sheet.inventory
+                except Inventory.DoesNotExist:
+                    sheet_pk = getattr(sheet, 'pk', None)
+                    if sheet_pk:
+                        inv, _ = Inventory.objects.get_or_create(character_id=sheet_pk)
+            if inv:
+                weapons = list(inv.weapons.all()) if hasattr(inv, 'weapons') else []
+                output += f"|yWeapons:|n {'|w' + ', '.join(w.name for w in weapons) + '|n' if weapons else '|wNone|n'}\n"
+
+                armor = list(inv.armor.all()) if hasattr(inv, 'armor') else []
+                output += f"|yArmor:|n {'|w' + ', '.join(p.name for p in armor) + '|n' if armor else '|wNone|n'}\n"
+
+                gear = list(inv.gear.all()) if hasattr(inv, 'gear') else []
+                output += f"|yGear:|n {'|w' + ', '.join(g.name for g in gear) + '|n' if gear else '|wNone|n'}\n"
+
+                cyberware = list(inv.cyberware.filter(installed=True)) if hasattr(inv, 'cyberware') else []
+                cw_names = [c.cyberware.name for c in cyberware]
+                output += f"|yCyberware:|n {'|w' + ', '.join(cw_names) + '|n' if cw_names else '|wNone|n'}\n"
+            else:
+                output += "|yWeapons:|n |wNone|n\n|yArmor:|n |wNone|n\n|yGear:|n |wNone|n\n|yCyberware:|n |wNone|n\n"
         except Exception as e:
             logger.log_err(f"Error retrieving inventory for {target}: {str(e)}")
-            output += "Error retrieving inventory\n"
-        else:
-            weapons = inv.weapons.all() if hasattr(inv, 'weapons') else []
-            if weapons:
-                output += "|cWeapons:|n\n"
-                for weapon in weapons:
-                    if weapon.name and weapon.damage and weapon.rof:
-                        output += f"- {weapon.name:<20} Damage: {weapon.damage:<10} ROF: {weapon.rof}\n"
-                    else:
-                        logger.log_warn(f"Incomplete weapon data found: {weapon.id}")
-            else:
-                output += "Weapons: None\n"
-
-            armor = inv.armor.all() if hasattr(inv, 'armor') else []
-            if armor:
-                output += "|cArmor:|n\n"
-                for piece in armor:
-                    output += f"- {piece.name:<20} SP: {piece.sp}, EV: {piece.ev:<10} Locations: {piece.locations}\n"
-            else:
-                output += "Armor: None\n"
-
-            gear = inv.gear.all() if hasattr(inv, 'gear') else []
-            if gear:
-                output += "|cGear:|n\n"
-                gear_list = [f"- {item.name}" for item in gear]
-                max_items = max(4, ceil(len(gear_list) / 2))  # At least 4 items in first column
-                col1 = gear_list[:max_items]
-                col2 = gear_list[max_items:]
-                
-                for i in range(max(len(col1), len(col2))):
-                    left = col1[i] if i < len(col1) else ""
-                    right = col2[i] if i < len(col2) else ""
-                    output += f"{left:<39} {right}\n"
-            else:
-                output += "Gear: None\n"
+            output += "|wError retrieving inventory|n\n"
         output += "\n"
 
-        # Languages
-        output += divider("Languages", width=80, fillchar="|m-|n") + "\n"
+        # Languages (three-column format, alphabetical order - like skills)
+        output += sheet_section("Languages", width=W)
         if hasattr(target, 'languages') and target.languages:
-            for lang_name, level in target.languages.items():
-                output += f"- {lang_name} (Level {level})\n"
+            lang_list = [(name, level) for name, level in target.languages.items()]
+            lang_list.sort(key=lambda x: x[0].lower())
+            for i in range(0, len(lang_list), 3):
+                row = lang_list[i:i+3]
+                output += "".join(f"|y{name:<20}|n {level:<5}" for name, level in row).ljust(80) + "\n"
         else:
-            output += "None\n"
+            output += "|wNone|n\n"
 
-        output += footer(width=80, fillchar="|m-|n")
+        output += footer(width=W, fillchar="-")
         self.caller.msg(output)
+
+    # Role ability key -> Role name (for detecting secondary roles from taken abilities)
+    ROLE_ABILITY_TO_ROLE = {
+        'charismatic_impact': 'Rockerboy',
+        'combat_awareness': 'Solo',
+        'interface': 'Netrunner',
+        'maker': 'Tech',
+        'medicine': 'Medtech',
+        'credibility': 'Media',
+        'teamwork': 'Exec',
+        'backup': 'Lawman',
+        'operator': 'Fixer',
+        'moto': 'Nomad',
+    }
+
+    def get_display_roles(self, char):
+        """
+        Build role display string: primary role + any secondary roles from role abilities.
+        E.g. "Solo / Rockerboy / Medtech" if primary is Solo but they also have Charismatic Impact and Medicine.
+        """
+        primary = (char.db.role or "").strip()
+        roles_seen = set()
+        roles_ordered = []
+
+        # Primary role first
+        if primary:
+            roles_seen.add(primary)
+            roles_ordered.append(primary)
+
+        # Add secondary roles from role abilities with value > 0
+        if hasattr(char, 'db') and char.db.skills:
+            for ability_key, role_name in self.ROLE_ABILITY_TO_ROLE.items():
+                if role_name in roles_seen:
+                    continue
+                val = char.db.skills.get(ability_key, 0)
+                if val > 0:
+                    roles_seen.add(role_name)
+                    roles_ordered.append(role_name)
+
+        return " / ".join(roles_ordered) if roles_ordered else "None"
+
+    # Keys in db.skills that are derived stats, not actual skills (exclude from SKILLS section)
+    NON_SKILL_KEYS = frozenset({
+        'total_cyberware_humanity_loss', 'humanity', 'death_save', 'serious_wounds',
+        'unarmed_damage_die_type', 'unarmed_damage_dice',
+    })
 
     def get_active_skills(self, char):
         """
         Get a list of active skills (skills with value > 0) directly from the character.
+        Excludes derived stats that may be stored in db.skills.
         """
         skill_list = []
-        
-        # Get skills from character's skills dictionary
+
+        # Get skills from character's skills dictionary (includes role abilities)
         if hasattr(char, 'db') and char.db.skills:
             for skill_name, value in char.db.skills.items():
-                if value > 0:
-                    skill_name = skill_name.replace('_', ' ').title()
-                    skill_list.append([skill_name, value])
-        
-        # Add role abilities
-        role_abilities = {
-            'charismatic_impact': 'Charismatic Impact',
-            'combat_awareness': 'Combat Awareness',
-            'interface': 'Interface',
-            'maker': 'Maker',
-            'medicine': 'Medicine',
-            'credibility': 'Credibility',
-            'teamwork': 'Teamwork',
-            'backup': 'Backup',
-            'operator': 'Operator',
-            'moto': 'Moto'
-        }
-        
-        for ability_key, ability_name in role_abilities.items():
-            if char.db.skills and ability_key in char.db.skills:
-                value = char.db.skills[ability_key]
-                if value > 0:
-                    skill_list.append([ability_name, value])
-        
+                if value > 0 and skill_name not in self.NON_SKILL_KEYS:
+                    display_name = skill_name.replace('_', ' ').title()
+                    skill_list.append([display_name, value])
+
         # Add skill instances from character typeclass
         if hasattr(char, 'db') and char.db.skill_instances:
             for skill_key, value in char.db.skill_instances.items():
@@ -370,7 +439,7 @@ class CmdSheet(MuxCommand):
                     formatted_name = f"{base_name.replace('_', ' ').title()} ({instance})"
                     skill_list.append([formatted_name, value])
         
-        skill_list.sort(key=lambda x: (-x[1], x[0]))
+        skill_list.sort(key=lambda x: (x[0].lower(), -x[1]))  # Alphabetical by name, then by value desc
         return skill_list
 
 class CmdShortDesc(Command):
@@ -412,7 +481,7 @@ class CmdShortDesc(Command):
                 return
 
             # Find the target character
-            target = caller.search(self.target_name)
+            target = caller.search(self.target_name, global_search=True)
             if not target:
                 caller.msg(f"|rCharacter '{self.target_name}' not found.|n")
                 return
@@ -432,53 +501,119 @@ class CmdShortDesc(Command):
             caller.db.shortdesc = self.shortdesc
             caller.msg("Short description set to '|w%s|n'." % self.shortdesc)
 
+
 class CmdRoll(Command):
     """
     Roll a skill check.
 
     Usage:
-      roll <attribute> <skill>
+      roll <attribute> + <skill>
+      roll <attribute> + <skill> vs <DV or difficulty name>
+      roll <value> + <value> [vs <DV or difficulty name>]
 
-    This command rolls 1d10 and adds it to the specified attribute and skill.
+    Rolls 1d10 + attribute + skill (or raw values). With 'vs', shows success (total >= DV) or failure.
+    Use attribute/skill names for your character, or raw numbers (0-10) for NPCs or ad-hoc rolls.
+
+    Difficulty names: Simple (9), Everyday (13), Difficult (15), Professional (17),
+    Heroic (21), Incredible (24), Legendary (29).
+
+    Examples:
+      roll Reflexes + Handgun
+      roll Reflexes + Handgun vs Simple
+      roll 5 + 4 vs Everyday
     """
     key = "roll"
     aliases = ["check"]
     locks = "cmd:all()"
     help_category = "Roleplay Utilities"
 
+    def _get_stat_value(self, char, field_name, is_stat):
+        """Get stat or skill value from character sheet or fallback to char attributes/db."""
+        sheet = getattr(char, 'character_sheet', None)
+        if sheet and hasattr(sheet, field_name):
+            return getattr(sheet, field_name, 0)
+        if is_stat:
+            return char.attributes.get(field_name, 0)
+        skill_key = field_name.lower().replace(' ', '_')
+        return char.db.skills.get(skill_key, 0) if char.db.skills else 0
+
     def func(self):
-        if not self.args or len(self.args.split()) != 2:
-            self.caller.msg("Usage: roll <attribute> <skill>")
+        args = (self.args or "").strip()
+        if not args:
+            self.caller.msg("Usage: roll <attribute> + <skill> | <value> + <value> [vs <DV or difficulty>]")
             return
 
-        attr, skill = self.args.split()
-        char = self.caller
+        # Parse "vs" part (case-insensitive)
+        vs_info = None
+        vs_match = re.search(r'\s+vs\s+', args, re.IGNORECASE)
+        if vs_match:
+            vs_str = args[vs_match.end():].strip()
+            args = args[:vs_match.start()].strip()
+            vs_info = parse_dv(vs_str)
+            if vs_info is None:
+                self.caller.msg("Invalid difficulty. Use a number (e.g. 9) or a name (Simple, Everyday, Difficult, Professional, Heroic, Incredible, Legendary).")
+                return
 
-        full_attr_name = get_full_attribute_name(attr)
-        full_skill_name = get_full_attribute_name(skill)
-
-        if not full_attr_name or full_attr_name not in STAT_MAPPING.values():
-            self.caller.msg(f"Invalid attribute. Choose from: {', '.join(STAT_MAPPING.values())}")
+        # Parse "Stat + Skill" part
+        if " + " not in args:
+            self.caller.msg("Usage: roll <attribute> + <skill> | <value> + <value> [vs <DV or difficulty>]")
             return
 
-        if not full_skill_name or full_skill_name not in SKILL_MAPPING.values():
-            self.caller.msg(f"Invalid skill. Choose from: {', '.join(SKILL_MAPPING.values())}")
-            return
+        parts = args.split(" + ", 1)
+        attr_input = parts[0].strip()
+        skill_input = parts[1].strip()
 
-        # Get attribute value directly from character
-        attr_value = char.attributes.get(full_attr_name, 0)
-        
-        # Get skill value from character's skills dictionary
-        skill_key = full_skill_name.lower().replace(' ', '_')
-        skill_value = char.db.skills.get(skill_key, 0) if char.db.skills else 0
+        attr_value = None
+        skill_value = None
+        attr_display = None
+        skill_display = None
+
+        # Try parsing as raw numeric values (for NPCs / ad-hoc rolls)
+        try:
+            a, s = int(attr_input), int(skill_input)
+            if 0 <= a <= 10 and 0 <= s <= 10:
+                attr_value, skill_value = a, s
+                attr_display, skill_display = str(a), str(s)
+        except ValueError:
+            pass
+
+        # Fall back to character sheet lookup
+        if attr_value is None:
+            full_attr_name = get_full_attribute_name(attr_input)
+            full_skill_name = get_full_attribute_name(skill_input)
+
+            if not full_attr_name or full_attr_name not in STAT_MAPPING.values():
+                self.caller.msg(f"Invalid attribute. Choose from: {', '.join(STAT_MAPPING.values())}, or use raw values 0-10.")
+                return
+
+            if not full_skill_name or full_skill_name not in SKILL_MAPPING.values():
+                self.caller.msg(f"Invalid skill. Choose from: {', '.join(SKILL_MAPPING.values())}, or use raw values 0-10.")
+                return
+
+            char = self.caller
+            attr_value = self._get_stat_value(char, full_attr_name, is_stat=True)
+            skill_value = self._get_stat_value(char, full_skill_name, is_stat=False)
+            attr_display = full_attr_name.replace('_', ' ').title()
+            skill_display = full_skill_name.replace('_', ' ').title()
 
         dice_roll = random.randint(1, 10)
         total = attr_value + skill_value + dice_roll
 
-        self.caller.msg(f"Rolling {full_attr_name.capitalize()} + {full_skill_name.capitalize()} + 1d10")
-        self.caller.msg(f"Result: {attr_value} + {skill_value} + {dice_roll} = {total}")
+        out = f"Rolling {attr_display} + {skill_display} + 1d10: {attr_value} + {skill_value} + {dice_roll} = |w{total}|n"
 
-class CmdLuck(Command):
+        if vs_info is not None:
+            dv, diff_name, _ = vs_info
+            success = total >= dv
+            color = "g" if success else "r"
+            result = "Success" if success else "Failure"
+            out += f" vs {dv}"
+            if diff_name:
+                out += f" ({diff_name})"
+            out += f" - |{color}{result}|n"
+
+        self.caller.msg(out)
+
+class CmdLuck(MuxCommand):
     """
     Spend a luck point.
 
@@ -702,12 +837,14 @@ class CmdMeet(MuxCommand):
                 caller.msg("You have no pending meet requests.")
                 return
             requester = caller.ndb.meet_request
+            # Capture locations before move - avoids desync if move_to triggers DB write
             old_location = caller.location
-            caller.move_to(requester.location, quiet=True)
+            destination = requester.location
+            caller.move_to(destination, quiet=True)
             caller.msg(f"You accept the meet request from {requester.name} and join them.")
             requester.msg(f"{caller.name} has accepted your meet request and joined you.")
             old_location.msg_contents(f"{caller.name} has left to meet {requester.name}.", exclude=caller)
-            requester.location.msg_contents(f"{caller.name} appears, joining {requester.name}.", exclude=[caller, requester])
+            destination.msg_contents(f"{caller.name} appears, joining {requester.name}.", exclude=[caller, requester])
             caller.ndb.meet_request = None
             return
 

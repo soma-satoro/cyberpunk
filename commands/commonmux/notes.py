@@ -4,7 +4,7 @@ from evennia import search_object
 from datetime import datetime
 from utils.text import process_special_characters
 from world.utils.formatting import footer
-from utils.search_helpers import search_character
+from world.utils.search_helpers import search_character
 
 
 class CmdNote(MuxCommand):

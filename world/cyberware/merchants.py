@@ -5,6 +5,8 @@ from evennia import Command
 from world.cyberware.models import CYBERWARE_HUMANITY_LOSS
 from world.inventory.models import CyberwareInstance
 from world.cyberpunk_sheets.models import CharacterSheet
+from world.cyberpunk_sheets.services import CharacterMoneyService
+from world.commerce.pricing import get_purchase_discount_percent, calculate_final_price
 from .models import Cyberware
 from evennia import CmdSet
 
@@ -131,11 +133,16 @@ class CmdImplantCyberware(Command):
     Buy and install cyberware from the merchant.
 
     Usage:
-      cyberimplant <cyberware_name>
+      cyberimplant <cyberware_name>      - Buy and install
+      cyberimplant/stash <cyberware_name> - Buy without installing (for resale)
+
+    Use /stash to purchase cyberware without installing it. Useful for Medtechs
+    who plan to resell it to other players.
     """
 
     key = "cyberimplant"
     aliases = ["implant_cyberware"]
+    switches = [("stash", "stash")]
     locks = "cmd:all()"
     help_category = "Cyberware"
 
@@ -151,83 +158,92 @@ class CmdImplantCyberware(Command):
         }
 
     def func(self):
-        self.caller.msg("Debug: CmdImplantCyberware executed")
-        
         if not self.args:
-            self.caller.msg("Debug: No arguments provided")
-            self.caller.msg("Usage: cyberimplant <cyberware_name>")
+            self.caller.msg("Usage: cyberimplant <cyberware_name> [or cyberimplant/stash for no install]")
             return
 
+        stash = "stash" in self.switches
         cyberware_name = self.args.strip()
-        self.caller.msg(f"Debug: Attempting to implant {cyberware_name}")
-        
         try:
             cyberware = Cyberware.objects.get(name__iexact=cyberware_name)
-            self.caller.msg(f"Debug: Found cyberware: {cyberware.name}")
         except Cyberware.DoesNotExist:
-            self.caller.msg(f"Debug: Cyberware '{cyberware_name}' not found.")
+            self.caller.msg(f"Cyberware '{cyberware_name}' not found.")
             return
-        
+
         try:
             character_sheet = self.caller.character_sheet
-            self.caller.msg("Debug: Retrieved character sheet")
         except AttributeError:
-            self.caller.msg("Debug: Error: No character sheet found for your character.")
+            self.caller.msg("No character sheet found for your character.")
             return
 
-        self.caller.msg(f"Debug: Character's current money: {character_sheet.eurodollars}")
-        self.caller.msg(f"Debug: Cyberware cost: {cyberware.cost}")
+        base_cost = cyberware.cost
+        discount = get_purchase_discount_percent(self.caller, "cyberware", None)
+        final_cost = calculate_final_price(base_cost, discount)
 
-        if character_sheet.eurodollars < cyberware.cost:
-            self.caller.msg(f"Debug: Not enough money to buy {cyberware.name}.")
+        if not CharacterMoneyService.spend_money(self.caller, final_cost):
+            self.caller.msg(
+                f"Not enough money to buy {cyberware.name}. "
+                f"It costs {final_cost} eb."
+            )
             return
 
-        # Call the check_cyberware_requirements function
-        self.caller.msg("Debug: About to call check_cyberware_requirements")
-        requirements_met, error_message = check_cyberware_requirements(character_sheet, cyberware)
-        self.caller.msg(f"Debug: Result from check_cyberware_requirements: {requirements_met}, {error_message}")
-
-        if not requirements_met:
-            self.caller.msg(f"Debug: Requirements not met: {error_message}")
-            self.caller.msg(error_message)
-            return
-
-        # Check available slots
-        if cyberware.type in self.type_slots:
-            installed_cyberware = character_sheet.inventory.cyberware.filter(installed=True, cyberware__type=cyberware.type)
-            used_slots = sum(cw.cyberware.slots for cw in installed_cyberware)
-            if used_slots + cyberware.slots > self.type_slots[cyberware.type]:
-                self.caller.msg(f"Not enough slots available for {cyberware.type}.")
+        if not stash:
+            requirements_met, error_message = check_cyberware_requirements(character_sheet, cyberware)
+            if not requirements_met:
+                CharacterMoneyService.add_money(self.caller, final_cost)
+                self.caller.msg(error_message)
                 return
 
-        # If we've passed all checks, proceed with installation
-        self.caller.msg("Debug: Creating CyberwareInstance")
+            # Check available slots
+            if cyberware.type in self.type_slots:
+                installed_cyberware = character_sheet.inventory.cyberware.filter(installed=True, cyberware__type=cyberware.type)
+                used_slots = sum(cw.cyberware.slots for cw in installed_cyberware)
+                if used_slots + cyberware.slots > self.type_slots[cyberware.type]:
+                    CharacterMoneyService.add_money(self.caller, final_cost)
+                    self.caller.msg(f"Not enough slots available for {cyberware.type}.")
+                    return
+
         try:
             cyberware_instance = CyberwareInstance.objects.create(
                 cyberware=cyberware,
-                character=character_sheet,
-                installed=True
+                character_sheet=character_sheet,
+                installed=not stash,
             )
-            self.caller.msg(f"Debug: CyberwareInstance created with ID: {cyberware_instance.id}")
 
-            # Check if the cyberware is a cyberarm and update the has_cyberarm flag
-            if cyberware.name.lower() == "cyberarm":
+            character_sheet.inventory.cyberware.add(cyberware_instance)
+            # Check if the cyberware is a cyberarm and update the has_cyberarm flag (only when installing)
+            if not stash and cyberware.name.lower() == "cyberarm":
                 character_sheet.has_cyberarm = True
                 character_sheet.save()
                 self.caller.msg("Your Cyberarm installation has been registered.")
 
         except Exception as e:
-            self.caller.msg(f"Debug: Error creating CyberwareInstance: {str(e)}")
+            CharacterMoneyService.add_money(self.caller, final_cost)
+            self.caller.msg(f"Error creating cyberware instance: {str(e)}")
             return
 
-        self.caller.msg("Debug: Updating character sheet")
-        character_sheet.eurodollars -= cyberware.cost
-        character_sheet.calculate_humanity_loss()
+        character_sheet.refresh_from_db()
+        if not stash:
+            character_sheet.calculate_humanity_loss()
         character_sheet.save()
 
-        self.caller.msg(f"Debug: Implant process completed for {cyberware.name}")
-        self.caller.msg(f"You have purchased and installed {cyberware.name}.")
-        self.caller.msg(f"Your new humanity is {character_sheet.humanity}.")
+        if stash:
+            if discount > 0:
+                self.caller.msg(
+                    f"You have purchased {cyberware.name} (not installed) for {final_cost} eb "
+                    f"(base {base_cost} eb, {discount}% Medtech discount applied)."
+                )
+            else:
+                self.caller.msg(f"You have purchased {cyberware.name} (not installed) for {final_cost} eb.")
+        else:
+            if discount > 0:
+                self.caller.msg(
+                    f"You have purchased and installed {cyberware.name} for {final_cost} eb "
+                    f"(base {base_cost} eb, {discount}% Medtech discount applied)."
+                )
+            else:
+                self.caller.msg(f"You have purchased and installed {cyberware.name} for {final_cost} eb.")
+            self.caller.msg(f"Your new humanity is {character_sheet.humanity}.")
 
         if cyberware.is_weapon:
             self.caller.msg(f"Weapon stats: {cyberware.damage_dice}d{cyberware.damage_die_type} damage, {cyberware.rate_of_fire} ROF")
@@ -236,28 +252,24 @@ class CmdImplantCyberware(Command):
         self.caller.msg("Installed Cyberware:")
         try:
             installed_cyberware = CyberwareInstance.objects.filter(character=character_sheet, installed=True)
-            self.caller.msg(f"Debug: Found {installed_cyberware.count()} installed cyberware items")
-            
             for cw in installed_cyberware:
                 self.caller.msg(f"- {cw.cyberware.name} ({cw.cyberware.type})")
                 if cw.cyberware.is_weapon:
                     self.caller.msg(f"  Weapon stats: {cw.cyberware.damage_dice}d{cw.cyberware.damage_die_type} damage, {cw.cyberware.rate_of_fire} ROF")
         except Exception as e:
-            self.caller.msg(f"Debug: Error retrieving installed cyberware: {str(e)}")
+            self.caller.msg(f"Error retrieving installed cyberware: {str(e)}")
 
         # Display all cyberware in inventory (including not installed)
         self.caller.msg("\nAll Cyberware in Inventory:")
         try:
             all_cyberware = CyberwareInstance.objects.filter(character=character_sheet)
-            self.caller.msg(f"Debug: Found {all_cyberware.count()} total cyberware items")
-            
             for cw in all_cyberware:
                 status = "Installed" if cw.installed else "Not Installed"
                 self.caller.msg(f"- {cw.cyberware.name} ({cw.cyberware.type}) - {status}")
                 if cw.cyberware.is_weapon:
                     self.caller.msg(f"  Weapon stats: {cw.cyberware.damage_dice}d{cw.cyberware.damage_die_type} damage, {cw.cyberware.rate_of_fire} ROF")
         except Exception as e:
-            self.caller.msg(f"Debug: Error retrieving all cyberware: {str(e)}")
+            self.caller.msg(f"Error retrieving cyberware: {str(e)}")
 
         character_sheet.recalculate_derived_stats()
         character_sheet.save()

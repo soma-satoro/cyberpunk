@@ -241,7 +241,7 @@ class CmdClearAllStates(AdminCommand):
 
     def func(self):
         if self.args:
-            target = self.caller.search(self.args.strip())
+            target = self.caller.search(self.args.strip(), global_search=True)
             if not target:
                 return
         else:
@@ -299,7 +299,7 @@ class CmdHeal(AdminCommand):
             return
 
         target_name, heal_amount = self.args.split()
-        target = self.caller.search(target_name)
+        target = self.caller.search(target_name, global_search=True)
         if not target:
             return
 
@@ -350,7 +350,7 @@ class CmdHurt(AdminCommand):
             return
 
         target_name, damage = self.args.split()
-        target = self.caller.search(target_name)
+        target = self.caller.search(target_name, global_search=True)
         if not target:
             return
 
@@ -396,7 +396,7 @@ class CmdApprove(AdminCommand):
     and adding the 'approved' tag. This allows the player to start playing.
     """
     key = "approve"
-    locks = "cmd:perm(Admin)"
+    locks = "cmd:perm(Admin) or perm(Builder)"
     help_category = "Admin"
 
     def func(self):
@@ -404,11 +404,12 @@ class CmdApprove(AdminCommand):
             self.caller.msg("Usage: approve <character_name>")
             return
 
-        target = self.caller.search(self.args)
+        target = self.caller.search(self.args, global_search=True)
         if not target:
             return
 
-        if not target.tags.has("unapproved", category="approval"):
+        # Brand new characters may have neither tag - treat as unapproved
+        if target.tags.has("approved", category="approval"):
             self.caller.msg(f"{target.name} is already approved.")
             return
 
@@ -431,7 +432,7 @@ class CmdUnapprove(AdminCommand):
     chargen commands again.
     """
     key = "unapprove"
-    locks = "cmd:perm(Admin)"
+    locks = "cmd:perm(Admin) or perm(Builder)"
     help_category = "Admin"
 
     def func(self):
@@ -439,10 +440,11 @@ class CmdUnapprove(AdminCommand):
             self.caller.msg("Usage: unapprove <character_name>")
             return
 
-        target = self.caller.search(self.args)
+        target = self.caller.search(self.args, global_search=True)
         if not target:
             return
 
+        # Brand new characters may have neither tag - treat as already unapproved
         if target.tags.has("unapproved", category="approval"):
             self.caller.msg(f"{target.name} is already unapproved.")
             return
@@ -880,7 +882,7 @@ class CmdViewSheetAttributes(Command):
             if related_objects:
                 self.caller.msg(f"{display_name}:")
                 for obj in related_objects:
-                    if relation_name == 'character_languages':
+                    if relation_name in ('character_languages', 'sheet_language_proficiencies'):
                         self.caller.msg(f"- {obj.language.name} (Level {obj.level})")
                     else:
                         self.caller.msg(f"- {obj}")
@@ -993,12 +995,14 @@ class CmdSummon(AdminCommand):
             caller.msg("You can only summon characters.")
             return
 
+        # Capture locations before move - avoids desync if move_to triggers DB write
         old_location = target.location
-        target.move_to(caller.location, quiet=True)
+        destination = caller.location
+        target.move_to(destination, quiet=True)
         caller.msg(f"You have summoned {target.name} to your location.")
         target.msg(f"{caller.name} has summoned you.")
         old_location.msg_contents(f"{target.name} has been summoned by {caller.name}.", exclude=target)
-        caller.location.msg_contents(f"{target.name} appears, summoned by {caller.name}.", exclude=[caller, target])
+        destination.msg_contents(f"{target.name} appears, summoned by {caller.name}.", exclude=[caller, target])
 
 class CmdJoin(AdminCommand):
     """
@@ -1030,6 +1034,8 @@ class CmdJoin(AdminCommand):
             caller.msg("You can only join characters.")
             return
 
-        caller.move_to(target.location, quiet=True)
+        # Capture destination before move - avoids desync from re-fetching after DB write
+        destination = target.location
+        caller.move_to(destination, quiet=True)
         caller.msg(f"You have joined {target.name} at their location.")
-        target.location.msg_contents(f"{caller.name} appears in the room.", exclude=caller)
+        destination.msg_contents(f"{caller.name} appears in the room.", exclude=caller)

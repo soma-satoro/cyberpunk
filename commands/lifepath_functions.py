@@ -1,4 +1,4 @@
-from world.lifepath_dictionary import CULTURAL_ORIGINS, PERSONALITIES, CLOTHING_STYLES, HAIRSTYLES, AFFECTATIONS, MOTIVATIONS, LIFE_GOALS, ROLE_SPECIFIC_LIFEPATHS, VALUED_PERSON, VALUED_POSSESSION, FAMILY_BACKGROUND, ENVIRONMENT, FAMILY_CRISIS
+from world.lifepath_dictionary import CULTURAL_ORIGINS, CULTURAL_ORIGIN_LANGUAGES, PERSONALITIES, CLOTHING_STYLES, HAIRSTYLES, AFFECTATIONS, MOTIVATIONS, LIFE_GOALS, ROLE_SPECIFIC_LIFEPATHS, VALUED_PERSON, VALUED_POSSESSION, FAMILY_BACKGROUND, ENVIRONMENT, FAMILY_CRISIS
 from world.cyberpunk_sheets.models import CharacterSheet
 from django.db import IntegrityError
 
@@ -53,10 +53,12 @@ def choose_cultural_origin(caller):
 def set_cultural_origin(caller, raw_string, **kwargs):
     origin = kwargs.get('origin')
     cs = caller.character_sheet
-    
-    # Clear previous languages associated with cultural origin
-    cs.clear_cultural_languages()
-    
+
+    # Clear previous languages associated with old cultural origin (before overwriting)
+    old_origin = getattr(cs, 'cultural_origin', '') or ''
+    if old_origin:
+        cs.clear_cultural_languages(old_origin)
+
     cs.cultural_origin = origin
     cs.save()
     
@@ -67,7 +69,7 @@ def set_cultural_origin(caller, raw_string, **kwargs):
 
 def choose_language(caller, raw_string="", **kwargs):
     origin = kwargs.get("origin")
-    languages = CULTURAL_ORIGINS.get(origin, [])
+    languages = CULTURAL_ORIGIN_LANGUAGES.get(origin, [])
     
     text = f"Choose a language you know from your {origin} background:\n\n"
     options = []
