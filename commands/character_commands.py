@@ -1,0 +1,876 @@
+import random
+import re
+from evennia import Command, logger, search_object, default_cmds
+from world.utils.character_utils import get_full_attribute_name, ALL_ATTRIBUTES, TOPSHEET_MAPPING
+from world.utils.calculation_utils import get_remaining_points, STAT_MAPPING, SKILL_MAPPING
+from typeclasses.chargen import ChargenRoom
+from evennia.utils import evtable
+from evennia.utils.utils import list_to_string, inherits_from
+from evennia.utils.create import create_object
+from evennia.utils import create
+from world.cyberpunk_sheets.models import CharacterSheet
+from world.languages.models import Language
+from evennia.utils.evtable import EvTable
+from world.utils.formatting import footer, sheet_header, sheet_section
+from world.utils.ansi_utils import wrap_ansi
+from world.inventory.models import Weapon, Armor, Gear, Inventory
+from evennia.commands.default.muxcommand import MuxCommand
+from world.lifepath_dictionary import CULTURAL_ORIGINS, PERSONALITIES, CLOTHING_STYLES, HAIRSTYLES, AFFECTATIONS, MOTIVATIONS, LIFE_GOALS, ROLE_SPECIFIC_LIFEPATHS, VALUED_PERSON, VALUED_POSSESSION, FAMILY_BACKGROUND, ENVIRONMENT, FAMILY_CRISIS
+from world.utils.difficulty_values import parse_dv
+from math import ceil
+
+class CmdSheet(MuxCommand):
+    """
+    Show character sheet or lifepath details
+
+    Usage:
+      sheet
+      sheet/lifepath
+      sheet/elo
+      sheet <character name>
+
+    Switches:
+      lifepath - Show detailed lifepath information
+      elo      - Elflines Online character generation (stats, skills, elfname, equipment)
+
+    Staff members can view the character sheet of other characters by specifying their name.
+    """
+
+    key = "sheet"
+    aliases = ["char", "character"]
+    lock = "cmd:all()"
+    help_category = "Character"
+
+    def safe_get_attr(self, obj, attr):
+        """Safely get an attribute value, returning 'N/A' if it doesn't exist."""
+        if hasattr(obj, "attributes") and obj.attributes.has(attr):
+            return obj.attributes.get(attr, 'N/A')
+        return getattr(obj, attr, 'N/A')
+
+    def parse(self):
+        """Parse command arguments."""
+        super().parse()
+
+        if not self.args or self.args in self.switches:
+            self.target_name = None
+        else:
+            self.target_name = self.args.strip()
+
+    def func(self):
+        if "lifepath" in self.switches:
+            self.view_lifepath()
+        elif "elo" in self.switches:
+            self.view_elo_chargen()
+        else:
+            self.view_sheet()
+
+    def get_target_character(self):
+        """Get the target character based on user input."""
+        caller = self.caller
+        
+        if not self.target_name:
+            return caller
+        
+        # Check if the caller has staff permissions
+        if not caller.check_permstring("builders") and not caller.check_permstring("wizards"):
+            caller.msg("|rYou don't have permission to view other character sheets.|n")
+            return None
+        
+        # Search for the target character
+        target = caller.search(self.target_name, global_search=True)
+        if not target:
+            # caller.search already sends a message if no match found
+            return None
+            
+        return target
+
+    def view_elo_chargen(self):
+        """Launch Elflines Online character generation EvMenu."""
+        from world.elflines.chargen_menu import start_elo_chargen
+        start_elo_chargen(self.caller)
+
+    def view_lifepath(self):
+        target = self.get_target_character()
+        if not target:
+            return
+
+        # Check for new lifepath format (db.lifepath dict with cultural_region, friends, etc.)
+        lp = target.db.lifepath or {}
+        if lp.get("cultural_region") or lp.get("friends") is not None or lp.get("enemies") is not None:
+            from world.lifepath import format_lifepath
+            display_name = getattr(target.db, 'full_name', None) or target.key
+            sheet = getattr(target, 'character_sheet', None)
+            if sheet and getattr(sheet, 'full_name', None):
+                display_name = sheet.full_name
+            output = sheet_header(f"Lifepath for {display_name}", width=80)
+            output += format_lifepath(lp) + "\n"
+            output += footer(width=80, fillchar="-")
+            self.caller.msg(output)
+            return
+
+        # Legacy: lifepath data on CharacterSheet
+        sheet = getattr(target, 'character_sheet', None)
+        if not sheet:
+            self.caller.msg("No character sheet found. Create one with the chargen command first.")
+            return
+
+        width = 80
+        output = ""
+
+        # Main header - use sheet full_name or fall back to target
+        display_name = getattr(sheet, 'full_name', None) or getattr(target.db, 'full_name', None) or target.key
+        output += sheet_header(f"Lifepath for {display_name}", width=width)
+
+        def get_sheet_value(field):
+            val = getattr(sheet, field, None)
+            return (val or "").strip() or "Not set"
+
+        # Present Section
+        output += sheet_section("Present", width=width)
+        present_fields = [
+            ("Cultural Origin", "cultural_origin"),
+            ("Personality", "personality"),
+            ("Clothing Style", "clothing_style"),
+            ("Hairstyle", "hairstyle"),
+            ("Affectation", "affectation"),
+            ("Motivation", "motivation"),
+            ("Life Goal", "life_goal"),
+            ("Most Valued Person", "valued_person"),
+        ]
+        for title, field in present_fields:
+            value = get_sheet_value(field)
+            output += self._sheet_field(title, value, width)
+        output += "\n"
+
+        # Past Section
+        output += sheet_section("Past", width=width)
+        past_fields = [
+            ("Valued Possession", "valued_possession"),
+            ("Family Background", "family_background"),
+            ("Origin Environment", "environment"),
+            ("Family Crisis", "family_crisis")
+        ]
+        for title, field in past_fields:
+            value = get_sheet_value(field)
+            output += self._sheet_field(title, value, width)
+        output += "\n"
+
+        # Role Section - read role from sheet
+        role = getattr(sheet, 'role', None) or ""
+        if role:
+            output += sheet_section(f"Role: {role}", width=width)
+            role_specific_fields = {
+                "Rockerboy": [
+                    "what_kind_of_rockerboy_are_you",
+                    "whos_gunning_for_you_your_group",
+                    "where_do_you_perform"
+                ],
+                "Solo": [
+                    "what_kind_of_solo_are_you",
+                    "whats_your_moral_compass_like",
+                    "whos_gunning_for_you",
+                    "whats_your_operational_territory"
+                ],
+                "Netrunner": [
+                    "what_kind_of_runner_are_you",
+                    "who_are_some_of_your_other_clients",
+                    "where_do_you_get_your_programs",
+                    "whos_gunning_for_you"
+                ],
+                "Tech": [
+                    "what_kind_of_tech_are_you",
+                    "whats_your_workspace_like",
+                    "who_are_your_main_clients",
+                    "where_do_you_get_your_supplies"
+                ],
+                "Medtech": [
+                    "what_kind_of_medtech_are_you",
+                    "who_are_your_main_clients",
+                    "where_do_you_get_your_supplies"
+                ],
+                "Media": [
+                    "what_kind_of_media_are_you",
+                    "how_does_your_work_reach_the_public",
+                    "how_ethical_are_you",
+                    "what_types_of_stories_do_you_want_to_tell"
+                ],
+                "Exec": [
+                    "what_kind_of_corp_do_you_work_for",
+                    "what_division_do_you_work_in",
+                    "how_good_bad_is_your_corp",
+                    "where_is_your_corp_based",
+                    "current_state_with_your_boss"
+                ],
+                "Lawman": [
+                    "what_is_your_position_on_the_force",
+                    "how_wide_is_your_groups_jurisdiction",
+                    "how_corrupt_is_your_group",
+                    "who_is_your_groups_major_target"
+                ],
+                "Fixer": [
+                    "what_kind_of_fixer_are_you",
+                    "who_are_your_side_clients",
+                    "whos_gunning_for_you"
+                ],
+                "Nomad": [
+                    "how_big_is_your_pack",
+                    "what_do_you_do_for_your_pack",
+                    "whats_your_packs_overall_philosophy",
+                    "is_your_pack_based_on_land_air_or_sea"
+                ]
+            }
+            for field in role_specific_fields.get(role, []):
+                value = get_sheet_value(field)
+                if value and value != "Not set":
+                    title = field.replace('_', ' ').title()
+                    output += self._sheet_field(title, value, width)
+            output += "\n"
+
+        output += footer(width=width, fillchar="-")
+        
+        # Send the formatted output to the caller
+        self.caller.msg(output)
+
+    def _sheet_field(self, title, value, width=80, label_width=20):
+        """Format a label-value pair like the main sheet (|yLabel:|n value)."""
+        wrapped_value = wrap_ansi(value, width=width - label_width - 1)
+        value_lines = wrapped_value.split('\n')
+        output = ""
+        label = f"{title}:"
+        for i, value_line in enumerate(value_lines):
+            if i == 0:
+                output += f"|y{label:<{label_width}}|n {value_line}\n"
+            else:
+                output += f"{' ' * label_width} {value_line}\n"
+        return output
+    
+    def view_sheet(self):
+        # Check for voucher first (anyone can +sheet a voucher they have or that's in the room)
+        if self.target_name:
+            from commands.voucher_commands import find_voucher
+            v = find_voucher(self.caller, self.target_name, quiet=True)
+            if v and (v.location == self.caller or v.location == self.caller.location):
+                self.caller.msg(v.format_sheet())
+                return
+
+        target = self.get_target_character()
+        if not target:
+            return
+
+        # Recalculate humanity from cyberware before display (CharacterSheet is source of truth)
+        if hasattr(target, 'character_sheet') and target.character_sheet:
+            sheet = target.character_sheet
+            sheet.calculate_humanity_loss(quiet=True)
+            target.db.humanity = sheet.humanity
+            target.db.total_cyberware_humanity_loss = sheet.total_cyberware_humanity_loss
+            
+        W = 80
+        full_name = target.db.full_name or "Unknown"
+
+        # Main header (80 chars, blue/magenta/yellow - no pipes)
+        output = sheet_header(f"Character Sheet for {full_name}", width=W)
+
+        # Basic Information
+        output += sheet_section("Basic Information", width=W)
+        basic_info = [
+            ("Full Name:", full_name, "Gender:", target.db.gender or ""),
+            ("Handle:", target.db.handle or "", "Age:", target.db.age or 0),
+            ("Hometown:", target.db.hometown or "", "Height:", f"{target.db.height or 0} cm"),
+            ("Night City Rep:", target.db.rep or 0, "Notoriety:", target.db.notoriety or 0),
+            ("Weight:", f"{target.db.weight or 0} kg", "Luck:", f"{target.db.current_luck or 1}/{target.db.luck or 1}"),
+        ]
+        for row in basic_info:
+            output += f"|y{row[0]:<18}|n {str(row[1]):<18} |y{row[2]:<15}|n {str(row[3]):<18}\n"
+        # Role on its own line (full width) - includes secondary roles from role abilities
+        display_roles = self.get_display_roles(target)
+        output += f"|yRole:|n {display_roles}\n"
+
+        # Stats
+        output += sheet_section("STATS", width=W)
+        stats = [
+            ("Intelligence:", target.db.intelligence, "Technology:", target.db.technology, "Move:", target.db.move),
+            ("Reflexes:", target.db.reflexes, "Cool:", target.db.cool, "Body:", target.db.body),
+            ("Dexterity:", target.db.dexterity, "Willpower:", target.db.willpower, "Empathy:", target.db.empathy)
+        ]
+        for row in stats:
+            output += "".join(f"|y{label:<13}|n {value:<8}" for label, value in zip(row[::2], row[1::2])) + "\n"
+
+        # Skills
+        output += sheet_section("SKILLS", width=W)
+        active_skills = self.get_active_skills(target)
+        for i in range(0, len(active_skills), 3):
+            row = active_skills[i:i+3]
+            output += "".join(f"|y{skill:<20}|n {value:<5}" for skill, value in row).ljust(80) + "\n"
+
+        # Derived Stats
+        output += sheet_section("Derived Statistics", width=W)
+        sheet = target.character_sheet if hasattr(target, 'character_sheet') and target.character_sheet else None
+        unarmed_die = getattr(sheet, 'unarmed_damage_die_type', None) if sheet else None
+        unarmed_dice = getattr(sheet, 'unarmed_damage_dice', None) if sheet else None
+        if unarmed_die is None:
+            unarmed_die = getattr(target.db, 'unarmed_damage_die_type', 6)
+        if unarmed_dice is None:
+            unarmed_dice = getattr(target.db, 'unarmed_damage_dice', 1)
+        unarmed_die_display = f"d{unarmed_die}"
+        derived_stats = [
+            ("Hit Points:", f"{target.db.current_hp}/{target.db.max_hp}", "Death Save:", target.db.death_save),
+            ("Serious Wounds:", target.db.serious_wounds, "Humanity:", target.db.humanity),
+            ("Unarmed Damage:", unarmed_die_display, "Unarmed Dice:", unarmed_dice)
+        ]
+        for row in derived_stats:
+            output += "".join(f"|y{label:<16}|n {value:<18}" for label, value in zip(row[::2], row[1::2])) + "\n"
+        output += "\n"
+
+        # Equipment (use same inventory source as +inventory: character_sheet.inventory)
+        output += sheet_section("Equipment", width=W)
+        try:
+            from world.inventory.models import Inventory
+            inv = None
+            sheet = target.character_sheet if hasattr(target, 'character_sheet') and target.character_sheet else None
+            if sheet:
+                try:
+                    inv = sheet.inventory
+                except Inventory.DoesNotExist:
+                    sheet_pk = getattr(sheet, 'pk', None)
+                    if sheet_pk:
+                        inv, _ = Inventory.objects.get_or_create(character_id=sheet_pk)
+            if inv:
+                weapons = list(inv.weapons.all()) if hasattr(inv, 'weapons') else []
+                output += f"|yWeapons:|n {'|w' + ', '.join(w.name for w in weapons) + '|n' if weapons else '|wNone|n'}\n"
+
+                armor = list(inv.armor.all()) if hasattr(inv, 'armor') else []
+                output += f"|yArmor:|n {'|w' + ', '.join(p.name for p in armor) + '|n' if armor else '|wNone|n'}\n"
+
+                gear = list(inv.gear.all()) if hasattr(inv, 'gear') else []
+                output += f"|yGear:|n {'|w' + ', '.join(g.name for g in gear) + '|n' if gear else '|wNone|n'}\n"
+
+                cyberware = list(inv.cyberware.filter(installed=True)) if hasattr(inv, 'cyberware') else []
+                cw_names = [c.cyberware.name for c in cyberware]
+                output += f"|yCyberware:|n {'|w' + ', '.join(cw_names) + '|n' if cw_names else '|wNone|n'}\n"
+            else:
+                output += "|yWeapons:|n |wNone|n\n|yArmor:|n |wNone|n\n|yGear:|n |wNone|n\n|yCyberware:|n |wNone|n\n"
+        except Exception as e:
+            logger.log_err(f"Error retrieving inventory for {target}: {str(e)}")
+            output += "|wError retrieving inventory|n\n"
+        output += "\n"
+
+        # Languages (three-column format, alphabetical order - like skills)
+        output += sheet_section("Languages", width=W)
+        if hasattr(target, 'languages') and target.languages:
+            lang_list = [(name, level) for name, level in target.languages.items()]
+            lang_list.sort(key=lambda x: x[0].lower())
+            for i in range(0, len(lang_list), 3):
+                row = lang_list[i:i+3]
+                output += "".join(f"|y{name:<20}|n {level:<5}" for name, level in row).ljust(80) + "\n"
+        else:
+            output += "|wNone|n\n"
+
+        output += footer(width=W, fillchar="-")
+        self.caller.msg(output)
+
+    # Role ability key -> Role name (for detecting secondary roles from taken abilities)
+    ROLE_ABILITY_TO_ROLE = {
+        'charismatic_impact': 'Rockerboy',
+        'combat_awareness': 'Solo',
+        'interface': 'Netrunner',
+        'maker': 'Tech',
+        'medicine': 'Medtech',
+        'credibility': 'Media',
+        'teamwork': 'Exec',
+        'backup': 'Lawman',
+        'operator': 'Fixer',
+        'moto': 'Nomad',
+    }
+
+    def get_display_roles(self, char):
+        """
+        Build role display string: primary role + any secondary roles from role abilities.
+        E.g. "Solo / Rockerboy / Medtech" if primary is Solo but they also have Charismatic Impact and Medicine.
+        """
+        primary = (char.db.role or "").strip()
+        roles_seen = set()
+        roles_ordered = []
+
+        # Primary role first
+        if primary:
+            roles_seen.add(primary)
+            roles_ordered.append(primary)
+
+        # Add secondary roles from role abilities with value > 0
+        if hasattr(char, 'db') and char.db.skills:
+            for ability_key, role_name in self.ROLE_ABILITY_TO_ROLE.items():
+                if role_name in roles_seen:
+                    continue
+                val = char.db.skills.get(ability_key, 0)
+                if val > 0:
+                    roles_seen.add(role_name)
+                    roles_ordered.append(role_name)
+
+        return " / ".join(roles_ordered) if roles_ordered else "None"
+
+    # Keys in db.skills that are derived stats, not actual skills (exclude from SKILLS section)
+    NON_SKILL_KEYS = frozenset({
+        'total_cyberware_humanity_loss', 'humanity', 'death_save', 'serious_wounds',
+        'unarmed_damage_die_type', 'unarmed_damage_dice',
+    })
+
+    def get_active_skills(self, char):
+        """
+        Get a list of active skills (skills with value > 0) directly from the character.
+        Excludes derived stats that may be stored in db.skills.
+        """
+        skill_list = []
+
+        # Get skills from character's skills dictionary (includes role abilities)
+        if hasattr(char, 'db') and char.db.skills:
+            for skill_name, value in char.db.skills.items():
+                if value > 0 and skill_name not in self.NON_SKILL_KEYS:
+                    display_name = skill_name.replace('_', ' ').title()
+                    skill_list.append([display_name, value])
+
+        # Add skill instances from character typeclass
+        if hasattr(char, 'db') and char.db.skill_instances:
+            for skill_key, value in char.db.skill_instances.items():
+                if value > 0 and "(" in skill_key and ")" in skill_key:
+                    # Extract the base name and instance from the key (format: "base_skill(instance)")
+                    base_name, instance = skill_key.split("(", 1)
+                    instance = instance.rstrip(")")
+                    # Format as "Base Skill (Instance)"
+                    formatted_name = f"{base_name.replace('_', ' ').title()} ({instance})"
+                    skill_list.append([formatted_name, value])
+        
+        skill_list.sort(key=lambda x: (x[0].lower(), -x[1]))  # Alphabetical by name, then by value desc
+        return skill_list
+
+class CmdShortDesc(Command):
+    """
+    shortdesc <text>
+
+    Usage:
+      shortdesc <text>
+      shortdesc <character>=<text>
+
+    Create or set a short description for your character. Builders+ can set the short description for others.
+
+    Examples:
+      shortdesc Tall and muscular
+      shortdesc Bob=Short and stocky
+    """
+    key = "shortdesc"
+    help_category = "Roleplay Utilities"
+
+    def parse(self):
+        """
+        Custom parser to handle the possibility of targeting another character.
+        """
+        args = self.args.strip()
+        if "=" in args:
+            self.target_name, self.shortdesc = [part.strip() for part in args.split("=", 1)]
+        else:
+            self.target_name = None
+            self.shortdesc = args
+
+    def func(self):
+        "Implement the command"
+        caller = self.caller
+
+        if self.target_name:
+            # Check if the caller has permission to set short descriptions for others
+            if not caller.check_permstring("builders"):
+                caller.msg("|rYou don't have permission to set short descriptions for others.|n")
+                return
+
+            # Find the target character
+            target = caller.search(self.target_name, global_search=True)
+            if not target:
+                caller.msg(f"|rCharacter '{self.target_name}' not found.|n")
+                return
+
+            # Set the short description for the target
+            target.db.shortdesc = self.shortdesc
+            caller.msg(f"Short description for {target.name} set to '|w{self.shortdesc}|n'.")
+            target.msg(f"Your short description has been set to '|w{self.shortdesc}|n' by {caller.name}.")
+        else:
+            # Set the short description for the caller
+            if not self.shortdesc:
+                # remove the shortdesc
+                caller.db.shortdesc = ""
+                caller.msg("Short description removed.")
+                return
+
+            caller.db.shortdesc = self.shortdesc
+            caller.msg("Short description set to '|w%s|n'." % self.shortdesc)
+
+
+class CmdRoll(Command):
+    """
+    Roll a skill check.
+
+    Usage:
+      roll <attribute> + <skill>
+      roll <attribute> + <skill> vs <DV or difficulty name>
+      roll <value> + <value> [vs <DV or difficulty name>]
+
+    Rolls 1d10 + attribute + skill (or raw values). With 'vs', shows success (total >= DV) or failure.
+    Use attribute/skill names for your character, or raw numbers (0-10) for NPCs or ad-hoc rolls.
+
+    Difficulty names: Simple (9), Everyday (13), Difficult (15), Professional (17),
+    Heroic (21), Incredible (24), Legendary (29).
+
+    Examples:
+      roll Reflexes + Handgun
+      roll Reflexes + Handgun vs Simple
+      roll 5 + 4 vs Everyday
+    """
+    key = "roll"
+    aliases = ["check"]
+    locks = "cmd:all()"
+    help_category = "Roleplay Utilities"
+
+    def _get_stat_value(self, char, field_name, is_stat):
+        """Get stat or skill value from character sheet or fallback to char attributes/db."""
+        sheet = getattr(char, 'character_sheet', None)
+        if sheet and hasattr(sheet, field_name):
+            return getattr(sheet, field_name, 0)
+        if is_stat:
+            return char.attributes.get(field_name, 0)
+        skill_key = field_name.lower().replace(' ', '_')
+        return char.db.skills.get(skill_key, 0) if char.db.skills else 0
+
+    def func(self):
+        args = (self.args or "").strip()
+        if not args:
+            self.caller.msg("Usage: roll <attribute> + <skill> | <value> + <value> [vs <DV or difficulty>]")
+            return
+
+        # Parse "vs" part (case-insensitive)
+        vs_info = None
+        vs_match = re.search(r'\s+vs\s+', args, re.IGNORECASE)
+        if vs_match:
+            vs_str = args[vs_match.end():].strip()
+            args = args[:vs_match.start()].strip()
+            vs_info = parse_dv(vs_str)
+            if vs_info is None:
+                self.caller.msg("Invalid difficulty. Use a number (e.g. 9) or a name (Simple, Everyday, Difficult, Professional, Heroic, Incredible, Legendary).")
+                return
+
+        # Parse "Stat + Skill" part
+        if " + " not in args:
+            self.caller.msg("Usage: roll <attribute> + <skill> | <value> + <value> [vs <DV or difficulty>]")
+            return
+
+        parts = args.split(" + ", 1)
+        attr_input = parts[0].strip()
+        skill_input = parts[1].strip()
+
+        attr_value = None
+        skill_value = None
+        attr_display = None
+        skill_display = None
+
+        # Try parsing as raw numeric values (for NPCs / ad-hoc rolls)
+        try:
+            a, s = int(attr_input), int(skill_input)
+            if 0 <= a <= 10 and 0 <= s <= 10:
+                attr_value, skill_value = a, s
+                attr_display, skill_display = str(a), str(s)
+        except ValueError:
+            pass
+
+        # Fall back to character sheet lookup
+        if attr_value is None:
+            full_attr_name = get_full_attribute_name(attr_input)
+            full_skill_name = get_full_attribute_name(skill_input)
+
+            if not full_attr_name or full_attr_name not in STAT_MAPPING.values():
+                self.caller.msg(f"Invalid attribute. Choose from: {', '.join(STAT_MAPPING.values())}, or use raw values 0-10.")
+                return
+
+            if not full_skill_name or full_skill_name not in SKILL_MAPPING.values():
+                self.caller.msg(f"Invalid skill. Choose from: {', '.join(SKILL_MAPPING.values())}, or use raw values 0-10.")
+                return
+
+            char = self.caller
+            attr_value = self._get_stat_value(char, full_attr_name, is_stat=True)
+            skill_value = self._get_stat_value(char, full_skill_name, is_stat=False)
+            attr_display = full_attr_name.replace('_', ' ').title()
+            skill_display = full_skill_name.replace('_', ' ').title()
+
+        dice_roll = random.randint(1, 10)
+        total = attr_value + skill_value + dice_roll
+
+        out = f"Rolling {attr_display} + {skill_display} + 1d10: {attr_value} + {skill_value} + {dice_roll} = |w{total}|n"
+
+        if vs_info is not None:
+            dv, diff_name, _ = vs_info
+            success = total >= dv
+            color = "g" if success else "r"
+            result = "Success" if success else "Failure"
+            out += f" vs {dv}"
+            if diff_name:
+                out += f" ({diff_name})"
+            out += f" - |{color}{result}|n"
+
+        self.caller.msg(out)
+
+class CmdLuck(MuxCommand):
+    """
+    Spend a luck point.
+
+    Usage:
+      luck        - Spend one luck point if you have any available.
+      luck/gain <amount> - Regain luck points up to your maximum.
+    """
+
+    key = "luck"
+    locks = "cmd:all()"
+    help_category = "Roleplay Utilities"
+
+    def func(self):
+        char = self.caller
+        
+        # Handle the gain switch
+        if "gain" in self.switches:
+            self.gain_luck()
+            return
+        
+        # Handle spending luck
+        current_luck = char.db.current_luck
+        max_luck = char.db.luck
+        
+        if current_luck is None or max_luck is None:
+            self.caller.msg("Your luck attributes aren't properly set up.")
+            return
+            
+        if current_luck > 0:
+            char.db.current_luck = current_luck - 1
+            self.caller.msg(f"You spend a luck point. Remaining luck: {char.db.current_luck}/{max_luck}")
+        else:
+            self.caller.msg("You don't have any luck points to spend!")
+        
+    def gain_luck(self):
+        """Handle gaining luck points."""
+        if not self.args:
+            self.caller.msg("Usage: luck/gain <amount>")
+            return
+
+        try:
+            amount = int(self.args)
+        except ValueError:
+            self.caller.msg("Please provide a valid number.")
+            return
+        
+        if amount <= 0:
+            self.caller.msg("Please provide a positive number.")
+            return
+
+        char = self.caller
+        current_luck = char.db.current_luck
+        max_luck = char.db.luck
+        
+        if current_luck is None or max_luck is None:
+            self.caller.msg("Your luck attributes aren't properly set up.")
+            return
+
+        if current_luck >= max_luck:
+            self.caller.msg("You already have the maximum number of luck points.")
+            return
+
+        new_luck = min(current_luck + amount, max_luck)
+        char.db.current_luck = new_luck
+        self.caller.msg(f"You regained {amount} luck points. Current luck: {new_luck}/{max_luck}")
+
+class CmdOOC(MuxCommand):
+    """
+    Speak or pose out-of-character in your current location.
+
+    Usage:
+      ooc <message>
+      ooc :<pose>
+
+    Examples:
+      ooc Hello everyone!
+      ooc :waves to the group.
+    """
+    key = "ooc"
+    locks = "cmd:all()"
+    help_category = "Communication"
+
+    def func(self):
+        if not self.args:
+            self.caller.msg("Say or pose what?")
+            return
+
+        location = self.caller.location
+        if not location:
+            self.caller.msg("You are not in any location.")
+            return
+
+        # Strip leading and trailing whitespace from the message
+        ooc_message = self.args.strip()
+
+        # Check if it's a pose (starts with ':')
+        if ooc_message.startswith(':'):
+            pose = ooc_message[1:].strip()  # Remove the ':' and any following space
+            message = f"<|mOOC|n> {self.caller.name} {pose}"
+            self_message = f"<|mOOC|n> You say, \"{ooc_message}\""
+        else:
+            message = f"<|mOOC|n> {self.caller.name} says, \"{ooc_message}\""
+            self_message = f"<|mOOC|n> You say, \"{ooc_message}\""
+
+        location.msg_contents(message, exclude=self.caller)
+        self.caller.msg(self_message)
+
+class CmdPlusIc(MuxCommand):
+    """
+    Return to the IC area from OOC.
+
+    Usage:
+      +ic
+
+    This command moves you back to your previous IC location if available,
+    or to the default IC starting room if not. You must be approved to use this command.
+    """
+
+    key = "+ic"
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        caller = self.caller
+
+        # Check if the character is approved
+        if not caller.tags.has("approved", category="approval"):
+            caller.msg("You must be approved to enter IC areas.")
+            return
+
+        # Get the stored pre_ooc_location, or use the default room #30
+        target_location = caller.db.pre_ooc_location or search_object("#30")[0]
+
+        if not target_location:
+            caller.msg("Error: Unable to find a valid IC location.")
+            return
+
+        # Move the caller to the target location
+        caller.move_to(target_location, quiet=True)
+        caller.msg(f"You return to the IC area ({target_location.name}).")
+        target_location.msg_contents(f"{caller.name} has returned to the IC area.", exclude=caller)
+
+        # Clear the pre_ooc_location attribute
+        caller.attributes.remove("pre_ooc_location")
+
+class CmdPlusOoc(MuxCommand):
+    """
+    Move to the OOC area (Limbo).
+
+    Usage:
+      +ooc
+
+    This command moves you to the OOC area (Limbo) and stores your
+    previous location so you can return later.
+    """
+
+    key = "+ooc"
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        caller = self.caller
+        current_location = caller.location
+
+        # Store the current location as an attribute
+        caller.db.pre_ooc_location = current_location
+
+        # Find Limbo (object #2)
+        limbo = search_object("#2")[0]
+
+        if not limbo:
+            caller.msg("Error: Limbo not found.")
+            return
+
+        # Move the caller to Limbo
+        caller.move_to(limbo, quiet=True)
+        caller.msg(f"You move to the OOC area ({limbo.name}).")
+        limbo.msg_contents(f"{caller.name} has entered the OOC area.", exclude=caller)
+
+class CmdMeet(MuxCommand):
+    """
+    Send a meet request to another player or respond to one.
+
+    Usage:
+      +meet <player>
+      +meet/accept
+      +meet/reject
+
+    Sends a meet request to another player. If accepted, they'll be
+    teleported to your location.
+    """
+
+    key = "+meet"
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def search_for_character(self, search_string):
+        # First, try to find by exact name match
+        results = search_object(search_string, typeclass="typeclasses.characters.Character")
+        if results:
+            return results[0]
+        
+        # If not found, try to find by dbref
+        if search_string.startswith("#") and search_string[1:].isdigit():
+            results = search_object(search_string, typeclass="typeclasses.characters.Character")
+            if results:
+                return results[0]
+        
+        # If still not found, return None
+        return None
+
+    def func(self):
+        caller = self.caller
+
+        if not self.args and not self.switches:
+            caller.msg("Usage: +meet <player> or +meet/accept or +meet/reject")
+            return
+
+        if "accept" in self.switches:
+            if not caller.ndb.meet_request:
+                caller.msg("You have no pending meet requests.")
+                return
+            requester = caller.ndb.meet_request
+            # Capture locations before move - avoids desync if move_to triggers DB write
+            old_location = caller.location
+            destination = requester.location
+            caller.move_to(destination, quiet=True)
+            caller.msg(f"You accept the meet request from {requester.name} and join them.")
+            requester.msg(f"{caller.name} has accepted your meet request and joined you.")
+            old_location.msg_contents(f"{caller.name} has left to meet {requester.name}.", exclude=caller)
+            destination.msg_contents(f"{caller.name} appears, joining {requester.name}.", exclude=[caller, requester])
+            caller.ndb.meet_request = None
+            return
+
+        if "reject" in self.switches:
+            if not caller.ndb.meet_request:
+                caller.msg("You have no pending meet requests.")
+                return
+            requester = caller.ndb.meet_request
+            caller.msg(f"You reject the meet request from {requester.name}.")
+            requester.msg(f"{caller.name} has rejected your meet request.")
+            caller.ndb.meet_request = None
+            return
+
+        target = self.search_for_character(self.args)
+        if not target:
+            caller.msg(f"Could not find character '{self.args}'.")
+            return
+
+        if target == caller:
+            caller.msg("You can't send a meet request to yourself.")
+            return
+
+        if target.ndb.meet_request:
+            caller.msg(f"{target.name} already has a pending meet request.")
+            return
+
+        target.ndb.meet_request = caller
+        caller.msg(f"You sent a meet request to {target.name}.")
+        target.msg(f"{caller.name} has sent you a meet request. Use +meet/accept to accept or +meet/reject to decline.")

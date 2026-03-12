@@ -1,0 +1,1175 @@
+import random
+from evennia import Command
+from evennia.utils.search import search_object
+from evennia.utils import gametime
+from world.cyberpunk_sheets.services import CharacterMoneyService
+from world.inventory.models import Weapon, Armor, Gear, Vehicle as VehicleModel, CyberwareInstance, Inventory
+from world.equipment_data import weapons, armors, gears, vehicles as vehicles_data
+from world.cyberware.models import Cyberware
+from world.cyberware.merchants import check_cyberware_requirements
+from evennia.utils.evmenu import get_input, EvMenu
+from world.cyberpunk_sheets.merchants import Merchant
+from world.utils.character_utils import get_character_sheet
+from world.commerce.pricing import (
+    EXPENSIVE_THRESHOLD,
+    can_purchase_expensive_from_vendor,
+    get_purchase_discount_percent,
+    calculate_final_price,
+    is_expensive_item,
+)
+
+# Import ChargenRoom for chargen buy
+from typeclasses.chargen import ChargenRoom
+
+
+class Merchant:
+    def __init__(self, merchant_type):
+        self.merchant_type = merchant_type
+        self.inventory = self._load_inventory()
+
+    def _load_inventory(self):
+        if self.merchant_type == "arms_dealer":
+            return {item['name']: item for item in weapons}
+        elif self.merchant_type == "clothier":
+            return {item['name']: item for item in armors}
+        elif self.merchant_type == "gear_merchant":
+            return {item['name']: item for item in gears}
+        else:
+            return {}
+
+    def get_item(self, item_name):
+        return self.inventory.get(item_name)
+
+    def list_items(self):
+        return [f"{name} - {item['value']} eb" for name, item in self.inventory.items()]
+
+
+# Chargen only sells items at or under 1000 eb (nothing over 1000)
+CHARGEN_MAX_PRICE = 1000
+
+
+def _get_chargen_catalog(category=None):
+    """
+    Build catalog of chargen items (value <= 1000).
+    category: 'weapons', 'armor', 'gear', 'cyberware' or None for all.
+    'cyberware' = Cyberware model (body implants) + gear with category "Cyberware".
+    """
+    catalog = []
+    if category is None or category == "weapons":
+        for w in weapons:
+            if w.get("value", 0) <= CHARGEN_MAX_PRICE:
+                entry = dict(w)
+                entry["_type"] = "weapon"
+                entry["_merchant_type"] = "arms_dealer"
+                catalog.append(entry)
+    if category is None or category == "armor":
+        for a in armors:
+            if a.get("value", 0) <= CHARGEN_MAX_PRICE:
+                entry = dict(a)
+                entry["_type"] = "armor"
+                entry["_merchant_type"] = "clothier"
+                catalog.append(entry)
+    if category is None or category == "gear":
+        for g in gears:
+            if g.get("value", 0) <= CHARGEN_MAX_PRICE and g.get("category") != "Cyberware":
+                entry = dict(g)
+                entry["_type"] = "gear"
+                entry["_merchant_type"] = "gear_merchant"
+                catalog.append(entry)
+    if category is None or category == "cyberware":
+        # Body implants from Cyberware model (cyberware_data.py)
+        for cw in Cyberware.objects.filter(cost__lte=CHARGEN_MAX_PRICE).order_by("type", "name"):
+            catalog.append({
+                "name": cw.name,
+                "value": cw.cost,
+                "_type": "cyberware_implant",
+                "_cyberware": cw,
+            })
+        # Gear with category Cyberware (e.g. Linear Frames if any <= 1000)
+        for g in gears:
+            if g.get("value", 0) <= CHARGEN_MAX_PRICE and g.get("category") == "Cyberware":
+                entry = dict(g)
+                entry["_type"] = "gear"
+                entry["_merchant_type"] = "gear_merchant"
+                catalog.append(entry)
+    return catalog
+
+
+def _find_chargen_item(item_name):
+    """Find item in chargen catalog by name (value <= 1000). Returns (item_dict_or_cyberware, item_type, gear_category) or None."""
+    item_name_lower = item_name.lower()
+    for w in weapons:
+        if w.get("value", 0) <= CHARGEN_MAX_PRICE and w.get("name", "").lower() == item_name_lower:
+            return (dict(w), "weapon", None)
+    for a in armors:
+        if a.get("value", 0) <= CHARGEN_MAX_PRICE and a.get("name", "").lower() == item_name_lower:
+            return (dict(a), "armor", None)
+    for g in gears:
+        if g.get("value", 0) <= CHARGEN_MAX_PRICE and g.get("name", "").lower() == item_name_lower:
+            return (dict(g), "gear", g.get("category"))
+    # Cyberware from Cyberware model
+    try:
+        cw = Cyberware.objects.get(name__iexact=item_name, cost__lte=CHARGEN_MAX_PRICE)
+        return ({"_cyberware": cw, "name": cw.name, "value": cw.cost}, "cyberware_implant", None)
+    except Cyberware.DoesNotExist:
+        pass
+    return None
+
+
+class CmdBuy(Command):
+    """
+    Buy an item from a merchant or from the chargen catalog.
+
+    Usage:
+      buy <item name> from <merchant>   - Buy from a vendor (items 1000eb or under)
+      buy <item name>                   - In chargen room: buy equipment (1000eb or under)
+      buy/stash <cyberware>             - In chargen: buy cyberware without installing
+
+    In the chargen room, you can purchase equipment (up to 1000 eb) without vendors.
+    At vendors, items over 1000eb cannot be purchased (except by Fixer, Medtech,
+    Netrunner, or Tech in their specialty categories).
+    Role discounts apply.
+    """
+
+    key = "buy"
+    switches = [("stash", "stash")]
+    locks = "cmd:all()"
+    help_category = "Economy"
+
+    def func(self):
+        in_chargen = isinstance(self.caller.location, ChargenRoom)
+
+        if " from " in self.args:
+            # Vendor purchase: buy <item> from <merchant>
+            self._buy_from_vendor()
+        elif in_chargen and self.args.strip():
+            # Chargen purchase: buy <item> (no merchant)
+            self._buy_from_chargen()
+        else:
+            if in_chargen:
+                self.caller.msg(
+                    "Usage: buy <item name> - Purchase equipment from the chargen catalog. "
+                    "Use 'list chargen/weapons', 'list chargen/armor', 'list chargen/gear', "
+                    "or 'list chargen/cyberware' to see available items."
+                )
+            else:
+                self.caller.msg(
+                    "Usage: buy <item name> from <merchant> - Purchase from a vendor in your location."
+                )
+            return
+
+    def _buy_from_chargen(self):
+        """Handle chargen room purchase - only items 1000eb or under."""
+        item_name = self.args.strip().lower()
+        result = _find_chargen_item(item_name)
+        if not result:
+            self.caller.msg(
+                f"'{item_name}' is not available in the chargen catalog. "
+                "Use 'list chargen/weapons', 'list chargen/armor', 'list chargen/gear', "
+                "or 'list chargen/cyberware' to see options."
+            )
+            return
+
+        item, item_type, gear_category = result
+
+        if item_type == "cyberware_implant":
+            stash = "stash" in (self.switches or [])
+            self._buy_cyberware_from_chargen(item, stash=stash)
+            return
+
+        base_price = item["value"]
+        discount = get_purchase_discount_percent(self.caller, item_type, gear_category)
+        price = calculate_final_price(base_price, discount)
+
+        inventory = self.get_character_inventory(self.caller)
+        if not inventory:
+            self.caller.msg("You don't have an inventory!")
+            return
+
+        if self._item_exists_in_inventory(inventory, item):
+            self.caller.msg(f"You already own {item['name']}.")
+            return
+
+        if not CharacterMoneyService.spend_money(self.caller, price):
+            self.caller.msg(
+                f"You don't have enough Eurodollars to buy {item['name']}. "
+                f"It costs {price} eb."
+            )
+            return
+
+        self._add_item_to_inventory(self.caller, item, item["_merchant_type"])
+        if discount > 0:
+            self.caller.msg(
+                f"You have purchased {item['name']} for {price} eb "
+                f"(base {base_price} eb, {discount}% role discount applied)."
+            )
+        else:
+            self.caller.msg(f"You have purchased {item['name']} for {price} eb.")
+
+    def _buy_cyberware_from_chargen(self, item, stash=False):
+        """Handle chargen purchase of body cyberware (from Cyberware model). stash=True = buy without installing."""
+        cyberware = item["_cyberware"]
+        base_cost = cyberware.cost
+        discount = get_purchase_discount_percent(self.caller, "cyberware", None)
+        final_cost = calculate_final_price(base_cost, discount)
+
+        try:
+            character_sheet = self.caller.character_sheet
+        except AttributeError:
+            self.caller.msg("No character sheet found for your character.")
+            return
+
+        inventory, _ = Inventory.get_or_create_for_character(self.caller)
+        if not stash and inventory.cyberware.filter(cyberware=cyberware, installed=True).exists():
+            self.caller.msg(f"You already have {cyberware.name} installed.")
+            return
+
+        if not stash:
+            requirements_met, error_message = check_cyberware_requirements(character_sheet, cyberware)
+            if not requirements_met:
+                self.caller.msg(error_message)
+                return
+
+        type_slots = {
+            "Fashionware": 7,
+            "Neuralware": 5,
+            "Cyberoptics": 3,
+            "Cyberaudio": 3,
+            "Internal Body Cyberware": 7,
+            "External Body Cyberware": 7,
+        }
+        if not stash and cyberware.type in type_slots:
+            installed = inventory.cyberware.filter(
+                installed=True, cyberware__type=cyberware.type
+            )
+            used_slots = sum(cw.cyberware.slots for cw in installed)
+            if used_slots + cyberware.slots > type_slots[cyberware.type]:
+                self.caller.msg(f"Not enough slots available for {cyberware.type}.")
+                return
+
+        if not CharacterMoneyService.spend_money(self.caller, final_cost):
+            self.caller.msg(
+                f"Not enough money to buy {cyberware.name}. It costs {final_cost} eb."
+            )
+            return
+
+        try:
+            instance = CyberwareInstance.objects.create(
+                cyberware=cyberware,
+                character_sheet=character_sheet,
+                installed=not stash,
+            )
+            inventory.cyberware.add(instance)
+        except Exception as e:
+            CharacterMoneyService.add_money(self.caller, final_cost)
+            self.caller.msg(f"Error installing cyberware: {str(e)}")
+            return
+
+        if not stash and cyberware.name.lower() == "cyberarm":
+            character_sheet.has_cyberarm = True
+            character_sheet.save()
+
+        character_sheet.refresh_from_db()
+        if not stash:
+            character_sheet.calculate_humanity_loss()
+        character_sheet.save()
+
+        if stash:
+            if discount > 0:
+                self.caller.msg(
+                    f"You have purchased {cyberware.name} (not installed) for {final_cost} eb "
+                    f"(base {base_cost} eb, {discount}% Medtech discount applied)."
+                )
+            else:
+                self.caller.msg(f"You have purchased {cyberware.name} (not installed) for {final_cost} eb.")
+        elif discount > 0:
+            self.caller.msg(
+                f"You have purchased and installed {cyberware.name} for {final_cost} eb "
+                f"(base {base_cost} eb, {discount}% Medtech discount applied)."
+            )
+        else:
+            self.caller.msg(f"You have purchased and installed {cyberware.name} for {final_cost} eb.")
+            self.caller.msg(f"Your new humanity is {character_sheet.humanity}.")
+
+    def _buy_from_vendor(self):
+        """Handle vendor purchase - block items over 1000eb unless role allows."""
+        item_name, merchant_name = self.args.split(" from ", 1)
+        item_name = item_name.strip().lower()
+        merchant_name = merchant_name.strip().lower()
+
+        merchants = [
+            obj for obj in self.caller.location.contents
+            if obj.is_typeclass("world.cyberpunk_sheets.merchants.Merchant")
+            and merchant_name in obj.name.lower()
+        ]
+        if not merchants:
+            self.caller.msg(f"There's no merchant named '{merchant_name}' here.")
+            return
+        merchant = merchants[0]
+
+        item = merchant.get_item(item_name)
+        if not item:
+            self.caller.msg(f"Sorry, {item_name} is not available from this merchant.")
+            return
+
+        inventory = self.get_character_inventory(self.caller)
+        if not inventory:
+            self.caller.msg("You don't have an inventory!")
+            return
+
+        if self._item_exists_in_inventory(inventory, item):
+            self.caller.msg(f"You already own {item['name']}.")
+            return
+
+        base_price = item['value']
+        merchant_type = merchant.db.merchant_type
+
+        item_type = (
+            "weapon" if merchant_type == "arms_dealer"
+            else "armor" if merchant_type == "clothier"
+            else "vehicle" if merchant_type == "vehicle_dealer"
+            else "gear"
+        )
+        gear_category = item.get("category") if item_type == "gear" else None
+
+        if is_expensive_item(base_price):
+            if not can_purchase_expensive_from_vendor(self.caller, base_price, item_type, gear_category):
+                self.caller.msg(
+                    f"{item['name']} costs {base_price} eb and is too expensive for vendors to sell. "
+                    "Very expensive items can only be purchased in the chargen room, or by Fixer, "
+                    "Medtech, Netrunner, Tech, or Nomad within their specialty categories."
+                )
+                return
+
+        discount = get_purchase_discount_percent(self.caller, item_type, gear_category)
+        price = calculate_final_price(base_price, discount)
+
+        if not CharacterMoneyService.spend_money(self.caller, price):
+            self.caller.msg(
+                f"You don't have enough Eurodollars to buy {item['name']}. It costs {price} eb."
+            )
+            return
+
+        self._add_item_to_inventory(self.caller, item, merchant_type)
+        if discount > 0:
+            self.caller.msg(
+                f"You have purchased {item['name']} for {price} eb "
+                f"(base {base_price} eb, {discount}% role discount applied)."
+            )
+        else:
+            self.caller.msg(f"You have purchased {item['name']} for {price} eb.")
+
+    def get_character_inventory(self, character):
+        """Get a character's inventory, checking typeclass first, then character sheet"""
+        # Try to get inventory via typeclass attribute
+        if hasattr(character, 'db') and hasattr(character.db, 'inventory'):
+            return character.db.inventory
+            
+        # Try to get inventory via inventory_object relation
+        if hasattr(character, 'inventory_object'):
+            return character.inventory_object
+            
+        # Fall back to character sheet
+        if hasattr(character, 'character_sheet') and character.character_sheet:
+            return character.character_sheet.inventory
+            
+        return None
+
+    def _item_exists_in_inventory(self, inventory, item):
+        """Check if the item already exists in the character's inventory."""
+        item_name = item['name'].lower()
+        
+        # Check weapons
+        if inventory.weapons.filter(name__iexact=item_name).exists():
+            return True
+        
+        # Check armor
+        if inventory.armor.filter(name__iexact=item_name).exists():
+            return True
+        
+        # Check gear
+        if inventory.gear.filter(name__iexact=item_name).exists():
+            return True
+
+        # Check vehicles
+        if inventory.vehicles.filter(name__iexact=item_name).exists():
+            return True
+        
+        return False
+
+    def _add_item_to_inventory(self, character, item, merchant_type):
+        # Get character's inventory (checking typeclass first)
+        inventory = self.get_character_inventory(character)
+        if not inventory:
+            self.caller.msg("Error: Couldn't find your inventory.")
+            return
+        
+        if merchant_type == "arms_dealer":
+            weapon, created = Weapon.objects.get_or_create(
+                name=item['name'],
+                defaults={
+                    'damage': item['damage'],
+                    'rof': item['rof'],
+                    'hands': item['hands'],
+                    'concealable': item['concealable'],
+                    'weight': item['weight'],
+                    'value': item['value']
+                }
+            )
+            inventory.weapons.add(weapon)
+        elif merchant_type == "clothier":
+            armor, created = Armor.objects.get_or_create(
+                name=item['name'],
+                defaults={
+                    'sp': item['sp'],
+                    'ev': item['ev'],
+                    'locations': item['locations'],
+                    'weight': item['weight'],
+                    'value': item['value']
+                }
+            )
+            inventory.armor.add(armor)
+        elif merchant_type == "gear_merchant":
+            gear, created = Gear.objects.get_or_create(
+                name=item['name'],
+                defaults={
+                    'category': item['category'],
+                    'description': item.get('description', ''),
+                    'weight': item['weight'],
+                    'value': item['value']
+                }
+            )
+            inventory.gear.add(gear)
+        elif merchant_type == "vehicle_dealer":
+            vehicle_model, _ = VehicleModel.objects.get_or_create(
+                name=item['name'],
+                defaults={
+                    'description': item.get('description', ''),
+                    'category': item.get('category', 'land'),
+                    'sdp': item.get('sdp', 35),
+                    'seats': item.get('seats', 2),
+                    'speed_combat': item.get('speed_combat', 20),
+                    'speed_narrative': item.get('speed_narrative', ''),
+                    'value': item['value'],
+                }
+            )
+            inventory.vehicles.add(vehicle_model)
+
+class CmdListItems(Command):
+    """
+    List items available from a merchant or the chargen catalog.
+
+    Usage:
+      list from <merchant>
+      list items from <merchant>
+      list chargen/weapons
+      list chargen/armor
+      list chargen/gear
+      list chargen/cyberware
+
+    In the chargen room, list chargen/<category> shows equipment (1000 eb or under)
+    that can be purchased without vendors.
+    """
+
+    key = "list"
+    aliases = ["list items"]
+    locks = "cmd:all()"
+    help_category = "Economy"
+
+    def func(self):
+        if not self.args:
+            self.caller.msg(
+                "Usage: list from <merchant> | list chargen/weapons | list chargen/armor | "
+                "list chargen/gear | list chargen/cyberware"
+            )
+            return
+
+        args = self.args.strip().lower()
+
+        in_chargen = isinstance(self.caller.location, ChargenRoom)
+        if in_chargen and (args == "chargen" or args.startswith("chargen/")):
+            if "/" in args:
+                _, sub = args.split("/", 1)
+                sub = sub.strip()
+            else:
+                sub = None
+            self._list_chargen(sub)
+            return
+
+        if args.startswith("items from "):
+            merchant_name = args[11:]
+        elif args.startswith("from "):
+            merchant_name = args[5:]
+        else:
+            self.caller.msg("Usage: list from <merchant> or list items from <merchant>")
+            return
+
+        merchants = search_object(merchant_name)
+        merchants = [
+            obj for obj in merchants
+            if obj.typeclass_path == "world.cyberpunk_sheets.merchants.Merchant"
+        ]
+
+        if not merchants:
+            self.caller.msg(f"There's no merchant named '{merchant_name}' found.")
+            return
+
+        merchant = merchants[0]
+        if merchant.location != self.caller.location:
+            self.caller.msg(f"{merchant.name} is not here. They are located in {merchant.location}.")
+            return
+
+        items = merchant.list_items()
+        if items:
+            self.caller.msg(f"Items available from {merchant.name}:")
+            for item in items:
+                self.caller.msg(item)
+        else:
+            self.caller.msg(f"No items available from {merchant.name}.")
+
+    def _list_chargen(self, category=None):
+        """List items in the chargen catalog (value <= 1000 eb)."""
+        valid = ("weapons", "armor", "gear", "cyberware")
+        if not category:
+            self.caller.msg(
+                "Usage: list chargen/weapons | list chargen/armor | "
+                "list chargen/gear | list chargen/cyberware"
+            )
+            return
+        if category not in valid:
+            self.caller.msg(
+                f"Unknown category '{category}'. Use: list chargen/weapons | list chargen/armor | "
+                "list chargen/gear | list chargen/cyberware"
+            )
+            return
+
+        catalog = _get_chargen_catalog(category)
+        if not catalog:
+            cat_label = category or "items"
+            self.caller.msg(f"No {cat_label} available in the chargen catalog.")
+            return
+
+        label = f"Chargen catalog - {category}" if category else "Chargen catalog"
+        self.caller.msg(f"{label} (1000 eb or under):")
+        for entry in catalog:
+            name = entry.get("name", "?")
+            value = entry.get("value", 0)
+            self.caller.msg(f"  {name} - {value} eb")
+
+class CleanExitEvMenu(EvMenu):
+    def close_menu(self):
+        """Clean up and exit the menu without any additional output."""
+        self.caller.cmdset.remove(self.cmdset_class)
+        del self.caller.ndb._evmenu
+
+def player_sale_offer_node(caller, raw_string, **kwargs):
+    """EvMenu node for buyer to accept/decline a player-to-player sale offer."""
+    offer = getattr(caller.ndb, '_pending_sale_offer', None)
+    if not offer:
+        caller.msg("No pending offer.")
+        return None
+    text = (
+        f"{offer['seller'].get_display_name(caller)} offers to sell you "
+        f"{offer['display_name']} for {offer['price']} eurodollars.\n"
+        "Do you accept?"
+    )
+    options = (
+        {"key": ("y", "yes"), "desc": "Yes", "goto": "execute_player_sale"},
+        {"key": ("n", "no"), "desc": "No", "goto": "decline_player_sale"},
+    )
+    return text, options
+
+
+def execute_player_sale(caller, raw_string, **kwargs):
+    """Buyer accepted - transfer money and item."""
+    offer = getattr(caller.ndb, '_pending_sale_offer', None)
+    if not offer:
+        caller.msg("Offer no longer valid.")
+        return None
+    del caller.ndb._pending_sale_offer
+
+    seller = offer['seller']
+    item = offer['item']
+    category = offer['category']
+    price = offer['price']
+    display_name = offer['display_name']
+
+    if not CharacterMoneyService.spend_money(caller, price):
+        caller.msg(f"You don't have enough eurodollars. The price is {price} eb.")
+        seller.msg(f"{caller.get_display_name(seller)} couldn't afford the {price} eb.")
+        return None
+
+    seller_inv = get_character_inventory(seller)
+    buyer_inv, _ = Inventory.get_or_create_for_character(caller)
+    if not seller_inv:
+        CharacterMoneyService.add_money(caller, price)
+        caller.msg("The sale could not be completed.")
+        return None
+
+    if category == 'weapon':
+        seller_inv.weapons.remove(item)
+        buyer_inv.weapons.add(item)
+    elif category == 'armor':
+        seller_inv.armor.remove(item)
+        buyer_inv.armor.add(item)
+    elif category == 'gear':
+        seller_inv.gear.remove(item)
+        buyer_inv.gear.add(item)
+    elif category == 'vehicle':
+        seller_inv.vehicles.remove(item)
+        buyer_inv.vehicles.add(item)
+    elif category == 'cyberware':
+        seller_inv.cyberware.remove(item)
+        if hasattr(caller, 'character_sheet') and caller.character_sheet:
+            item.character_sheet = caller.character_sheet
+        item.character_object = caller
+        item.save()
+        buyer_inv.cyberware.add(item)
+
+    CharacterMoneyService.add_money(seller, price)
+
+    caller.msg(f"You purchased {display_name} from {seller.get_display_name(caller)} for {price} eb.")
+    seller.msg(f"{caller.get_display_name(seller)} purchased your {display_name} for {price} eb.")
+    if hasattr(caller.ndb, '_evmenu') and caller.ndb._evmenu:
+        caller.ndb._evmenu.close_menu()
+    return None
+
+
+def decline_player_sale(caller, raw_string, **kwargs):
+    """Buyer declined."""
+    offer = getattr(caller.ndb, '_pending_sale_offer', None)
+    if offer:
+        seller = offer['seller']
+        seller.msg(f"{caller.get_display_name(seller)} declined your offer.")
+        del caller.ndb._pending_sale_offer
+    caller.msg("You declined the offer.")
+    if hasattr(caller.ndb, '_evmenu') and caller.ndb._evmenu:
+        caller.ndb._evmenu.close_menu()
+    return None
+
+
+def sell_node(caller, raw_string, **kwargs):
+    context = caller.ndb._sell_item_context
+    if not context:
+        caller.msg("Error: Sell context not found.")
+        return None
+
+    item = context['item']
+    item_name = item.name if hasattr(item, 'name') else item.cyberware.name
+    text = f"{context['merchant'].name} offers {context['price']} eb for your {item_name}.\nDo you want to sell it?"
+    options = (
+        {"key": ("y", "yes"), "desc": "Yes", "goto": "execute_sale"},
+        {"key": ("n", "no"), "desc": "No", "goto": "cancel_sale"},
+    )
+    return text, options
+
+def execute_sale(caller, raw_string, **kwargs):
+    context = caller.ndb._sell_item_context
+    merchant = context['merchant']
+    item = context['item']
+    price = context['price']
+
+    inventory = get_character_inventory(caller)
+    if hasattr(item, 'damage'):
+        category = 'weapons'
+    elif hasattr(item, 'sp'):
+        category = 'armor'
+    elif hasattr(item, 'cyberware'):
+        category = 'cyberware'
+    elif hasattr(item, 'sdp') and hasattr(item, 'speed_combat'):
+        category = 'vehicles'
+    else:
+        category = 'gear'
+    if category == 'cyberware':
+        inventory.cyberware.remove(item)
+        item.delete()
+    else:
+        getattr(inventory, category).remove(item)
+
+    # Add money to the character
+    CharacterMoneyService.add_money(caller, price)
+
+    caller.msg(f"You sold {item.name} to {merchant.name} for {price} eb.")
+    merchant.msg(f"{caller.name} sold you {item.name} for {price} eb.")
+
+    del caller.ndb._sell_item_context
+    
+    # Update inventory display
+    caller.execute_cmd('inventory')
+    
+    # Close the menu
+    caller.ndb._evmenu.close_menu()
+
+def cancel_sale(caller, raw_string, **kwargs):
+    caller.msg("You decided not to sell the item.")
+    del caller.ndb._sell_item_context
+    
+    # Close the menu
+    caller.ndb._evmenu.close_menu()
+
+def get_character_inventory(character):
+    """Get a character's inventory. Uses same lookup as inventory command (via character sheet)."""
+    from world.utils.character_utils import get_character_sheet
+    sheet = get_character_sheet(character)
+    if sheet and hasattr(sheet, 'inventory'):
+        return sheet.inventory
+    try:
+        inventory, _ = Inventory.get_or_create_for_character(character)
+        return inventory
+    except (ValueError, AttributeError):
+        return None
+
+
+def find_item_in_inventory(inventory, item_name):
+    """Find item by name. Returns (item, category) or (None, None). category: weapon/armor/gear/vehicle/cyberware"""
+    item_name_lower = item_name.lower().strip()
+    for cat in ['weapons', 'armor', 'gear', 'vehicles']:
+        qs = getattr(inventory, cat).filter(name__iexact=item_name_lower)
+        if qs.exists():
+            return qs.first(), cat.rstrip('s')
+    cw = inventory.cyberware.filter(cyberware__name__iexact=item_name_lower, installed=False).first()
+    if cw:
+        return cw, 'cyberware'
+    return None, None
+
+
+class CmdGive(Command):
+    """
+    Give equipment, uninstalled cyberware, or vouchers to another player.
+
+    Usage:
+      give <item> to <player>
+    """
+
+    key = "give"
+    locks = "cmd:all()"
+    help_category = "Economy"
+
+    def func(self):
+        from typeclasses.npcs import is_npc
+        if is_npc(self.caller):
+            self.caller.msg("NPCs cannot give money, gear, or vouchers to people.")
+            return
+        if not self.args or " to " not in self.args:
+            self.caller.msg("Usage: give <item name> to <player>")
+            return
+
+        item_name, target_name = self.args.split(" to ", 1)
+        item_name = item_name.strip()
+        target_name = target_name.strip()
+
+        target = self.caller.search(target_name)
+        if not target:
+            return
+        if not target.has_account:
+            self.caller.msg(f"{target.get_display_name(self.caller)} is not a player character.")
+            return
+        if target == self.caller:
+            self.caller.msg("You can't give items to yourself.")
+            return
+        if target.location != self.caller.location:
+            self.caller.msg(f"{target.get_display_name(self.caller)} is not here.")
+            return
+
+        inventory = get_character_inventory(self.caller)
+        if not inventory:
+            self.caller.msg("You don't have an inventory!")
+            return
+
+        item, category = find_item_in_inventory(inventory, item_name)
+        if not item:
+            # Try giving a physical object (e.g. voucher) from contents
+            from commands.voucher_commands import find_voucher, VOUCHER_TYPECLASS
+            obj = find_voucher(self.caller, item_name, location=self.caller)
+            if obj and obj.location == self.caller:
+                obj.move_to(target, quiet=True)
+                display_name = obj.key or obj.name
+                self.caller.msg(f"You give {display_name} to {target.get_display_name(self.caller)}.")
+                target.msg(f"{self.caller.get_display_name(target)} gives you {display_name}.")
+                return
+            self.caller.msg(f"You don't have '{item_name}' in your inventory.")
+            return
+
+        to_inv, _ = Inventory.get_or_create_for_character(target)
+        if category == 'weapon':
+            inventory.weapons.remove(item)
+            to_inv.weapons.add(item)
+        elif category == 'armor':
+            inventory.armor.remove(item)
+            to_inv.armor.add(item)
+        elif category == 'gear':
+            inventory.gear.remove(item)
+            to_inv.gear.add(item)
+        elif category == 'vehicle':
+            inventory.vehicles.remove(item)
+            to_inv.vehicles.add(item)
+        elif category == 'cyberware':
+            inventory.cyberware.remove(item)
+            if hasattr(target, 'character_sheet') and target.character_sheet:
+                item.character_sheet = target.character_sheet
+            item.character_object = target
+            item.save()
+            to_inv.cyberware.add(item)
+
+        display_name = item.name if hasattr(item, 'name') else item.cyberware.name
+        self.caller.msg(f"You give {display_name} to {target.get_display_name(self.caller)}.")
+        target.msg(f"{self.caller.get_display_name(target)} gives you {display_name}.")
+
+
+class CmdSellItem(Command):
+    """
+    Sell an item to a merchant or to another player.
+
+    Usage:
+      sell <item> to <merchant>   - Sell to a vendor
+      sell <item>=<player>       - Offer to sell to a player (you set the price)
+
+    When selling to a player, you'll be asked for your asking price. The buyer
+    will receive an offer they can accept or decline.
+    """
+
+    key = "sell"
+    locks = "cmd:all()"
+    help_category = "Economy"
+
+    def func(self):
+        if not self.args:
+            self.caller.msg("Usage: sell <item> to <merchant>  OR  sell <item>=<player>")
+            return
+
+        if "=" in self.args:
+            self._sell_to_player()
+        elif " to " in self.args:
+            self._sell_to_merchant()
+        else:
+            self.caller.msg("Usage: sell <item> to <merchant>  OR  sell <item>=<player>")
+
+    def _sell_to_player(self):
+        """Sell item to another player - prompt for price, buyer accepts/declines."""
+        item_name, target_name = self.args.split("=", 1)
+        item_name = item_name.strip()
+        target_name = target_name.strip()
+
+        inventory = get_character_inventory(self.caller)
+        if not inventory:
+            self.caller.msg("You don't have an inventory!")
+            return
+
+        item, category = find_item_in_inventory(inventory, item_name)
+        if not item:
+            self.caller.msg(f"You don't have '{item_name}' in your inventory.")
+            return
+
+        target = self.caller.search(target_name)
+        if not target:
+            return
+        if not target.has_account:
+            self.caller.msg(f"{target.get_display_name(self.caller)} is not a player character.")
+            return
+        if target == self.caller:
+            self.caller.msg("You can't sell to yourself.")
+            return
+        if target.location != self.caller.location:
+            self.caller.msg(f"{target.get_display_name(self.caller)} is not here.")
+            return
+
+        display_name = item.name if hasattr(item, 'name') else item.cyberware.name
+        get_input(
+            self.caller,
+            "How much do you want to sell it for?",
+            callback=lambda char, prompt, result: self._player_sale_price_entered(char, result, item, category, target, display_name),
+        )
+
+    def _player_sale_price_entered(self, seller, price_str, item, category, target, display_name):
+        """Callback after seller enters price - validate and send offer to buyer."""
+        try:
+            price = int(price_str.strip())
+            if price < 1:
+                seller.msg("Price must be at least 1 eb.")
+                return
+        except (ValueError, AttributeError):
+            seller.msg("Please enter a valid number.")
+            return
+
+        target.ndb._pending_sale_offer = {
+            'seller': seller,
+            'item': item,
+            'category': category,
+            'price': price,
+            'display_name': display_name,
+        }
+        target.msg(
+            f"{seller.get_display_name(target)} offers to sell you {display_name} for {price} eurodollars. "
+            "Do you accept?"
+        )
+        EvMenu(
+            target,
+            "world.cyberpunk_sheets.commerce",
+            startnode="player_sale_offer_node",
+            auto_quit=True,
+            cmd_on_exit=None,
+        )
+        seller.msg(f"You offer to sell {display_name} to {target.get_display_name(seller)} for {price} eb.")
+
+    def _sell_to_merchant(self):
+        """Sell item to a merchant (existing flow)."""
+        item_name, merchant_name = self.args.split(" to ", 1)
+        item_name = item_name.strip().lower()
+        merchant_name = merchant_name.strip().lower()
+
+        merchants = [
+            obj for obj in self.caller.location.contents
+            if obj.is_typeclass("world.cyberpunk_sheets.merchants.Merchant")
+            and merchant_name in obj.name.lower()
+        ]
+        if not merchants:
+            self.caller.msg(f"There's no merchant named '{merchant_name}' here.")
+            return
+        merchant = merchants[0]
+
+        inventory = get_character_inventory(self.caller)
+        if not inventory:
+            self.caller.msg("You don't have an inventory!")
+            return
+
+        item, category = find_item_in_inventory(inventory, item_name)
+        if not item:
+            self.caller.msg(f"You don't have an item named '{item_name}' in your inventory.")
+            return
+
+        item_value = getattr(item, 'value', None) or (getattr(item.cyberware, 'cost', 0) if hasattr(item, 'cyberware') else 0)
+        sell_price = merchant.get_sell_price({'value': item_value})
+
+        self.caller.ndb._sell_item_context = {
+            'merchant': merchant,
+            'item': item,
+            'price': sell_price
+        }
+        EvMenu(self.caller, "world.cyberpunk_sheets.commerce",
+               startnode="sell_node", auto_quit=True, cmd_on_exit=None)
+
+class CmdHaggle(Command):
+    """
+    Haggle with a merchant over the price of an item.
+
+    Usage:
+      haggle <item name> with <merchant>
+
+    This command allows you to haggle with merchants to get a better price for your items.
+    """
+
+    key = "haggle"
+    locks = "cmd:all()"
+    help_category = "Economy"
+
+    def func(self):
+        if not self.args or " with " not in self.args:
+            self.caller.msg("Usage: haggle <item name> with <merchant>")
+            return
+
+        item_name, merchant_name = self.args.split(" with ")
+        item_name = item_name.strip().lower()
+        merchant_name = merchant_name.strip().lower()
+
+        # Search for the merchant in the current location
+        merchants = [obj for obj in self.caller.location.contents 
+                     if isinstance(obj, Merchant)  # Use isinstance instead of is_typeclass
+                     and merchant_name in obj.name.lower()]
+        
+        if not merchants:
+            self.caller.msg(f"There's no merchant named '{merchant_name}' here.")
+            return
+        merchant = merchants[0]
+
+        # Check if the character can haggle
+        if not merchant.can_haggle(self.caller):
+            self.caller.msg(f"You can't haggle with {merchant.name} yet. Try again later.")
+            return
+
+        # Find the item in the character's inventory
+        inventory = get_character_inventory(self.caller)
+        if not inventory:
+            self.caller.msg("You don't have an inventory!")
+            return
+            
+        item = None
+
+        for category in ['weapons', 'armor', 'gear']:
+            items = getattr(inventory, category).filter(name__iexact=item_name)
+            if items.exists():
+                item = items.first()
+                break
+
+        if not item:
+            self.caller.msg(f"You don't have an item named '{item_name}' in your inventory.")
+            return
+
+        # Get character's cool and trading skill values
+        cool = merchant.get_character_cool(self.caller)
+        trading = merchant.get_character_trading_skill(self.caller)
+        
+        # Perform the haggle check
+        roll = random.randint(1, 10)
+        total = cool + trading + roll
+
+        # Determine the result
+        base_price = merchant.get_sell_price(item.__dict__)
+        if roll == 1:  # Critical failure
+            price_multiplier = 0.50
+            self.caller.msg("Critical failure! The merchant is offended by your low offer.")
+            merchant.db.haggle_attempts[self.caller.id] = gametime.time() + 7 * 24 * 60 * 60  # 1 week cooldown
+        elif roll == 10:  # Critical success
+            price_multiplier = 1.75
+            self.caller.msg("Critical success! The merchant is impressed by your negotiation skills.")
+        elif total > 13:  # Success
+            price_multiplier = 1.25
+            self.caller.msg("Success! You've negotiated a better price.")
+        else:  # Failure
+            price_multiplier = 1.0
+            self.caller.msg("Your attempt to haggle was unsuccessful.")
+
+        final_price = int(base_price * price_multiplier)
+
+        # Record the haggle attempt
+        merchant.record_haggle_attempt(self.caller)
+
+        self.caller.ndb._sell_item_context = {
+            'merchant': merchant,
+            'item': item,
+            'price': final_price
+        }
+        EvMenu(self.caller, "world.cyberpunk_sheets.commerce", 
+               startnode="sell_node", auto_quit=True, cmd_on_exit=None)
+
+def handle_sell_confirmation(character, prompt, response):
+    context = character.ndb._sell_item_context
+    if not context:
+        character.msg("Error: Sell context not found.")
+        return
+
+    response = (response or "").strip().lower()
+    if response in ["y", "yes"]:
+        merchant = context['merchant']
+        item = context['item']
+        price = context['price']
+
+        # Remove the item from the character's inventory
+        inventory = get_character_inventory(character)
+        category = 'weapons' if hasattr(item, 'damage') else 'armor' if hasattr(item, 'sp') else 'gear'
+        getattr(inventory, category).remove(item)
+
+        # Add money to the character
+        CharacterMoneyService.add_money(character, price)
+
+        character.msg(f"You sold {item.name} to {merchant.name} for {price} eb.")
+        merchant.msg(f"{character.name} sold you {item.name} for {price} eb.")
+        
+        # Clean up
+        del character.ndb._sell_item_context
+    elif response in ["n", "no"]:
+        character.msg("You decided not to sell the item.")
+        
+        # Clean up
+        del character.ndb._sell_item_context
+    else:
+        character.msg("Invalid response. Please type 'y' or 'n'.")
+        get_input(character, "Do you want to sell it? (y/n)", handle_sell_confirmation)
+
+class CmdAddItem(Command):
+    """
+    Add an item to a merchant's inventory.
+
+    Usage:
+      additem <item name> to <merchant>
+
+    This command allows administrators to add items to a merchant's inventory.
+    The item must exist in the equipment data.
+    """
+
+    key = "additem"
+    locks = "cmd:perm(Admin)"
+    help_category = "Admin"
+
+    def func(self):
+        if not self.args or " to " not in self.args:
+            self.caller.msg("Usage: additem <item name> to <merchant>")
+            return
+
+        item_name, merchant_name = self.args.split(" to ")
+        item_name = item_name.strip()
+        merchant_name = merchant_name.strip()
+
+        # Search for the merchant
+        merchants = search_object(merchant_name)
+        if not merchants:
+            self.caller.msg(f"No merchant named '{merchant_name}' found.")
+            return
+        merchant = merchants[0]
+
+        if not merchant.is_typeclass("world.cyberpunk_sheets.merchants.Merchant"):
+            self.caller.msg(f"{merchant_name} is not a valid merchant.")
+            return
+
+        # Find the item in the equipment data
+        all_items = weapons + armors + gears
+        item = next((item for item in all_items if item['name'].lower() == item_name.lower()), None)
+
+        if not item:
+            self.caller.msg(f"No item named '{item_name}' found in the equipment data.")
+            return
+
+        # Add the item to the merchant's inventory
+        if not hasattr(merchant.db, 'inventory'):
+            merchant.db.inventory = []
+        
+        if item not in merchant.db.inventory:
+            merchant.db.inventory.append(item)
+            self.caller.msg(f"Added {item_name} to {merchant_name}'s inventory.")
+        else:
+            self.caller.msg(f"{item_name} is already in {merchant_name}'s inventory.")
+
+class CmdRemItem(Command):
+    """
+    Remove an item from a merchant's inventory.
+
+    Usage:
+      remitem <item name> from <merchant>
+
+    This command allows administrators to remove items from a merchant's inventory.
+    """
+
+    key = "remitem"
+    locks = "cmd:perm(Admin)"
+    help_category = "Admin"
+
+    def func(self):
+        if not self.args or " from " not in self.args:
+            self.caller.msg("Usage: remitem <item name> from <merchant>")
+            return
+
+        item_name, merchant_name = self.args.split(" from ")
+        item_name = item_name.strip()
+        merchant_name = merchant_name.strip()
+
+        # Search for the merchant
+        merchants = search_object(merchant_name)
+        if not merchants:
+            self.caller.msg(f"No merchant named '{merchant_name}' found.")
+            return
+        merchant = merchants[0]
+
+        if not merchant.is_typeclass("world.cyberpunk_sheets.merchants.Merchant"):
+            self.caller.msg(f"{merchant_name} is not a valid merchant.")
+            return
+
+        # Remove the item from the merchant's inventory
+        if not hasattr(merchant.db, 'inventory'):
+            self.caller.msg(f"{merchant_name} has no inventory.")
+            return
+
+        item = next((item for item in merchant.db.inventory if item['name'].lower() == item_name.lower()), None)
+        if item:
+            merchant.db.inventory.remove(item)
+            self.caller.msg(f"Removed {item_name} from {merchant_name}'s inventory.")
+        else:
+            self.caller.msg(f"No item named '{item_name}' found in {merchant_name}'s inventory.")

@@ -1,0 +1,174 @@
+from evennia import Command
+from world.cyberpunk_sheets.models import CharacterSheet
+from world.inventory.models import CyberwareInstance
+from world.cyberware.models import Cyberware
+from evennia.commands.default.muxcommand import MuxCommand
+from world.utils.formatting import sheet_header, footer, header, divider
+from django.db.models import Q
+
+class CmdCyberware(MuxCommand):
+    """
+    Show installed cyberware and its information.
+
+    Usage:
+      cyberware
+      cyberware <name>
+      cyberware/activate <name>
+      cyberware/install <name>
+
+    Examples:
+      cyberware
+      cyberware Neural Link
+      cyberware/activate Neural Link
+      cyberware/install Sandevistan
+    """
+
+    key = "cyberware"
+    aliases = ["cyber"]
+    lock = "cmd:all()"
+    help_category = "Character"
+
+    def func(self):
+        try:
+            character_sheet = CharacterSheet.objects.get(character=self.caller)
+        except CharacterSheet.DoesNotExist:
+            self.caller.msg("You don't have a character sheet. Please create one using the 'chargen' command.")
+            return
+
+        if not character_sheet:
+            self.caller.msg("You don't have a character sheet. Please create one using the 'chargen' command.")
+            return
+
+        if self.switches and "activate" in self.switches:
+            self.activate_cyberware(character_sheet, self.args.strip() if self.args else "")
+            return
+        if self.switches and "install" in self.switches:
+            self.install_cyberware(character_sheet, self.args.strip() if self.args else "")
+            return
+        if not self.args:
+            self.list_cyberware(character_sheet)
+        else:
+            self.view_specific_cyberware(character_sheet, self.args.strip())
+
+    def list_cyberware(self, character_sheet):
+        installed_cyberware = CyberwareInstance.objects.filter(character_sheet=character_sheet, installed=True)
+
+        if not installed_cyberware:
+            self.caller.msg("You have no cyberware installed.")
+            return
+
+        W = 80
+        output = sheet_header("Installed Cyberware", width=W)
+        output += f"|y{'Name':<20}{'Type':<15}{'Humanity Loss':<15}{'Description':<25}|n\n"
+
+        for instance in installed_cyberware:
+            cyberware = instance.cyberware
+            description = (cyberware.description[:22] + "...") if len(cyberware.description or "") > 25 else (cyberware.description or "")
+            output += f"|w{cyberware.name:<20}{cyberware.type:<15}{cyberware.humanity_loss:<15}{description:<25}|n\n"
+
+        output += footer(width=W, fillchar="-")
+        output += "\nUse 'cyberware <name>' to view full details of a specific piece of cyberware."
+        self.caller.msg(output)
+
+    def view_specific_cyberware(self, character_sheet, cyberware_name):
+        cyberware_name = cyberware_name.strip()  # Remove leading/trailing whitespace
+        try:
+            cyberware_instance = CyberwareInstance.objects.get(
+                character_sheet=character_sheet,
+                cyberware__name__iexact=cyberware_name,
+                installed=True
+            )
+        except CyberwareInstance.DoesNotExist:
+            self.caller.msg(f"You don't have a piece of cyberware named '{cyberware_name}' installed.")
+            return
+
+        cyberware = cyberware_instance.cyberware
+        
+        output = header(cyberware.name, width=78, fillchar="|m-|n") + "\n"
+        output += f"|cType:|n {cyberware.type}\n"
+        output += f"|cSlots:|n {cyberware.slots}\n"
+        output += f"|cHumanity Loss:|n {cyberware.humanity_loss}\n"
+        output += f"|cCost:|n {cyberware.cost} eb\n"
+        output += divider("Description", width=78, fillchar="|m-|n") + "\n"
+        output += f"{cyberware.description}\n"
+        output += footer(width=78, fillchar="|m-|n")
+        
+        self.caller.msg(output)
+    def install_cyberware(self, character_sheet, cyberware_name):
+        """Install uninstalled cyberware (e.g. purchased from Ripperdoc)."""
+        if not cyberware_name:
+            self.caller.msg("Usage: cyberware/install <name>")
+            return
+        cw_instance = CyberwareInstance.objects.filter(
+            Q(character_sheet=character_sheet) | Q(character_object=self.caller),
+            cyberware__name__iexact=cyberware_name,
+            installed=False
+        ).first()
+        if not cw_instance:
+            self.caller.msg(
+                f"You don't have uninstalled cyberware named '{cyberware_name}'. "
+                "Check your inventory with 'inv' to see uninstalled cyberware."
+            )
+            return
+        cw_instance.installed = True
+        if not cw_instance.character_sheet:
+            cw_instance.character_sheet = character_sheet
+        cw_instance.save()
+        character_sheet.calculate_humanity_loss()
+        self.caller.msg(
+            f"You have installed {cw_instance.cyberware.name}. "
+            f"Humanity loss: {cw_instance.cyberware.humanity_loss}. "
+            f"Current humanity: {character_sheet.humanity}."
+        )
+
+    def activate_cyberware(self, character_sheet, cyberware_name):
+        cyberware_name = cyberware_name.strip()  # Remove leading/trailing whitespace
+        try:
+            cyberware_instance = CyberwareInstance.objects.get(
+                character_sheet=character_sheet,
+                cyberware__name__iexact=cyberware_name,
+                installed=True
+            )
+        except CyberwareInstance.DoesNotExist:
+            self.caller.msg(f"You don't have a piece of cyberware named '{cyberware_name}' installed.")
+            return
+        # Attempt to find the cyberware
+        try:
+            cyberware = CyberwareInstance.objects.filter(
+                character_sheet=character_sheet,
+                installed=True,
+                cyberware__is_weapon=True
+            ).filter(
+                Q(cyberware__name__iexact=cyberware_name) |
+                Q(cyberware__name__icontains=cyberware_name)
+            ).first()
+
+            if not cyberware:
+                raise CyberwareInstance.DoesNotExist
+
+        except CyberwareInstance.DoesNotExist:
+            self.caller.msg(f"You don't have an installed cyberware weapon named '{cyberware_name}'.")
+            return
+
+        # Deactivate any previously activated cyberware
+        CyberwareInstance.objects.filter(character_sheet=character_sheet, active=True).update(active=False)
+
+        # Activate the selected cyberware
+        cyberware.active = True
+        cyberware.save()
+
+        # Calculate base unarmed damage based on Body stat
+        base_damage_dice = character_sheet.calculate_base_unarmed_damage()
+
+        # Update the character's unarmed strike damage
+        character_sheet.unarmed_damage_dice = max(base_damage_dice, cyberware.cyberware.damage_dice)
+        character_sheet.unarmed_damage_die_type = 6  # Always d6 as per the rules
+        character_sheet.save()
+
+        self.caller.msg(f"You have activated {cyberware.cyberware.name}. Your unarmed strike now deals {character_sheet.unarmed_damage_dice}d6 damage.")
+
+        # Check if the cyberware is a cyberarm and update the has_cyberarm flag
+        if cyberware.cyberware.name.lower() == "cyberarm":
+            character_sheet.has_cyberarm = True
+            character_sheet.save()
+            self.caller.msg("Your Cyberarm installation has been registered.")
