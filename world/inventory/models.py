@@ -220,7 +220,7 @@ class Gear(SharedMemoryModel):
 
     @property
     def is_cyberdeck(self):
-        return 'cyberdeck' in self.name.lower()
+        return 'cyberdeck' in self.name.lower() or (getattr(self, 'category', '') or '').lower() == 'cyberdeck'
 
 
 class Vehicle(SharedMemoryModel):

@@ -2,13 +2,13 @@ from evennia import DefaultRoom
 from evennia.utils import evtable
 from evennia.utils.ansi import ANSIString
 from world.utils.ansi_utils import wrap_ansi
-from world.utils.formatting import header, footer, divider
+from world.utils.formatting import header, footer, divider, footer_with_right_text
 from evennia import DefaultRoom
 from evennia.utils.utils import make_iter, justify
 from evennia.utils.ansi import ANSIString
 from evennia.utils import ansi
 from world.utils.ansi_utils import wrap_ansi
-from world.utils.formatting import header, footer, divider
+from world.utils.formatting import header, footer, divider, footer_with_right_text
 from datetime import datetime
 import random
 from evennia.utils.search import search_channel
@@ -122,18 +122,35 @@ class Room(DefaultRoom):
 
                 string +=" "+  ANSIString(f"{obj.get_display_name(looker)}").ljust(25) + ANSIString(f"{shortdesc}") .ljust(53, ' ') + "\n"
 
-        # Separate exits into directions and building exits
+        # Separate exits into directions, building exits, and apartment exits
         exits = [ex for ex in self.contents if ex.destination]
         directions = []
         building_exits = []
+        apartment_exits = []
 
         direction_aliases = ['n', 's', 'e', 'w', 'ne', 'se', 'nw', 'sw', 'u', 'd', 'o']
-        
+
+        def is_apartment_exit(ex):
+            dest = getattr(ex, 'destination', None)
+            return dest and getattr(dest, 'is_typeclass', lambda _: False)("typeclasses.rental.RentableRoom")
+
         for ex in exits:
-            if any(alias in ex.aliases.all() for alias in direction_aliases):
+            if is_apartment_exit(ex):
+                apartment_exits.append(ex)
+            elif any(alias in ex.aliases.all() for alias in direction_aliases):
                 directions.append(ex)
             else:
                 building_exits.append(ex)
+
+        # Apartments section (units on rental floors)
+        if apartment_exits:
+            string += divider("Apartments", width=78, fillchar=ANSIString("|m-|n")) + "\n"
+            apt_strings = []
+            for ex in apartment_exits:
+                aliases = ex.aliases.all() or []
+                short = min(aliases, key=len) if aliases else ex.key
+                apt_strings.append(ANSIString(f" <|y{str(short).upper()}|n> {ex.get_display_name(looker)}"))
+            string += self.format_two_columns(apt_strings)
 
         # Building Exits section
         if building_exits:
@@ -166,7 +183,19 @@ class Room(DefaultRoom):
         area_type = "OOC Area" if is_ooc else "IC Area"
         area_footer = f"|m{area_type} - {area_code}|n"
         string += divider(area_footer, width=78, fillchar=ANSIString("|m-|n")) + "\n"
-        string += footer(width=78, fillchar=ANSIString("|m-|n"))
+
+        # Room type and resource descriptor (e.g. [Apartment Building; Res: Cheap])
+        from world.cyberpunk_constants import resource_level_to_descriptor
+        res_level = self.db.resources if self.db.resources is not None else None
+        res_desc = resource_level_to_descriptor(res_level)
+        roomtype = getattr(self.db, 'roomtype', None) or ""
+        parts = []
+        if roomtype:
+            parts.append(roomtype)
+        if res_desc != "Not set":
+            parts.append(f"Res: {res_desc}")
+        res_str = "[" + "; ".join(parts) + "]" if parts else ""
+        string += footer_with_right_text(width=78, right_text=res_str, fillchar="-", color="|m")
 
         return string
 
@@ -497,7 +526,7 @@ class Room(DefaultRoom):
     def get_available_housing_types(self):
         """Get available housing types based on area type."""
         self.ensure_housing_data()  # Ensure housing data exists
-        from commands.economy import CmdRent
+        from commands.rent_commands import CmdRent
         if self.db.roomtype == "Motel":
             return {"Cube Hotel": CmdRent.APARTMENT_TYPES["Cube Hotel"]}
         elif self.db.roomtype == "Encampment":
@@ -642,10 +671,13 @@ class Room(DefaultRoom):
             "Cube Hotel",
             "Cargo Container",
             "Studio Apartment",
+            "One-Bedroom Apartment",
             "Two-Bedroom Apartment",
             "Corporate Conapt",
             "Upscale Conapt",
             "Luxury Penthouse",
+            "Corporate Beaverville House",
+            "Corporate Beaverville McMansion",
         ]
         
         # Check if room type is valid

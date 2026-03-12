@@ -4,6 +4,30 @@ ROLES = ["Rockerboy", "Solo", "Netrunner", "Tech", "Medtech", "Media", "Lawman",
 # Stats
 STATS = ['intelligence', 'reflexes', 'dexterity', 'technology', 'cool', 'willpower', 'luck', 'move', 'body', 'empathy']
 
+# Room resource descriptors (Cyberpunk standard, 0-6)
+RESOURCE_DESCRIPTORS = (
+    "Cheap", "Everyday", "Costly", "Premium", "Expensive", "Very Expensive", "Luxury"
+)
+
+def resource_level_to_descriptor(level):
+    """Convert resource level (0-6) to descriptor string."""
+    if level is None:
+        return "Not set"
+    level = int(level)
+    if 0 <= level < len(RESOURCE_DESCRIPTORS):
+        return RESOURCE_DESCRIPTORS[level]
+    return str(level)
+
+def descriptor_to_resource_level(descriptor):
+    """Convert descriptor string to resource level (0-6). Case-insensitive."""
+    if descriptor is None:
+        return None
+    desc_lower = str(descriptor).strip().lower()
+    for i, name in enumerate(RESOURCE_DESCRIPTORS):
+        if name.lower() == desc_lower:
+            return i
+    return None
+
 # Role-specific stat tables
 ROLE_STAT_TABLES = {
     "Rockerboy": [

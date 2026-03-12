@@ -1,7 +1,5 @@
 """
 Cyberpunk RED netrunning command.
-
-Floor-based NET architectures per the core rulebook. Uses +net/scan, +net/jackin, etc.
 """
 
 import random
@@ -9,8 +7,9 @@ import random
 import evennia
 from evennia.commands.default.muxcommand import MuxCommand
 
-from world.netrunning.red_netrunning import (
+from world.cyberpunk.netrunning import (
     ALL_PROGRAMS,
+    BLACK_ICE,
     DIFFICULTY_DV,
     generate_architecture,
     generate_paydata_entry,
@@ -22,8 +21,6 @@ from world.netrunning.red_netrunning import (
     normalize_name,
 )
 from world.utils.permission_utils import check_builder_permission
-from world.utils.character_utils import is_character_approved
-from world.inventory.models import CyberwareInstance
 
 
 def _roll_dice(dice: str) -> int:
@@ -49,9 +46,9 @@ class CmdNet(MuxCommand):
         +net/programs
         +net/activate <program>
         +net/deactivate <program>
-        +net/zap [=target]              - target: ICE name or index when multiple
-        +net/attack <program> [=target] - target: ICE name or index when multiple
-        +net/slide [=target]             - target: ICE name or index when multiple
+        +net/zap
+        +net/attack <program>
+        +net/slide
 
     Staff/Storyteller usage:
         +net/create <name>=<difficulty>[,<floors>]
@@ -65,7 +62,7 @@ class CmdNet(MuxCommand):
     key = "+net"
     aliases = ["net", "netrun", "+netrun"]
     locks = "cmd:all()"
-    help_category = "Netrunning"
+    help_category = "Cyberpunk RED"
 
     STAFF_SWITCHES = {"create", "generate", "setfloor", "autopaydata", "refreshpaydata"}
 
@@ -109,6 +106,10 @@ class CmdNet(MuxCommand):
             return
         handler()
 
+    # -------------------------------------------------------------------------
+    # State helpers
+    # -------------------------------------------------------------------------
+
     def _get_state(self):
         return self.caller.db.netrun_state or {}
 
@@ -127,11 +128,11 @@ class CmdNet(MuxCommand):
         local = self.caller.search(name, location=self.caller.location, quiet=True)
         if local:
             for obj in local:
-                if hasattr(obj, "db") and getattr(obj.db, "is_net_architecture", False):
+                if obj.db.is_net_architecture:
                     return obj
         global_matches = evennia.search_object(name)
         for obj in global_matches:
-            if hasattr(obj, "db") and getattr(obj.db, "is_net_architecture", False):
+            if obj.db.is_net_architecture:
                 return obj
         return None
 
@@ -144,7 +145,7 @@ class CmdNet(MuxCommand):
         if not match:
             return None
         arch = match[0]
-        if not getattr(arch.db, "is_net_architecture", False):
+        if not arch.db.is_net_architecture:
             return None
         return arch
 
@@ -175,10 +176,9 @@ class CmdNet(MuxCommand):
         return floors[idx]
 
     def _brain_damage(self, amount, reason):
-        self.caller.take_damage(amount)
-        self.caller.msg(f"|rBrain burn: {amount} damage ({reason}).|n")
-        hp = getattr(self.caller.db, "current_hp", None)
-        if hp is not None and hp <= 0:
+        dealt = self.caller.take_damage(amount)
+        self.caller.msg(f"|rBrain burn: {dealt} damage ({reason}).|n")
+        if self.caller.get_hp_current() <= 0:
             self.caller.msg("|rYou flatline from neural feedback!|n")
             self._do_jackout(unsafe=True)
 
@@ -190,24 +190,6 @@ class CmdNet(MuxCommand):
         ice_state = state.get("ice_state", {})
         ice_state[str(floor_num)] = data
         state["ice_state"] = ice_state
-
-    def _pick_ice_target(self, floor_ice, target_arg):
-        """Resolve ICE target from optional name or 1-based index. Returns (ice_dict, index) or (None, -1)."""
-        if not floor_ice:
-            return None, -1
-        if not target_arg or not target_arg.strip():
-            return floor_ice[0], 0
-        arg = target_arg.strip()
-        if arg.isdigit():
-            idx = int(arg) - 1
-            if 0 <= idx < len(floor_ice):
-                return floor_ice[idx], idx
-            return None, -1
-        arg_lower = normalize_name(arg)
-        for i, ice_dict in enumerate(floor_ice):
-            if normalize_name(ice_dict.get("name", "")) == arg_lower:
-                return ice_dict, i
-        return None, -1
 
     def _parse_ice_names(self, floor):
         ftype = floor.get("type")
@@ -225,7 +207,7 @@ class CmdNet(MuxCommand):
         names = self._parse_ice_names(floor)
         generated = []
         for name in names:
-            ice = get_black_ice(normalize_name(name))
+            ice = get_black_ice(name)
             if not ice:
                 continue
             generated.append({"name": ice["name"], "rez": ice["rez"], "active": True})
@@ -240,7 +222,7 @@ class CmdNet(MuxCommand):
         for ice_instance in ice_list:
             if not ice_instance.get("active"):
                 continue
-            ice = get_black_ice(normalize_name(ice_instance["name"]))
+            ice = get_black_ice(ice_instance["name"])
             if not ice:
                 continue
             net_total, _, _ = interface_check(self.caller, bonus=speed_bonus)
@@ -279,24 +261,10 @@ class CmdNet(MuxCommand):
                 self.caller.msg("  |rHostile ICE:|n " + ", ".join(f"{i['name']}({i['rez']} REZ)" for i in active))
 
     def _has_netrunning_gear(self):
-        sheet = getattr(self.caller, "character_sheet", None)
-        if not sheet:
-            return False, ["a character sheet"]
-        inv = getattr(sheet, "inventory", None)
-        if not inv:
-            return False, ["an inventory"]
-        has_deck = False
-        for gear in inv.gear.all():
-            if getattr(gear, "is_cyberdeck", False):
-                has_deck = True
-                break
-        for cw in CyberwareInstance.objects.filter(character_sheet=sheet, installed=True):
-            if "cyberdeck" in (cw.cyberware.name or "").lower():
-                has_deck = True
-                break
-        cyber_names = set()
-        for cw in CyberwareInstance.objects.filter(character_sheet=sheet, installed=True):
-            cyber_names.add(normalize_name(cw.cyberware.name or ""))
+        inv = self.caller.db.inventory or []
+        has_deck = any(item.get("type") == "cyberdeck" for item in inv)
+        cyber = self.caller.get_installed_cyberware()
+        cyber_names = {normalize_name(c.get("name", "")) for c in cyber}
         needs = []
         if not has_deck:
             needs.append("a Cyberdeck")
@@ -310,6 +278,11 @@ class CmdNet(MuxCommand):
 
     def _do_jackout(self, unsafe=False):
         state = self._get_state()
+        marker_id = state.get("body_marker_id")
+        if marker_id:
+            marker = evennia.search_object(f"#{marker_id}")
+            if marker:
+                marker[0].delete()
         arch = self._current_architecture()
         self._clear_state()
         if unsafe:
@@ -323,26 +296,27 @@ class CmdNet(MuxCommand):
                 exclude=self.caller,
             )
 
+    # -------------------------------------------------------------------------
+    # Player switches
+    # -------------------------------------------------------------------------
+
     def cmd_scan(self):
         room = self.caller.location
         if not room:
             self.caller.msg("You have no location to scan.")
             return
-        arches = [obj for obj in room.contents if hasattr(obj, "db") and getattr(obj.db, "is_net_architecture", False)]
+        arches = [obj for obj in room.contents if obj.db.is_net_architecture]
         if not arches:
             self.caller.msg("No NET access points detected here.")
             return
         lines = ["|cAccess Points in range:|n"]
         for arch in arches:
             lines.append(
-                f"  {arch.key} - {(arch.db.difficulty or 'standard').title()} ({len(arch.db.floors or [])} floors)"
+                f"  {arch.key} - {arch.db.difficulty.title()} ({len(arch.db.floors or [])} floors)"
             )
         self.caller.msg("\n".join(lines))
 
     def cmd_jackin(self):
-        if not is_character_approved(self.caller):
-            self.caller.msg("You must be approved by staff before using netrunning.")
-            return
         if self._is_jacked_in():
             self.caller.msg("You are already jacked in.")
             return
@@ -365,6 +339,13 @@ class CmdNet(MuxCommand):
                 self.caller.msg("Missing required netrunning gear: " + ", ".join(missing))
                 return
 
+        marker = evennia.create_object(
+            "typeclasses.netrunning.NetrunBodyMarker",
+            key=f"{self.caller.key}'s netrunning body",
+            location=self.caller.location,
+        )
+        marker.db.owner_id = self.caller.id
+
         state = {
             "active": True,
             "architecture_id": arch.id,
@@ -373,6 +354,7 @@ class CmdNet(MuxCommand):
             "active_programs": {},
             "cleared_passwords": [],
             "controlled_nodes": [],
+            "body_marker_id": marker.id,
             "ice_state": {},
         }
         self._set_state(state)
@@ -475,7 +457,7 @@ class CmdNet(MuxCommand):
                 break
         self.caller.msg(f"|cPathfinder|n Interface {rank} + {die} + {bonus} = |w{total}|n")
         for floor in visible:
-            self.caller.msg(f"  F{floor['floor']}: {floor.get('name', '?')} ({floor.get('type')})")
+            self.caller.msg(f"  F{floor['floor']}: {floor['name']} ({floor['type']})")
 
     def cmd_backdoor(self):
         if not self._require_netrun():
@@ -662,18 +644,8 @@ class CmdNet(MuxCommand):
         if not floor_ice:
             self.caller.msg("No ICE target on this floor.")
             return
-        if len(floor_ice) > 1 and not self.args:
-            self.caller.msg(
-                f"Multiple ICE on this floor. Specify target: +net/zap <name or #>  "
-                f"(e.g. {', '.join(f['name'] for f in floor_ice)})"
-            )
-            return
-        target_arg = (self.args or "").strip().lstrip("=").strip()
-        target, _ = self._pick_ice_target(floor_ice, target_arg)
-        if not target:
-            self.caller.msg("ICE target not found. Use a name or 1-based index.")
-            return
-        ice = get_black_ice(normalize_name(target["name"]))
+        target = floor_ice[0]
+        ice = get_black_ice(target["name"])
         atk_total, rank, die = interface_check(self.caller)
         def_total = int(ice["def"]) + random.randint(1, 10)
         self.caller.msg(
@@ -696,19 +668,18 @@ class CmdNet(MuxCommand):
         if not self._require_netrun():
             return
         if not self.args:
-            self.caller.msg("Usage: +net/attack <program> [=target]  (target needed if multiple ICE)")
+            self.caller.msg("Usage: +net/attack <attacker program>")
             return
-        if "=" in self.args:
-            prog_arg, target_arg = self.args.split("=", 1)
-        else:
-            parts = self.args.strip().split(None, 1)
-            prog_arg = parts[0] if parts else ""
-            target_arg = parts[1] if len(parts) > 1 else ""
-        prog = get_program(prog_arg.strip())
+        arch = self._current_architecture()
+        state = self._get_state()
+        floor = self._get_floor(arch, state)
+        if not floor:
+            self.caller.msg("No valid floor.")
+            return
+        prog = get_program(self.args.strip())
         if not prog:
             self.caller.msg("Unknown program.")
             return
-        state = self._get_state()
         pkey = normalize_name(prog["name"])
         active = state.get("active_programs", {})
         if pkey not in active:
@@ -717,26 +688,12 @@ class CmdNet(MuxCommand):
         if "attacker" not in prog["class"].lower():
             self.caller.msg("That is not an attacker program.")
             return
-        arch = self._current_architecture()
-        floor = self._get_floor(arch, state)
-        if not floor:
-            self.caller.msg("No valid floor.")
-            return
         floor_ice = [i for i in self._ensure_floor_ice_state(state, floor) if i.get("active")]
         if not floor_ice:
             self.caller.msg("No valid target for that program on this floor.")
             return
-        if len(floor_ice) > 1 and not target_arg:
-            self.caller.msg(
-                f"Multiple ICE on this floor. Specify target: +net/attack {prog['name']}=<name or #>  "
-                f"(e.g. {', '.join(f['name'] for f in floor_ice)})"
-            )
-            return
-        target, idx = self._pick_ice_target(floor_ice, target_arg)
-        if not target:
-            self.caller.msg("ICE target not found. Use a name or 1-based index.")
-            return
-        ice = get_black_ice(normalize_name(target["name"]))
+        target = floor_ice[0]
+        ice = get_black_ice(target["name"])
         atk_total = get_interface_rank(self.caller) + int(prog["atk"]) + random.randint(1, 10)
         def_total = int(ice["def"]) + random.randint(1, 10)
         self.caller.msg(
@@ -751,6 +708,7 @@ class CmdNet(MuxCommand):
                 self.caller.msg(f"|y{ice['name']} is Derezzed.|n")
         else:
             self.caller.msg("|rProgram attack misses.|n")
+        # Attacker programs auto-deactivate after use.
         del active[pkey]
         state["active_programs"] = active
         self._set_active_ice_on_floor(state, floor["floor"], floor_ice)
@@ -769,18 +727,8 @@ class CmdNet(MuxCommand):
         if not floor_ice:
             self.caller.msg("No ICE is currently engaging you on this floor.")
             return
-        if len(floor_ice) > 1 and not self.args:
-            self.caller.msg(
-                f"Multiple ICE on this floor. Specify target: +net/slide <name or #>  "
-                f"(e.g. {', '.join(f['name'] for f in floor_ice)})"
-            )
-            return
-        target_arg = (self.args or "").strip().lstrip("=").strip()
-        target, _ = self._pick_ice_target(floor_ice, target_arg)
-        if not target:
-            self.caller.msg("ICE target not found. Use a name or 1-based index.")
-            return
-        ice = get_black_ice(normalize_name(target["name"]))
+        target = floor_ice[0]
+        ice = get_black_ice(target["name"])
         runner_total, rank, die = interface_check(self.caller)
         ice_total = int(ice["per"]) + random.randint(1, 10)
         self.caller.msg(
@@ -795,7 +743,9 @@ class CmdNet(MuxCommand):
         else:
             self.caller.msg("|rSlide fails; the ICE stays on you.|n")
 
-    # ---- Staff switches ----
+    # -------------------------------------------------------------------------
+    # Staff/Storyteller switches
+    # -------------------------------------------------------------------------
 
     def cmd_create_architecture(self):
         if not self.args or "=" not in self.args:
@@ -864,7 +814,7 @@ class CmdNet(MuxCommand):
         if not arch:
             self.caller.msg("Architecture not found.")
             return
-        lines = [f"|c{arch.key}|n  Difficulty: {(arch.db.difficulty or 'standard').title()}"]
+        lines = [f"|c{arch.key}|n  Difficulty: {arch.db.difficulty.title()}"]
         for floor in arch.db.floors or []:
             line = f"  F{floor['floor']:>2}: {floor.get('name', '?')} ({floor.get('type', '?')})"
             if floor.get("dv") is not None:
@@ -950,24 +900,22 @@ class CmdNet(MuxCommand):
         self.caller.msg(f"|g{arch.key} auto paydata set to {toggle}.|n")
 
     def cmd_refresh_paydata(self):
-        arches = evennia.search_object(
-            "", typeclass="typeclasses.netrunning.NetArchitecture"
-        )
+        from evennia.objects.models import ObjectDB
+
+        arches = ObjectDB.objects.filter(db_typeclass_path="typeclasses.netrunning.NetArchitecture")
         refreshed = 0
         for arch in arches:
-            if not getattr(arch.db, "auto_paydata", False):
+            if not arch.db.auto_paydata:
                 continue
-            floors = getattr(arch.db, "floors", None) or []
+            floors = arch.db.floors or []
             changed = False
             for idx, floor in enumerate(floors):
                 if floor.get("type") in ("file", "paydata"):
-                    floor["paydata"] = generate_paydata_entry(
-                        getattr(arch.db, "difficulty", None) or "standard",
-                        int(floor.get("floor", idx + 1)),
-                    )
+                    floor["paydata"] = generate_paydata_entry(arch.db.difficulty, int(floor.get("floor", idx + 1)))
                     floors[idx] = floor
                     changed = True
             if changed:
                 arch.db.floors = floors
                 refreshed += 1
         self.caller.msg(f"|gWeekly paydata refreshed across {refreshed} architecture(s).|n")
+

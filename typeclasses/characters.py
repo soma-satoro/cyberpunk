@@ -829,6 +829,12 @@ class Character(DefaultCharacter):
         # Add any other details you want to include in the character's appearance
         # For example, you might want to add information about their equipment, stats, etc.
 
+        # Netrun indicator: show when character is jacked in (body vulnerable to attack)
+        netrun_state = getattr(self.db, "netrun_state", None) or {}
+        if netrun_state.get("active"):
+            string += "\n|yThey sit motionless, chrome flickering in their eyes - jacked into the NET.|n\n"
+            string += "|r(Their body is vulnerable to attack!)|n\n"
+
         return string
 
     def execute_cmd(self, raw_string, session=None, **kwargs):
@@ -1683,7 +1689,7 @@ class Note:
         logger.info("Starting calculate_humanity_loss in CharacterSheet")
         # Use lazy loading
         CyberwareInstance = apps.get_model('inventory', 'CyberwareInstance')
-        installed_cyberware = CyberwareInstance.objects.filter(character=self, installed=True)
+        installed_cyberware = CyberwareInstance.objects.filter(character_sheet=self, installed=True)
         total_cyberware_hl = sum(cw.cyberware.humanity_loss for cw in installed_cyberware)
         
         logger.info(f"Total cyberware humanity loss: {total_cyberware_hl}")
@@ -1732,7 +1738,7 @@ class Note:
     def calculate_total_cyberware_hl(self):
         # Use lazy loading
         CyberwareInstance = apps.get_model('inventory', 'CyberwareInstance')
-        installed_cyberware = CyberwareInstance.objects.filter(character=self, installed=True)
+        installed_cyberware = CyberwareInstance.objects.filter(character_sheet=self, installed=True)
         return sum(cw.cyberware.humanity_loss for cw in installed_cyberware)
 
     def save(self, *args, **kwargs):

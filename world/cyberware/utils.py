@@ -83,7 +83,7 @@ def check_cyberware_requirements(character, cyberware):
 
 def calculate_humanity_loss(sheet):
     from world.inventory.models import CyberwareInstance
-    installed_cyberware = CyberwareInstance.objects.filter(character=sheet, installed=True)
+    installed_cyberware = CyberwareInstance.objects.filter(character_sheet=sheet, installed=True)
     total_cyberware_hl = sum(cw.cyberware.humanity_loss for cw in installed_cyberware)
     
     print(f"Debug: Total Cyberware Humanity Loss: {total_cyberware_hl}")

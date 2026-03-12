@@ -50,6 +50,8 @@ world/plots/migrations/*
 world/requests/migrations/*
 world/utils/migrations/*
 world/voucher/migrations/*
+books/*
+newcommands/*
 
 # Installer logs
 pip-log.txt

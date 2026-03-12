@@ -556,6 +556,10 @@ class CmdRoll(Command):
 
         # Parse "Stat + Skill" part
         if " + " not in args:
+            # Check if they used dice syntax (e.g., 3d10) - suggest +dice instead
+            if re.match(r'^\s*\d*d\d+', args, re.IGNORECASE):
+                self.caller.msg("Syntax: +roll <stat> + <skill> vs <difficulty>. To roll a number of dice and not perform a skill check, use the +dice command.")
+                return
             self.caller.msg("Usage: roll <attribute> + <skill> | <value> + <value> [vs <DV or difficulty>]")
             return
 

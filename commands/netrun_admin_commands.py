@@ -1,8 +1,13 @@
 # commands/netrun_admin_commands.py
+"""
+Admin commands for NET Architectures.
+Uses the CPR floor-based system. For most operations, staff should use +net/create, +net/generate, etc.
+"""
 from evennia.commands.default.muxcommand import MuxCommand
-from evennia import Command, CmdSet, DefaultScript
-from evennia.utils import create
+from evennia import Command, CmdSet, DefaultScript, create_object
+from evennia.utils.search import search_object
 from world.netrunning.models import NetArchitecture, Node, ICE, BlackICE, Program
+from world.netrunning.red_netrunning import generate_architecture, DIFFICULTY_DV
 import random
 
 class CmdArchitecture(MuxCommand):
@@ -291,38 +296,48 @@ class CmdArchitecture(MuxCommand):
         del self.caller.ndb._netarch_creation
     
     def cmd_generate(self):
-        """Generate a random NET Architecture based on Cyberpunk Red rules."""
+        """Generate a CPR floor-based NET Architecture (Evennia Object) in a room."""
         if not self.args:
-            self.caller.msg("Usage: arch/generate <difficulty> <name> <location>")
-            self.caller.msg("Difficulty can be: basic, standard, uncommon, advanced")
+            self.caller.msg("Usage: arch/generate <difficulty> <name> [=location]")
+            self.caller.msg("Difficulty: basic, standard, uncommon, advanced")
+            self.caller.msg("Creates architecture in your current room if no location given.")
             return
-            
         try:
-            args_list = self.args.strip().split(None, 2)
-            if len(args_list) < 3:
-                self.caller.msg("You must provide difficulty, name, and location.")
+            if "=" in self.args:
+                rest, location = self.args.split("=", 1)
+                rest = rest.strip()
+                location = location.strip()
+            else:
+                rest = self.args.strip()
+                location = None
+            args_list = rest.split(None, 1)
+            difficulty = args_list[0].lower()
+            name = args_list[1] if len(args_list) > 1 else "NET Access Point"
+            if difficulty not in ["basic", "standard", "uncommon", "advanced"]:
+                self.caller.msg("Difficulty must be basic, standard, uncommon, or advanced.")
                 return
-                
-            difficulty, name, location = args_list
-            
-            # Validate difficulty
-            if difficulty.lower() not in ["basic", "standard", "uncommon", "advanced"]:
-                self.caller.msg("Invalid difficulty. Must be basic, standard, uncommon, or advanced.")
-                return
-                
-            # Generate the architecture
-            architecture_data = self.generate_random_architecture(difficulty.lower(), name, location)
-            
-            # Create the architecture in the database
-            architecture = self.create_architecture_from_data(architecture_data)
-            
-            # Display summary
-            self.display_generated_architecture(architecture_data)
-            
-            self.caller.msg(f"NET Architecture '{name}' at {location} successfully generated with {len(architecture_data['nodes'])} nodes.")
-            
+            target_room = self.caller.location
+            if location:
+                rooms = search_object(location, typeclass="typeclasses.rooms.Room")
+                if not rooms:
+                    rooms = search_object(location)
+                if rooms:
+                    target_room = rooms[0]
+                else:
+                    self.caller.msg(f"Location '{location}' not found. Creating in current room.")
+            arch = create_object(
+                "typeclasses.netrunning.NetArchitecture",
+                key=name,
+                location=target_room,
+            )
+            arch.db.difficulty = difficulty
+            arch.db.floors = generate_architecture(difficulty)
+            self.caller.msg(
+                f"|gCreated {arch.key}|n in {target_room.key} "
+                f"({difficulty}, {len(arch.db.floors)} floors). Use +net/scan to detect."
+            )
         except Exception as e:
-            self.caller.msg(f"Error generating architecture: {e}")
+            self.caller.msg(f"Error: {e}")
     
     def generate_random_architecture(self, difficulty, name, location):
         """Generate a random NET architecture based on Cyberpunk Red rules."""

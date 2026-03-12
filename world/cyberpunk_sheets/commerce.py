@@ -4,12 +4,14 @@ from evennia.utils.search import search_object
 from evennia.utils import gametime
 from world.cyberpunk_sheets.services import CharacterMoneyService
 from world.inventory.models import Weapon, Armor, Gear, Vehicle as VehicleModel, CyberwareInstance, Inventory
-from world.equipment_data import weapons, armors, gears, vehicles as vehicles_data
+from world.equipment_data import weapons, armors, gears, cyberdecks as cyberdecks_data, vehicles as vehicles_data
 from world.cyberware.models import Cyberware
 from world.cyberware.merchants import check_cyberware_requirements
 from evennia.utils.evmenu import get_input, EvMenu
 from world.cyberpunk_sheets.merchants import Merchant
 from world.utils.character_utils import get_character_sheet
+from world.utils.formatting import header, footer, section_header
+from world.utils.ansi_utils import wrap_ansi
 from world.commerce.pricing import (
     EXPENSIVE_THRESHOLD,
     can_purchase_expensive_from_vendor,
@@ -48,16 +50,18 @@ class Merchant:
 CHARGEN_MAX_PRICE = 1000
 
 
-def _get_chargen_catalog(category=None):
+def _get_chargen_catalog(category=None, subcategory=None):
     """
     Build catalog of chargen items (value <= 1000).
     category: 'weapons', 'armor', 'gear', 'cyberware' or None for all.
-    'cyberware' = Cyberware model (body implants) + gear with category "Cyberware".
+    subcategory: filter by subcategory (e.g. 'medical' for gear, 'shoulder_arms' for weapons).
     """
     catalog = []
     if category is None or category == "weapons":
         for w in weapons:
             if w.get("value", 0) <= CHARGEN_MAX_PRICE:
+                if subcategory and w.get("category", "").lower() != subcategory.lower():
+                    continue
                 entry = dict(w)
                 entry["_type"] = "weapon"
                 entry["_merchant_type"] = "arms_dealer"
@@ -65,6 +69,10 @@ def _get_chargen_catalog(category=None):
     if category is None or category == "armor":
         for a in armors:
             if a.get("value", 0) <= CHARGEN_MAX_PRICE:
+                if subcategory:
+                    locs = [x.strip().lower() for x in (a.get("locations", "") or "").split(",")]
+                    if subcategory.lower() not in locs:
+                        continue
                 entry = dict(a)
                 entry["_type"] = "armor"
                 entry["_merchant_type"] = "clothier"
@@ -72,22 +80,38 @@ def _get_chargen_catalog(category=None):
     if category is None or category == "gear":
         for g in gears:
             if g.get("value", 0) <= CHARGEN_MAX_PRICE and g.get("category") != "Cyberware":
+                if subcategory and g.get("category", "").lower() != subcategory.lower():
+                    continue
                 entry = dict(g)
                 entry["_type"] = "gear"
                 entry["_merchant_type"] = "gear_merchant"
                 catalog.append(entry)
+        if not subcategory or subcategory.lower() == "cyberdeck":
+            for cd in cyberdecks_data:
+                if cd.get("value", 0) <= CHARGEN_MAX_PRICE:
+                    catalog.append({
+                        "name": cd["name"],
+                        "value": cd["value"],
+                        "hardware_slots": cd.get("hardware_slots", 0),
+                        "program_slots": cd.get("program_slots", 0),
+                        "any_slots": cd.get("any_slots", 0),
+                        "_type": "cyberdeck",
+                        "_merchant_type": "cyberdeck_merchant",
+                    })
     if category is None or category == "cyberware":
-        # Body implants from Cyberware model (cyberware_data.py)
         for cw in Cyberware.objects.filter(cost__lte=CHARGEN_MAX_PRICE).order_by("type", "name"):
+            if subcategory and getattr(cw, "type", "").lower() != subcategory.lower():
+                continue
             catalog.append({
                 "name": cw.name,
                 "value": cw.cost,
                 "_type": "cyberware_implant",
                 "_cyberware": cw,
             })
-        # Gear with category Cyberware (e.g. Linear Frames if any <= 1000)
         for g in gears:
             if g.get("value", 0) <= CHARGEN_MAX_PRICE and g.get("category") == "Cyberware":
+                if subcategory:
+                    continue
                 entry = dict(g)
                 entry["_type"] = "gear"
                 entry["_merchant_type"] = "gear_merchant"
@@ -95,9 +119,40 @@ def _get_chargen_catalog(category=None):
     return catalog
 
 
-def _find_chargen_item(item_name):
-    """Find item in chargen catalog by name (value <= 1000). Returns (item_dict_or_cyberware, item_type, gear_category) or None."""
+def _get_chargen_subcategories():
+    """Return dict of main_category -> set of subcategories present in chargen catalog."""
+    result = {"weapons": set(), "armor": set(), "gear": set(), "cyberware": set()}
+    for w in weapons:
+        if w.get("value", 0) <= CHARGEN_MAX_PRICE and w.get("category"):
+            result["weapons"].add(w["category"])
+    for a in armors:
+        if a.get("value", 0) <= CHARGEN_MAX_PRICE and a.get("locations"):
+            for loc in str(a["locations"]).split(","):
+                result["armor"].add(loc.strip())
+    for g in gears:
+        if g.get("value", 0) <= CHARGEN_MAX_PRICE and g.get("category") and g.get("category") != "Cyberware":
+            result["gear"].add(g["category"])
+    if any(cd.get("value", 0) <= CHARGEN_MAX_PRICE for cd in cyberdecks_data):
+        result["gear"].add("Cyberdeck")
+    for cw in Cyberware.objects.filter(cost__lte=CHARGEN_MAX_PRICE).values_list("type", flat=True).distinct():
+        if cw:
+            result["cyberware"].add(cw)
+    return result
+
+
+def _find_chargen_item(item_name, cyberware_only=False):
+    """Find item in chargen catalog by name (value <= 1000). Returns (item_dict_or_cyberware, item_type, gear_category) or None.
+    cyberware_only: if True, only search Cyberware model (body implants). If False, search weapons/armor/gear/cyberdecks only."""
     item_name_lower = item_name.lower()
+    if cyberware_only:
+        # Body cyberware only - requires /cyberware switch
+        try:
+            cw = Cyberware.objects.get(name__iexact=item_name, cost__lte=CHARGEN_MAX_PRICE)
+            return ({"_cyberware": cw, "name": cw.name, "value": cw.cost}, "cyberware_implant", None)
+        except Cyberware.DoesNotExist:
+            pass
+        return None
+    # Equipment: weapons, armor, gear, external cyberdecks (NOT body cyberware)
     for w in weapons:
         if w.get("value", 0) <= CHARGEN_MAX_PRICE and w.get("name", "").lower() == item_name_lower:
             return (dict(w), "weapon", None)
@@ -107,12 +162,16 @@ def _find_chargen_item(item_name):
     for g in gears:
         if g.get("value", 0) <= CHARGEN_MAX_PRICE and g.get("name", "").lower() == item_name_lower:
             return (dict(g), "gear", g.get("category"))
-    # Cyberware from Cyberware model
-    try:
-        cw = Cyberware.objects.get(name__iexact=item_name, cost__lte=CHARGEN_MAX_PRICE)
-        return ({"_cyberware": cw, "name": cw.name, "value": cw.cost}, "cyberware_implant", None)
-    except Cyberware.DoesNotExist:
-        pass
+    for cd in cyberdecks_data:
+        if cd.get("value", 0) <= CHARGEN_MAX_PRICE and cd.get("name", "").lower() == item_name_lower:
+            return ({
+                "name": cd["name"],
+                "value": cd["value"],
+                "description": cd.get("description", ""),
+                "category": "Cyberdeck",
+                "weight": 0.5,
+                "_type": "cyberdeck",
+            }, "cyberdeck", "Cyberdeck")
     return None
 
 
@@ -122,8 +181,9 @@ class CmdBuy(Command):
 
     Usage:
       buy <item name> from <merchant>   - Buy from a vendor (items 1000eb or under)
-      buy <item name>                   - In chargen room: buy equipment (1000eb or under)
-      buy/stash <cyberware>             - In chargen: buy cyberware without installing
+      buy <item name>                   - In chargen: buy equipment (weapons, armor, gear, cyberdecks)
+      buy/cyberware <name>              - In chargen: buy body cyberware (implants)
+      buy/stash <cyberware>             - In chargen: buy cyberware without installing (use with /cyberware)
 
     In the chargen room, you can purchase equipment (up to 1000 eb) without vendors.
     At vendors, items over 1000eb cannot be purchased (except by Fixer, Medtech,
@@ -132,7 +192,7 @@ class CmdBuy(Command):
     """
 
     key = "buy"
-    switches = [("stash", "stash")]
+    switches = [("stash", "stash"), ("cyberware", "cyberware")]
     locks = "cmd:all()"
     help_category = "Economy"
 
@@ -148,7 +208,8 @@ class CmdBuy(Command):
         else:
             if in_chargen:
                 self.caller.msg(
-                    "Usage: buy <item name> - Purchase equipment from the chargen catalog. "
+                    "Usage: buy <item name> - Purchase equipment (weapons, armor, gear, cyberdecks). "
+                    "Use buy/cyberware <name> for body cyberware. "
                     "Use 'list chargen/weapons', 'list chargen/armor', 'list chargen/gear', "
                     "or 'list chargen/cyberware' to see available items."
                 )
@@ -161,12 +222,14 @@ class CmdBuy(Command):
     def _buy_from_chargen(self):
         """Handle chargen room purchase - only items 1000eb or under."""
         item_name = self.args.strip().lower()
-        result = _find_chargen_item(item_name)
+        cyberware_only = "cyberware" in (self.switches or [])
+        result = _find_chargen_item(item_name, cyberware_only=cyberware_only)
         if not result:
+            hint = "Use 'buy/cyberware <name>' for body cyberware." if not cyberware_only else ""
             self.caller.msg(
                 f"'{item_name}' is not available in the chargen catalog. "
                 "Use 'list chargen/weapons', 'list chargen/armor', 'list chargen/gear', "
-                "or 'list chargen/cyberware' to see options."
+                "or 'list chargen/cyberware' to see options. " + hint
             )
             return
 
@@ -176,6 +239,9 @@ class CmdBuy(Command):
             stash = "stash" in (self.switches or [])
             self._buy_cyberware_from_chargen(item, stash=stash)
             return
+
+        merchant_type_map = {"weapon": "arms_dealer", "armor": "clothier", "gear": "gear_merchant", "cyberdeck": "cyberdeck_merchant"}
+        merchant_type = merchant_type_map.get(item_type) or item.get("_merchant_type", "gear_merchant")
 
         base_price = item["value"]
         discount = get_purchase_discount_percent(self.caller, item_type, gear_category)
@@ -197,7 +263,7 @@ class CmdBuy(Command):
             )
             return
 
-        self._add_item_to_inventory(self.caller, item, item["_merchant_type"])
+        self._add_item_to_inventory(self.caller, item, merchant_type)
         if discount > 0:
             self.caller.msg(
                 f"You have purchased {item['name']} for {price} eb "
@@ -454,6 +520,17 @@ class CmdBuy(Command):
                 }
             )
             inventory.vehicles.add(vehicle_model)
+        elif merchant_type == "cyberdeck_merchant":
+            gear, created = Gear.objects.get_or_create(
+                name=item['name'],
+                defaults={
+                    'category': 'Cyberdeck',
+                    'description': item.get('description', ''),
+                    'weight': item.get('weight', 0.5),
+                    'value': item['value'],
+                }
+            )
+            inventory.gear.add(gear)
 
 class CmdListItems(Command):
     """
@@ -462,13 +539,14 @@ class CmdListItems(Command):
     Usage:
       list from <merchant>
       list items from <merchant>
-      list chargen/weapons
-      list chargen/armor
-      list chargen/gear
-      list chargen/cyberware
+      list chargen                    - Show category menu
+      list chargen/weapons            - All weapons (or list chargen weapons)
+      list chargen/gear               - All gear
+      list chargen/medical            - Gear in Medical category
+      list chargen/shoulder_arms      - Weapons in shoulder_arms category
 
-    In the chargen room, list chargen/<category> shows equipment (1000 eb or under)
-    that can be purchased without vendors.
+    In the chargen room, list chargen shows equipment (1000 eb or under).
+    Use subcategories for granular filtering (e.g. medical, shoulder_arms).
     """
 
     key = "list"
@@ -487,10 +565,12 @@ class CmdListItems(Command):
         args = self.args.strip().lower()
 
         in_chargen = isinstance(self.caller.location, ChargenRoom)
-        if in_chargen and (args == "chargen" or args.startswith("chargen/")):
+        if in_chargen and (args == "chargen" or args.startswith("chargen/") or args.startswith("chargen ")):
             if "/" in args:
                 _, sub = args.split("/", 1)
                 sub = sub.strip()
+            elif args.startswith("chargen "):
+                sub = args[8:].strip()  # "chargen gear" -> "gear"
             else:
                 sub = None
             self._list_chargen(sub)
@@ -528,33 +608,168 @@ class CmdListItems(Command):
             self.caller.msg(f"No items available from {merchant.name}.")
 
     def _list_chargen(self, category=None):
-        """List items in the chargen catalog (value <= 1000 eb)."""
-        valid = ("weapons", "armor", "gear", "cyberware")
+        """List items in the chargen catalog (value <= 1000 eb), formatted like equipdb.
+        category=None shows a menu. category can be main (weapons/armor/gear/cyberware)
+        or subcategory (medical, shoulder_arms, etc.)."""
+        main_cats = ("weapons", "armor", "gear", "cyberware")
+        subcats = _get_chargen_subcategories()
+
         if not category:
-            self.caller.msg(
-                "Usage: list chargen/weapons | list chargen/armor | "
-                "list chargen/gear | list chargen/cyberware"
-            )
+            self._list_chargen_menu(main_cats, subcats)
             return
-        if category not in valid:
+
+        # Resolve: is category a main category or a subcategory?
+        cat_lower = category.lower().replace(" ", "_")
+        main_cat = None
+        subcategory = None
+
+        if cat_lower in main_cats:
+            main_cat = cat_lower
+        else:
+            # Try to find which main category this subcategory belongs to
+            cat_norm = cat_lower.replace(" ", "_")
+            for mc in main_cats:
+                for sc in subcats[mc]:
+                    if sc.lower().replace(" ", "_") == cat_norm:
+                        main_cat = mc
+                        subcategory = sc
+                        break
+                if main_cat:
+                    break
+
+        if not main_cat:
             self.caller.msg(
-                f"Unknown category '{category}'. Use: list chargen/weapons | list chargen/armor | "
-                "list chargen/gear | list chargen/cyberware"
+                f"Unknown category '{category}'. Use |wlist chargen|n to see available categories."
             )
             return
 
-        catalog = _get_chargen_catalog(category)
+        catalog = _get_chargen_catalog(main_cat, subcategory)
         if not catalog:
-            cat_label = category or "items"
-            self.caller.msg(f"No {cat_label} available in the chargen catalog.")
+            label = f"{subcategory or main_cat}" if subcategory else main_cat
+            self.caller.msg(f"No {label} items available in the chargen catalog (1000 eb or under).")
             return
 
-        label = f"Chargen catalog - {category}" if category else "Chargen catalog"
-        self.caller.msg(f"{label} (1000 eb or under):")
-        for entry in catalog:
-            name = entry.get("name", "?")
-            value = entry.get("value", 0)
-            self.caller.msg(f"  {name} - {value} eb")
+        display_label = f"{subcategory} ({main_cat})" if subcategory else main_cat.title()
+        output = []
+        output.append(header(f"Chargen Catalog: {display_label} (1000 eb or under)"))
+
+        if main_cat == "weapons":
+            output.append(self._format_chargen_weapons(catalog))
+        elif main_cat == "armor":
+            output.append(self._format_chargen_armor(catalog))
+        elif main_cat == "gear":
+            gears = [e for e in catalog if e.get("_type") == "gear"]
+            cyberdecks = [e for e in catalog if e.get("_type") == "cyberdeck"]
+            if gears:
+                output.append(self._format_chargen_gear(gears))
+            if cyberdecks:
+                output.append(self._format_chargen_cyberdecks(cyberdecks))
+        elif main_cat == "cyberware":
+            output.append(self._format_chargen_cyberware(catalog))
+
+        output.append(footer())
+        self.caller.msg("\n".join(filter(None, output)))
+
+    def _list_chargen_menu(self, main_cats, subcats):
+        """Show chargen category menu with subcategories."""
+        output = []
+        output.append(header("Chargen Catalog (1000 eb or under)"))
+        output.append("The following equipment types can be used when looking at possible items for")
+        output.append("purchase during character generation. Note that these commands can only be")
+        output.append("used |rPRE-APPROVAL|n. If you are approved, you will not be able to access these")
+        output.append("commands. Make sure you have done this before completing character generation")
+        output.append("and submitting your character.")
+        output.append("|b-----------------------------------------------------------------------------|n")
+        output.append("Use |wlist chargen <category>|n or |wlist chargen/<category>|n to browse.\n")
+        for mc in main_cats:
+            subs = sorted(subcats.get(mc, []))
+            if subs:
+                sub_links = " | ".join(f"|w{s.lower().replace(' ', '_')}|n" for s in subs)
+                output.append(f"  |y{mc.title()}|n: {sub_links}")
+                output.append(f"      Or |w{mc}|n for all")
+            else:
+                output.append(f"  |y{mc.title()}|n: |w{mc}|n")
+        output.append("")
+        output.append("Examples: |wlist chargen gear|n  |wlist chargen medical|n  |wlist chargen shoulder_arms|n")
+        output.append(footer())
+        self.caller.msg("\n".join(output))
+
+    def _format_chargen_weapons(self, catalog):
+        """Format weapons like equipdb."""
+        out = [section_header("Weapons", width=78)]
+        for w in catalog:
+            name = w.get("name", "?")
+            damage = w.get("damage", "?")
+            rof = w.get("rof", "?")
+            hands = w.get("hands", "?")
+            value = w.get("value", 0)
+            cat = w.get("category", "?")
+            conceal = "Yes" if w.get("concealable") else "No"
+            weight = w.get("weight", "?")
+            out.append(f"|c{name:<28}|n |gDamage:|n {str(damage):<8} |gROF:|n {str(rof):<4} |gHands:|n {hands} |gValue:|n |y{value} eb|n")
+            out.append(f"  |gCategory:|n {str(cat):<14} |gConceal:|n {conceal} |gWeight:|n {weight}")
+        out.append(section_header("", width=78))
+        return "\n".join(out) + "\n"
+
+    def _format_chargen_armor(self, catalog):
+        """Format armor like equipdb."""
+        out = [section_header("Armor", width=78)]
+        for a in catalog:
+            name = a.get("name", "?")
+            sp = a.get("sp", "?")
+            ev = a.get("ev", "?")
+            value = a.get("value", 0)
+            locations = a.get("locations", "?")
+            out.append(f"|c{name:<28}|n |gSP:|n {str(sp):<3} |gEV:|n {str(ev):<3} |gValue:|n |y{value} eb|n |gLocations:|n {locations}")
+        out.append(section_header("", width=78))
+        return "\n".join(out) + "\n"
+
+    def _format_chargen_gear(self, catalog):
+        """Format gear like equipdb."""
+        out = [section_header("Gear", width=78)]
+        for g in catalog:
+            name = g.get("name", "?")
+            cat = g.get("category", "?")
+            value = g.get("value", 0)
+            desc = g.get("description", "—") or "—"
+            out.append(f"|c{name:<28}|n |gCategory:|n {str(cat):<14} |gValue:|n |y{value} eb|n")
+            out.append(wrap_ansi(desc, 74, left_padding=2))
+        out.append(section_header("", width=78))
+        return "\n".join(out) + "\n"
+
+    def _format_chargen_cyberdecks(self, catalog):
+        """Format cyberdecks like equipdb."""
+        out = [section_header("Cyberdecks", width=78)]
+        for d in catalog:
+            name = d.get("name", "?")
+            hw = d.get("hardware_slots", 0)
+            prog = d.get("program_slots", 0)
+            any_slots = d.get("any_slots", 0)
+            value = d.get("value", 0)
+            out.append(f"|c{name:<28}|n    |gHW:|n {hw} |gProg:|n {prog} |gAny:|n {any_slots} |gValue:|n |y{value} eb|n")
+        out.append(section_header("", width=78))
+        return "\n".join(out) + "\n"
+
+    def _format_chargen_cyberware(self, catalog):
+        """Format cyberware like equipdb (type, slots, humanity, value)."""
+        out = [section_header("Cyberware", width=78)]
+        for e in catalog:
+            if "_cyberware" in e:
+                cw = e["_cyberware"]
+                name = cw.name
+                ctype = getattr(cw, "type", "?")
+                slots = getattr(cw, "slots", 0)
+                hl = getattr(cw, "humanity_loss", 0)
+                value = cw.cost
+            else:
+                name = e.get("name", "?")
+                ctype = e.get("type", "?")
+                slots = e.get("slots", 0)
+                hl = e.get("humanity_loss", 0)
+                value = e.get("value", e.get("cost", 0))
+            out.append(f"|c{name:<28}|n |gType:|n {str(ctype):<20} |gSlots:|n {slots} |gHL:|n {hl} |gValue:|n |y{value} eb|n")
+        out.append(section_header("", width=78))
+        return "\n".join(out) + "\n"
 
 class CleanExitEvMenu(EvMenu):
     def close_menu(self):
