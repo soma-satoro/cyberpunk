@@ -1,0 +1,4 @@
+evennia.db3
+server/logs/http_requests.log
+server/logs/portal.log
+server/logs/server.log
