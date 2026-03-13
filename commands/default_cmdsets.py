@@ -77,6 +77,7 @@ from .commonmux.CmdPage import CmdPage
 from .dice_commands import CmdDice
 from .npc_commands import CmdNpc
 from .elflines_commands import CmdElo, CmdElfline, CmdEloSetup
+from .help_commands import CmdHelpSearch
 
 from commands.bbs.bbs_admin_commands import CmdResetBBS
 
@@ -104,7 +105,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         Populates the cmdset
         """
         super().at_cmdset_creation()
-        
+        self.add(CmdHelpSearch())
         self.add(CmdSetLegacyComms())
         self.add(CmdSheet())
         self.add(CmdSelfStat())

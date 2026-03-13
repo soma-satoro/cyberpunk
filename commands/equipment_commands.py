@@ -1,5 +1,7 @@
 from evennia import Command
 from evennia.commands.default.muxcommand import MuxCommand
+from evennia.utils.utils import crop
+from django.db import models
 from django.utils import timezone
 from datetime import timedelta
 from world.inventory.models import Weapon, Armor, Gear, Vehicle as VehicleModel, Ammunition, Cyberdeck, Inventory, WeaponAttachment
@@ -8,6 +10,7 @@ from world.equipment_data import populate_weapons, populate_armor, populate_gear
 from world.cyberpunk_sheets.models import CharacterSheet
 from world.utils.ansi_utils import wrap_ansi
 from world.utils.formatting import header, footer, divider, section_header
+from .list_commands import _find_item_info
 from world.cyberware.utils import populate_cyberware
 from evennia.utils.ansi import ANSIString
 from evennia.utils import evtable
@@ -387,6 +390,27 @@ class CmdPopulateCyberware(Command):
         except Exception as e:
             self.caller.msg(f"An error occurred while populating cyberware: {str(e)}")
 
+def _match_subcategory(user_input, valid_subcategories):
+    """
+    Match user input to a valid subcategory. Supports:
+    - Exact: heavy_weapons, heavy weapons
+    - First word: heavy -> heavy_weapons
+    """
+    user_norm = (user_input or "").lower().replace(" ", "_").strip()
+    if not user_norm:
+        return None
+    for sub in valid_subcategories:
+        sub_norm = (sub or "").lower().replace(" ", "_")
+        if sub_norm == user_norm:
+            return sub
+        if sub_norm.startswith(user_norm + "_"):
+            return sub
+        first_word = sub_norm.split("_")[0]
+        if first_word == user_norm:
+            return sub
+    return None
+
+
 def _get_equipdb_subcategories():
     """Return dict of main_category -> sorted list of subcategories from DB."""
     result = {
@@ -395,6 +419,7 @@ def _get_equipdb_subcategories():
         "gear": [],
         "ammo": [],
         "cyberdecks": [],
+        "cyberware": [],
         "vehicles": [],
         "attachments": [],
     }
@@ -418,10 +443,14 @@ def _get_equipdb_subcategories():
     for cat in VehicleModel.objects.values_list("category", flat=True).distinct():
         if cat:
             result["vehicles"].append(cat)
+    for cw_type in Cyberware.objects.values_list("type", flat=True).distinct():
+        if cw_type:
+            result["cyberware"].append(cw_type)
     result["weapons"] = sorted(set(result["weapons"]))
     result["armor"] = sorted(set(result["armor"]))
     result["ammo"] = sorted(set(result["ammo"]))
     result["vehicles"] = sorted(set(result["vehicles"]))
+    result["cyberware"] = sorted(set(result["cyberware"]))
     return result
 
 
@@ -436,9 +465,12 @@ class CmdViewEquipment(MuxCommand):
       equipdb gear [Electronics|Tools|Medical|Drugs|Clothing|...]
       equipdb vehicles [land|sea|air]
       equipdb medical            - Gear in Medical category (subcategory shorthand)
+      equipdb/search <string>    - Search all equipment by name, category, or description
+      equipdb/info <item>       - Detailed info on a specific item (like +lookup/info)
 
-    Types: weapons, armor, gear, ammo, cyberdecks, vehicles, attachments
+    Types: weapons, armor, gear, ammo, cyberdecks, cyberware, vehicles, attachments
     Use |wequipdb|n alone to see available categories and subcategories.
+    Subcategories with underscores (e.g. heavy_weapons) accept spaces or first word: heavy weapons, heavy
     """
 
     key = "equipdb"
@@ -447,8 +479,22 @@ class CmdViewEquipment(MuxCommand):
     help_category = "Inventory"
 
     def func(self):
-        valid_types = ['weapons', 'armor', 'gear', 'ammo', 'cyberdecks', 'vehicles', 'attachments']
+        valid_types = ['weapons', 'armor', 'gear', 'cyberware', 'ammo', 'cyberdecks', 'vehicles', 'attachments']
         subcats = _get_equipdb_subcategories()
+
+        # equipdb/search <string> - search across all equipment
+        if "search" in (self.switches or []):
+            search_str = (self.args or "").strip()
+            if not search_str:
+                self.caller.msg("Usage: equipdb/search <string>")
+                return
+            self._search_equipment(search_str)
+            return
+
+        # equipdb/info <item> - detailed info on a specific item (like +lookup/info)
+        if "info" in (self.switches or []):
+            self._info_equipment()
+            return
 
         # Parse args: support "equipdb", "equipdb weapons", "equipdb weapons handgun",
         # "equipdb gear medical", "equipdb medical" (subcategory shorthand)
@@ -477,6 +523,12 @@ class CmdViewEquipment(MuxCommand):
             self.caller.msg(f"Invalid type. Use one of: {', '.join(valid_types)}.")
             return
 
+        # Resolve flexible subcategory: "heavy weapons", "heavy" -> "heavy_weapons"
+        if subcategory and equip_type in subcats:
+            resolved = _match_subcategory(subcategory, subcats[equip_type])
+            if resolved is not None:
+                subcategory = resolved
+
         output = []
         if not equip_type:
             self._display_menu(valid_types, subcats)
@@ -488,15 +540,191 @@ class CmdViewEquipment(MuxCommand):
 
         self.caller.msg("\n".join(filter(None, output)))
 
+    def _search_equipment(self, search_str):
+        """Search for equipment matching string across all types."""
+        q = search_str.lower()
+        output = []
+        output.append(header(f"Equipment Search: '{search_str}'"))
+
+        # Weapons
+        weapons = list(Weapon.objects.filter(
+            models.Q(name__icontains=q) | models.Q(category__icontains=q) |
+            models.Q(description__icontains=q)
+        ).order_by('category', 'name')[:50])
+        if weapons:
+            output.append(section_header("Weapons", width=78))
+            for w in weapons:
+                nm = crop(w.name, width=28, suffix="...")
+                output.append(f"|c{nm:<28}|n |gDamage:|n {w.damage:<8} |gROF:|n {w.rof:<4} |gValue:|n |y{w.value} eb|n")
+            output.append("")
+
+        # Armor
+        armors = list(Armor.objects.filter(
+            models.Q(name__icontains=q) | models.Q(locations__icontains=q) |
+            models.Q(description__icontains=q)
+        ).order_by('name')[:50])
+        if armors:
+            output.append(section_header("Armor", width=78))
+            for a in armors:
+                nm = crop(a.name, width=28, suffix="...")
+                output.append(f"|c{nm:<28}|n |gSP:|n {a.sp} |gEV:|n {a.ev} |gValue:|n |y{a.value} eb|n")
+            output.append("")
+
+        # Gear
+        gears = list(Gear.objects.filter(
+            models.Q(name__icontains=q) | models.Q(category__icontains=q) |
+            models.Q(description__icontains=q)
+        ).order_by('category', 'name')[:50])
+        if gears:
+            output.append(section_header("Gear", width=78))
+            for g in gears:
+                nm = crop(g.name, width=28, suffix="...")
+                output.append(f"|c{nm:<28}|n |gCategory:|n {g.category:<14} |gValue:|n |y{g.value} eb|n")
+            output.append("")
+
+        # Cyberware
+        cyberware = list(Cyberware.objects.filter(
+            models.Q(name__icontains=q) | models.Q(type__icontains=q) |
+            models.Q(description__icontains=q)
+        ).order_by('type', 'name')[:50])
+        if cyberware:
+            output.append(section_header("Cyberware", width=78))
+            for cw in cyberware:
+                nm = crop(cw.name, width=28, suffix="...")
+                output.append(f"|c{nm:<28}|n |gType:|n {str(cw.type):<16} |gValue:|n |y{cw.cost} eb|n")
+            output.append("")
+
+        # Ammunition
+        ammos = list(Ammunition.objects.filter(
+            models.Q(name__icontains=q) | models.Q(ammo_type__icontains=q) |
+            models.Q(description__icontains=q)
+        ).order_by('ammo_type', 'name')[:50])
+        if ammos:
+            seen = set()
+            output.append(section_header("Ammunition", width=78))
+            for a in ammos:
+                key = (a.name.lower(), (a.ammo_type or "").lower().replace("_", " "))
+                if key in seen:
+                    continue
+                seen.add(key)
+                nm = crop(a.name, width=28, suffix="...")
+                output.append(f"|c{nm:<28}|n |gType:|n {a.ammo_type:<16} |gCost:|n |y{a.cost} eb|n")
+            output.append("")
+
+        # Cyberdecks
+        decks = list(Cyberdeck.objects.filter(
+            models.Q(name__icontains=q) | models.Q(description__icontains=q)
+        ).order_by('name')[:50])
+        if decks:
+            output.append(section_header("Cyberdecks", width=78))
+            for d in decks:
+                nm = crop(d.name, width=28, suffix="...")
+                output.append(f"|c{nm:<28}|n |gHW:|n {d.hardware_slots} |gProg:|n {d.program_slots} |gValue:|n |y{d.value} eb|n")
+            output.append("")
+
+        # Vehicles
+        vehicles = list(VehicleModel.objects.filter(
+            models.Q(name__icontains=q) | models.Q(category__icontains=q) |
+            models.Q(description__icontains=q)
+        ).order_by('category', 'name')[:50])
+        if vehicles:
+            output.append(section_header("Vehicles", width=78))
+            for v in vehicles:
+                nm = crop(v.name, width=28, suffix="...")
+                output.append(f"|c{nm:<28}|n |gCategory:|n {v.category:<8} |gValue:|n |y{v.value} eb|n")
+            output.append("")
+
+        # Attachments
+        atts = list(WeaponAttachment.objects.filter(
+            models.Q(name__icontains=q) | models.Q(description__icontains=q) |
+            models.Q(effect_description__icontains=q)
+        ).order_by('name')[:50])
+        if atts:
+            output.append(section_header("Weapon Attachments", width=78))
+            for a in atts:
+                nm = crop(a.name, width=28, suffix="...")
+                output.append(f"|c{nm:<28}|n |gValue:|n |y{a.value} eb|n")
+            output.append("")
+
+        if len(output) <= 1:
+            output.append("No equipment found matching that search.")
+        output.append(footer())
+        self.caller.msg("\n".join(output))
+
+    def _info_equipment(self):
+        """Show detailed info on a specific item (like +lookup/info)."""
+        if not self.args or not self.args.strip():
+            self.caller.msg("Usage: equipdb/info <item name>")
+            return
+
+        source, data = _find_item_info(self.args)
+        if not data:
+            self.caller.msg(f"Item '{self.args.strip()}' not found. Try |wequipdb/search <name>|n to find items.")
+            return
+
+        out = [section_header(f"{source}: {data.get('name', '')}", width=78)]
+
+        if source == "Weapon":
+            out.append(f"  |gDamage:|n {data.get('damage', '—')}  |gROF:|n {data.get('rof', '—')}  |gHands:|n {data.get('hands', '—')}")
+            out.append(f"  |gCategory:|n {data.get('category', '—')}  |gValue:|n {data.get('value', 0)} eb  |gConceal:|n {'Yes' if data.get('concealable') else 'No'}")
+            if data.get("description"):
+                out.append(f"  {wrap_ansi(data['description'], 74)}")
+        elif source == "Armor":
+            out.append(f"  |gSP:|n {data.get('sp', 0)}  |gEV:|n {data.get('ev', 0)}  |gLocations:|n {data.get('locations', '—')}")
+            out.append(f"  |gValue:|n {data.get('value', 0)} eb")
+            if data.get("description"):
+                out.append(f"  {wrap_ansi(data['description'], 74)}")
+        elif source == "Gear":
+            out.append(f"  |gCategory:|n {data.get('category', '—')}  |gValue:|n {data.get('value', 0)} eb")
+            if data.get("description"):
+                out.append(f"  {wrap_ansi(data['description'], 74)}")
+        elif source == "Vehicle":
+            out.append(f"  |gCategory:|n {data.get('category', '—')}  |gSDP:|n {data.get('sdp', 0)}  |gSeats:|n {data.get('seats', 0)}")
+            out.append(f"  |gSpeed:|n {data.get('speed_narrative', '—')}  |gValue:|n {data.get('value', 0)} eb")
+            if data.get("description"):
+                out.append(f"  {wrap_ansi(data['description'], 74)}")
+        elif source == "Ammunition":
+            out.append(f"  |gType:|n {data.get('ammo_type', '—')}  |gCost:|n {data.get('cost', 0)} eb")
+            if data.get("description"):
+                out.append(f"  {wrap_ansi(data['description'], 74)}")
+        elif source == "Cyberdeck":
+            out.append(f"  |gHW:|n {data.get('hardware_slots', 0)}  |gProgram:|n {data.get('program_slots', 0)}  |gAny:|n {data.get('any_slots', 0)}  |gValue:|n {data.get('value', 0)} eb")
+            if data.get("description"):
+                out.append(f"  {wrap_ansi(data['description'], 74)}")
+        elif source == "Weapon Attachment":
+            out.append(f"  |gValue:|n {data.get('value', 0)} eb  DV{data.get('install_dv', 17)} {data.get('install_skill', 'Weaponstech')}")
+            out.append(f"  {wrap_ansi(data.get('effect_description') or data.get('description', '—'), 74)}")
+        elif source == "Cyberware":
+            out.append(f"  |gType:|n {data.get('type', '—')}  |gSlots:|n {data.get('slots', 0)}  |gHL:|n {data.get('humanity_loss', 0)}  |gCost:|n {data.get('cost', 0)} eb")
+            if data.get("description"):
+                out.append(f"  {wrap_ansi(data['description'], 74)}")
+        elif source == "Netrunning Program":
+            out.append(f"  |gType:|n {data.get('type', '—')}  |gATK/DFV/Rez:|n {data.get('atk', 0)}/{data.get('dfv', 0)}/{data.get('rez', 0)}  |gCost:|n {data.get('cost', 0)} eb")
+            out.append(f"  |gEffect:|n {wrap_ansi(data.get('effect', '—'), 74)}")
+            if data.get("icon"):
+                out.append(f"  |gIcon:|n {data['icon']}")
+        elif source == "Netrunning Hardware":
+            out.append(f"  |gSlots:|n {data.get('slots', 0)}  |gCost:|n {data.get('cost', 0)} eb")
+            if data.get("description"):
+                out.append(f"  {wrap_ansi(data['description'], 74)}")
+        elif source == "Black ICE":
+            out.append(f"  |gATK/DFV/Rez:|n {data.get('atk', 0)}/{data.get('dfv', 0)}/{data.get('rez', 0)}  |gCost:|n {data.get('cost', 0)} eb")
+            out.append(f"  |gEffect:|n {wrap_ansi(data.get('effect', '—'), 74)}")
+        elif source == "Quickhack":
+            out.append(f"  |gDV:|n {data.get('dv', 0)}  |gTier:|n {data.get('tier', '—')}")
+            out.append(f"  |gEffect:|n {wrap_ansi(data.get('effect', '—'), 74)}")
+
+        out.append(divider("", width=78))
+        self.caller.msg("\n".join(out))
+
     def _resolve_subcategory(self, subcat, subcats):
         """If subcat is a subcategory (not main type), return (main_type, subcategory)."""
-        subcat_norm = subcat.replace(" ", "_")
         for main_cat, subs in subcats.items():
             if not subs:
                 continue
-            for s in subs:
-                if s.lower().replace(" ", "_") == subcat_norm:
-                    return (main_cat, s)
+            resolved = _match_subcategory(subcat, subs)
+            if resolved is not None:
+                return (main_cat, resolved)
         return None
 
     def _display_menu(self, valid_types, subcats):
@@ -515,7 +743,7 @@ class CmdViewEquipment(MuxCommand):
             else:
                 output.append(f"  |y{t.title()}|n: |w{t}|n")
         output.append("")
-        output.append("Examples: |wequipdb gear|n  |wequipdb medical|n  |wequipdb weapons handgun|n")
+        output.append("Examples: |wequipdb gear|n  |wequipdb cyberware|n  |wequipdb/search pistol|n  |wequipdb/info Medium Pistol|n")
         output.append(footer())
         self.caller.msg("\n".join(output))
 
@@ -528,7 +756,8 @@ class CmdViewEquipment(MuxCommand):
             return section_header("Weapons", width=78) + "\nNo weapons found.\n"
         out = [section_header("Weapons", width=78)]
         for w in weapons:
-            out.append(f"|c{w.name:<28}|n |gDamage:|n {w.damage:<8} |gROF:|n {w.rof:<4} |gHands:|n {w.hands} |gValue:|n |y{w.value} eb|n")
+            nm = crop(w.name, width=28, suffix="...")
+            out.append(f"|c{nm:<28}|n |gDamage:|n {w.damage:<8} |gROF:|n {w.rof:<4} |gHands:|n {w.hands} |gValue:|n |y{w.value} eb|n")
             out.append(f"  |gCategory:|n {w.category:<14} |gConceal:|n {'Yes' if w.concealable else 'No'} |gWeight:|n {w.weight}")
         out.append(divider("", width=78))
         return "\n".join(out) + "\n"
@@ -542,7 +771,8 @@ class CmdViewEquipment(MuxCommand):
             return section_header("Armor", width=78) + "\nNo armor found.\n"
         out = [section_header("Armor", width=78)]
         for a in armors:
-            out.append(f"|c{a.name:<28}|n |gSP:|n {a.sp:<3} |gEV:|n {a.ev:<3} |gValue:|n |y{a.value} eb|n |gLocations:|n {a.locations}")
+            nm = crop(a.name, width=28, suffix="...")
+            out.append(f"|c{nm:<28}|n |gSP:|n {a.sp:<3} |gEV:|n {a.ev:<3} |gValue:|n |y{a.value} eb|n |gLocations:|n {a.locations}")
         out.append(divider("", width=78))
         return "\n".join(out) + "\n"
 
@@ -555,7 +785,8 @@ class CmdViewEquipment(MuxCommand):
             return section_header("Gear", width=78) + "\nNo gear found.\n"
         out = [section_header("Gear", width=78)]
         for g in gears:
-            out.append(f"|c{g.name:<28}|n |gCategory:|n {g.category:<14} |gValue:|n |y{g.value} eb|n")
+            nm = crop(g.name, width=28, suffix="...")
+            out.append(f"|c{nm:<28}|n |gCategory:|n {g.category:<14} |gValue:|n |y{g.value} eb|n")
             desc = wrap_ansi(g.description, 74) if g.description else "—"
             out.append(f"  {desc}")
         out.append(divider("", width=78))
@@ -571,11 +802,32 @@ class CmdViewEquipment(MuxCommand):
         out = [section_header("Ammunition", width=78)]
         seen = set()
         for a in ammos:
-            key = (a.name.lower(), a.ammo_type.lower())
+            # Normalize ammo_type for dedupe: "HIGH_PRECISION" and "High Precision" -> same key
+            ammo_key = (a.ammo_type or "").lower().replace("_", " ")
+            key = (a.name.lower(), ammo_key)
             if key in seen:
                 continue
             seen.add(key)
-            out.append(f"|c{a.name:<28}|n |gType:|n {a.ammo_type:<16} |gCost:|n |y{a.cost} eb|n")
+            nm = crop(a.name, width=28, suffix="...")
+            out.append(f"|c{nm:<28}|n |gType:|n {a.ammo_type:<16} |gCost:|n |y{a.cost} eb|n")
+        out.append(divider("", width=78))
+        return "\n".join(out) + "\n"
+
+    def display_cyberware(self, subcategory=None):
+        qs = Cyberware.objects.all().order_by('type', 'name')
+        if subcategory:
+            qs = qs.filter(type__iexact=subcategory)
+        cyberware = list(qs)
+        if not cyberware:
+            return section_header("Cyberware", width=78) + "\nNo cyberware found.\n"
+        out = [section_header("Cyberware", width=78)]
+        for cw in cyberware:
+            ctype = getattr(cw, "type", "?")
+            slots = getattr(cw, "slots", 0)
+            hl = getattr(cw, "humanity_loss", 0)
+            value = cw.cost
+            nm = crop(cw.name, width=28, suffix="...")
+            out.append(f"|c{nm:<28}|n |gType:|n {str(ctype):<20} |gSlots:|n {slots} |gHL:|n {hl} |gValue:|n |y{value} eb|n")
         out.append(divider("", width=78))
         return "\n".join(out) + "\n"
 
@@ -585,7 +837,8 @@ class CmdViewEquipment(MuxCommand):
             return section_header("Cyberdecks", width=78) + "\nNo cyberdecks found.\n"
         out = [section_header("Cyberdecks", width=78)]
         for d in decks:
-            out.append(f"|c{d.name:<28}|n    |gHW:|n {d.hardware_slots} |gProg:|n {d.program_slots} |gAny:|n {d.any_slots} |gValue:|n |y{d.value} eb|n")
+            nm = crop(d.name, width=28, suffix="...")
+            out.append(f"|c{nm:<28}|n    |gHW:|n {d.hardware_slots} |gProg:|n {d.program_slots} |gAny:|n {d.any_slots} |gValue:|n |y{d.value} eb|n")
         out.append(divider("", width=78))
         return "\n".join(out) + "\n"
 
@@ -598,7 +851,8 @@ class CmdViewEquipment(MuxCommand):
             return section_header("Vehicles", width=78) + "\nNo vehicles found.\n"
         out = [section_header("Vehicles", width=78)]
         for v in vehicles:
-            out.append(f"|c{v.name:<28}|n |gCategory:|n {v.category:<8} |gSDP:|n {v.sdp} |gSeats:|n {v.seats} |gValue:|n |y{v.value} eb|n")
+            nm = crop(v.name, width=28, suffix="...")
+            out.append(f"|c{nm:<28}|n |gCategory:|n {v.category:<8} |gSDP:|n {v.sdp} |gSeats:|n {v.seats} |gValue:|n |y{v.value} eb|n")
         out.append(divider("", width=78))
         return "\n".join(out) + "\n"
 
@@ -608,7 +862,8 @@ class CmdViewEquipment(MuxCommand):
             return section_header("Weapon Attachments", width=78) + "\nNo attachments found.\n"
         out = [section_header("Weapon Attachments", width=78)]
         for a in atts:
-            out.append(f"|c{a.name:<28}|n |gValue:|n |y{a.value} eb|n DV{a.install_dv} {a.install_skill}")
+            nm = crop(a.name, width=28, suffix="...")
+            out.append(f"|c{nm:<28}|n |gValue:|n |y{a.value} eb|n DV{a.install_dv} {a.install_skill}")
             out.append(f"  {a.effect_description or a.description or '—'}")
         out.append(divider("", width=78))
         return "\n".join(out) + "\n"

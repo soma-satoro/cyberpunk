@@ -1,6 +1,7 @@
 import random
 from evennia import Command
 from evennia.utils.search import search_object
+from evennia.utils.utils import crop
 from evennia.utils import gametime
 from world.cyberpunk_sheets.services import CharacterMoneyService
 from world.inventory.models import Weapon, Armor, Gear, Vehicle as VehicleModel, CyberwareInstance, Inventory
@@ -756,7 +757,8 @@ class CmdListItems(Command):
             cat = w.get("category", "?")
             conceal = "Yes" if w.get("concealable") else "No"
             weight = w.get("weight", "?")
-            out.append(f"|c{name:<28}|n |gDamage:|n {str(damage):<8} |gROF:|n {str(rof):<4} |gHands:|n {hands} |gValue:|n |y{value} eb|n")
+            nm = crop(name, width=28, suffix="...")
+            out.append(f"|c{nm:<28}|n |gDamage:|n {str(damage):<8} |gROF:|n {str(rof):<4} |gHands:|n {hands} |gValue:|n |y{value} eb|n")
             out.append(f"  |gCategory:|n {str(cat):<14} |gConceal:|n {conceal} |gWeight:|n {weight}")
         out.append(section_header("", width=78))
         return "\n".join(out) + "\n"
@@ -770,7 +772,8 @@ class CmdListItems(Command):
             ev = a.get("ev", "?")
             value = a.get("value", 0)
             locations = a.get("locations", "?")
-            out.append(f"|c{name:<28}|n |gSP:|n {str(sp):<3} |gEV:|n {str(ev):<3} |gValue:|n |y{value} eb|n |gLocations:|n {locations}")
+            nm = crop(name, width=28, suffix="...")
+            out.append(f"|c{nm:<28}|n |gSP:|n {str(sp):<3} |gEV:|n {str(ev):<3} |gValue:|n |y{value} eb|n |gLocations:|n {locations}")
         out.append(section_header("", width=78))
         return "\n".join(out) + "\n"
 
@@ -782,7 +785,8 @@ class CmdListItems(Command):
             cat = g.get("category", "?")
             value = g.get("value", 0)
             desc = g.get("description", "—") or "—"
-            out.append(f"|c{name:<28}|n |gCategory:|n {str(cat):<14} |gValue:|n |y{value} eb|n")
+            nm = crop(name, width=28, suffix="...")
+            out.append(f"|c{nm:<28}|n |gCategory:|n {str(cat):<14} |gValue:|n |y{value} eb|n")
             out.append(wrap_ansi(desc, 74, left_padding=2))
         out.append(section_header("", width=78))
         return "\n".join(out) + "\n"
@@ -796,7 +800,8 @@ class CmdListItems(Command):
             prog = d.get("program_slots", 0)
             any_slots = d.get("any_slots", 0)
             value = d.get("value", 0)
-            out.append(f"|c{name:<28}|n    |gHW:|n {hw} |gProg:|n {prog} |gAny:|n {any_slots} |gValue:|n |y{value} eb|n")
+            nm = crop(name, width=28, suffix="...")
+            out.append(f"|c{nm:<28}|n    |gHW:|n {hw} |gProg:|n {prog} |gAny:|n {any_slots} |gValue:|n |y{value} eb|n")
         out.append(section_header("", width=78))
         return "\n".join(out) + "\n"
 
@@ -817,7 +822,8 @@ class CmdListItems(Command):
                 slots = e.get("slots", 0)
                 hl = e.get("humanity_loss", 0)
                 value = e.get("value", e.get("cost", 0))
-            out.append(f"|c{name:<28}|n |gType:|n {str(ctype):<20} |gSlots:|n {slots} |gHL:|n {hl} |gValue:|n |y{value} eb|n")
+            nm = crop(str(name), width=28, suffix="...")
+            out.append(f"|c{nm:<28}|n |gType:|n {str(ctype):<20} |gSlots:|n {slots} |gHL:|n {hl} |gValue:|n |y{value} eb|n")
         out.append(section_header("", width=78))
         return "\n".join(out) + "\n"
 
