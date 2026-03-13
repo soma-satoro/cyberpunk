@@ -168,9 +168,9 @@ class CmdRoom(MuxCommand):
       +room/tag here=bar,nightlife
       +room/tags here
 
-    'District' is the smaller area, 'Area' is the larger area. If you are in the room
-    East Kabuki, and you set the hierarchy to Kabuki,Watson, it will display as
-    East Kabuki - Kabuki - Watson.
+    'District' is smaller; 'Area' is larger. If you are in the room East Kabuki, 
+    and you set the hierarchy to Kabuki,Watson, it will display as
+    |wEast Kabuki - Kabuki - Watson|n.
     """
 
     key = "+room"
