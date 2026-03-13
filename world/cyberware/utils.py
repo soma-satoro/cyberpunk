@@ -3,34 +3,27 @@ from world.cyberware.models import Cyberware
 from .cyberware_data import CYBERWARE_DATA_LIST
 
 def populate_cyberware():
+    existing_names = set(Cyberware.objects.values_list("name", flat=True))
+    created = 0
     for cw_data in CYBERWARE_DATA_LIST:
+        if cw_data["name"] in existing_names:
+            continue
         defaults = {
-            'type': cw_data['type'],
-            'slots': cw_data['slots'],
-            'humanity_loss': cw_data['humanity_loss'],
-            'cost': cw_data['cost'],
-            'is_weapon': cw_data.get('is_weapon', False),
-            'description': cw_data['description']
+            "type": cw_data["type"],
+            "slots": cw_data["slots"],
+            "humanity_loss": cw_data["humanity_loss"],
+            "cost": cw_data["cost"],
+            "is_weapon": cw_data.get("is_weapon", False),
+            "description": cw_data["description"],
         }
-        
-        # Only add weapon-specific fields if it's a weapon
-        if defaults['is_weapon']:
-            defaults['rate_of_fire'] = cw_data.get('rate_of_fire', 1)
-            defaults['damage_dice'] = cw_data.get('damage_dice', 0)
-            defaults['damage_die_type'] = cw_data.get('damage_die_type', 6)
-        
-        cyberware, created = Cyberware.objects.get_or_create(
-            name=cw_data['name'],
-            defaults=defaults
-        )
-        
-        if not created:
-            # Update existing cyberware
-            for key, value in defaults.items():
-                setattr(cyberware, key, value)
-            cyberware.save()
-
-    print(f"Populated {len(CYBERWARE_DATA_LIST)} cyberware items.")
+        if defaults["is_weapon"]:
+            defaults["rate_of_fire"] = cw_data.get("rate_of_fire", 1)
+            defaults["damage_dice"] = cw_data.get("damage_dice", 0)
+            defaults["damage_die_type"] = cw_data.get("damage_die_type", 6)
+        Cyberware.objects.get_or_create(name=cw_data["name"], defaults=defaults)
+        created += 1
+        existing_names.add(cw_data["name"])
+    print(f"Populated {len(CYBERWARE_DATA_LIST)} cyberware items ({created} new).")
 
 def check_cyberware_requirements(character, cyberware):
     print("DEBUG: This is the modified check_cyberware_requirements function")

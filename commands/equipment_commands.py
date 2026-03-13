@@ -401,8 +401,8 @@ def _get_equipdb_subcategories():
     for cat in Weapon.objects.values_list("category", flat=True).distinct():
         if cat:
             result["weapons"].append(cat)
-    for a in Armor.objects.only("locations"):
-        for loc in (a.locations or "").split(","):
+    for loc_str in Armor.objects.values_list("locations", flat=True):
+        for loc in (loc_str or "").split(","):
             loc = loc.strip()
             if loc and loc not in result["armor"]:
                 result["armor"].append(loc)
@@ -452,8 +452,9 @@ class CmdViewEquipment(MuxCommand):
 
         # Parse args: support "equipdb", "equipdb weapons", "equipdb weapons handgun",
         # "equipdb gear medical", "equipdb medical" (subcategory shorthand)
-        # Also support "equipdb/weapons" or "equipdb/gear medical" via MuxCommand switch
-        switch_part = (self.switch or "").strip()
+        # Also support "equipdb/weapons" or "equipdb/gear medical" via MuxCommand switches
+        switches = self.switches or []
+        switch_part = (switches[0] if switches else "").strip()
         args_part = (self.args or "").strip()
         raw = (switch_part + " " + args_part).strip() if switch_part else args_part
         raw = raw.lower()
@@ -568,7 +569,12 @@ class CmdViewEquipment(MuxCommand):
         if not ammos:
             return section_header("Ammunition", width=78) + "\nNo ammunition found.\n"
         out = [section_header("Ammunition", width=78)]
+        seen = set()
         for a in ammos:
+            key = (a.name.lower(), a.ammo_type.lower())
+            if key in seen:
+                continue
+            seen.add(key)
             out.append(f"|c{a.name:<28}|n |gType:|n {a.ammo_type:<16} |gCost:|n |y{a.cost} eb|n")
         out.append(divider("", width=78))
         return "\n".join(out) + "\n"

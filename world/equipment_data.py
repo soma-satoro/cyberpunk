@@ -277,6 +277,66 @@ ammunition = [
         "cost": 10,
         "quantity": 50
     },
+    {
+        "name": "Basic Rifle Ammo",
+        "ammo_type": "BASIC",
+        "weapon_type": "Rifle",
+        "damage_modifier": 0,
+        "armor_piercing": 0,
+        "description": "Standard ammunition for rifles.",
+        "cost": 10,
+        "quantity": 50
+    },
+    {
+        "name": "Basic Shotgun Ammo",
+        "ammo_type": "BASIC",
+        "weapon_type": "Shotgun",
+        "damage_modifier": 0,
+        "armor_piercing": 0,
+        "description": "Standard ammunition for shotguns.",
+        "cost": 10,
+        "quantity": 50
+    },
+    {
+        "name": "Basic SMG Ammo",
+        "ammo_type": "BASIC",
+        "weapon_type": "SMG",
+        "damage_modifier": 0,
+        "armor_piercing": 0,
+        "description": "Standard ammunition for SMGs.",
+        "cost": 10,
+        "quantity": 50
+    },
+    {
+        "name": "Rocket Ammo",
+        "ammo_type": "EXPLOSIVE",
+        "weapon_type": "Heavy Weapons",
+        "damage_modifier": 0,
+        "armor_piercing": 0,
+        "description": "Standard ammunition for rocket launchers.",
+        "cost": 50,
+        "quantity": 10
+    },
+    {
+        "name": "Flamethrower Ammo",
+        "ammo_type": "FLAMETHROWER",
+        "weapon_type": "Heavy Weapons",
+        "damage_modifier": 0,
+        "armor_piercing": 0,
+        "description": "Standard ammunition for flamethrowers.",
+        "cost": 50,
+        "quantity": 10
+    },
+    {
+        "name": "Basic LMG Ammo",
+        "ammo_type": "BASIC",
+        "weapon_type": "Heavy Weapons",
+        "damage_modifier": 0,
+        "armor_piercing": 0,
+        "description": "Standard ammunition for light machine guns.",
+        "cost": 20,
+        "quantity": 100
+    },
     # Solo of Fortune 2045 (Mr. A-Maaaaaaze) ammunition types
     {"name": "Burrowing Ammo", "ammo_type": "BURROWING", "weapon_type": "Generic", "damage_modifier": 0, "armor_piercing": 0, "description": "Rounds dig into target. Solo of Fortune 2045.", "cost": 100},
     {"name": "Explosive Ammo", "ammo_type": "EXPLOSIVE", "weapon_type": "Generic", "damage_modifier": 0, "armor_piercing": 0, "description": "Explosive rounds. Solo of Fortune 2045.", "cost": 100},
@@ -2582,28 +2642,91 @@ def initialize_ammunition():
     print(f"Initialized {len(ammunition)} ammunition types.")
 
 def populate_weapons():
+    existing_names = set(Weapon.objects.values_list("name", flat=True))
+    created = 0
+    allowed_keys = {
+        "damage", "rof", "hands", "concealable", "weight", "value",
+        "category", "clip", "description", "attachment_slots", "range_dvs",
+    }
     for weapon_data in weapons:
-        Weapon.objects.get_or_create(**weapon_data)
-    print(f"Populated {len(weapons)} weapons.")
+        if weapon_data.get("name") in existing_names:
+            continue
+        defaults = {k: v for k, v in weapon_data.items() if k in allowed_keys and k != "name"}
+        Weapon.objects.get_or_create(name=weapon_data["name"], defaults=defaults)
+        created += 1
+        existing_names.add(weapon_data["name"])
+    print(f"Populated {len(weapons)} weapons ({created} new).")
+
 
 def populate_armor():
+    existing_names = set(Armor.objects.values_list("name", flat=True))
+    created = 0
     for armor_data in armors:
-        Armor.objects.get_or_create(**armor_data)
-    print(f"Populated {len(armors)} armor pieces.")
+        if armor_data.get("name") in existing_names:
+            continue
+        Armor.objects.get_or_create(
+            name=armor_data["name"],
+            defaults={
+                "sp": armor_data.get("sp", 0),
+                "ev": armor_data.get("ev", 0),
+                "locations": armor_data.get("locations", ""),
+                "description": armor_data.get("description", ""),
+                "weight": armor_data.get("weight", 0),
+                "value": armor_data.get("value", 0),
+            },
+        )
+        created += 1
+        existing_names.add(armor_data["name"])
+    print(f"Populated {len(armors)} armor pieces ({created} new).")
+
 
 def populate_gear():
+    existing_names = set(Gear.objects.values_list("name", flat=True))
+    created = 0
     for gear_data in gears:
-        Gear.objects.get_or_create(**gear_data)
-    print(f"Populated {len(gears)} gear items.")
+        if gear_data.get("name") in existing_names:
+            continue
+        Gear.objects.get_or_create(
+            name=gear_data["name"],
+            defaults={
+                "category": gear_data.get("category", ""),
+                "description": gear_data.get("description", ""),
+                "weight": gear_data.get("weight", 0),
+                "value": gear_data.get("value", 0),
+            },
+        )
+        created += 1
+        existing_names.add(gear_data["name"])
+    print(f"Populated {len(gears)} gear items ({created} new).")
+
 
 def populate_cyberdecks():
+    existing_names = set(Cyberdeck.objects.values_list("name", flat=True))
+    created = 0
     for cyberdeck_data in cyberdecks:
-        Cyberdeck.objects.get_or_create(**cyberdeck_data)
-    print(f"Populated {len(cyberdecks)} cyberdecks.")
+        if cyberdeck_data.get("name") in existing_names:
+            continue
+        Cyberdeck.objects.get_or_create(
+            name=cyberdeck_data["name"],
+            defaults={
+                "description": cyberdeck_data.get("description", ""),
+                "hardware_slots": cyberdeck_data.get("hardware_slots", 0),
+                "program_slots": cyberdeck_data.get("program_slots", 0),
+                "any_slots": cyberdeck_data.get("any_slots", 0),
+                "value": cyberdeck_data.get("value", 0),
+            },
+        )
+        created += 1
+        existing_names.add(cyberdeck_data["name"])
+    print(f"Populated {len(cyberdecks)} cyberdecks ({created} new).")
 
 
 def populate_vehicles():
+    existing_names = set(Vehicle.objects.values_list("name", flat=True))
+    created = 0
     for vehicle_data in vehicles:
+        if vehicle_data.get("name") in existing_names:
+            continue
         Vehicle.objects.get_or_create(
             name=vehicle_data["name"],
             defaults={
@@ -2616,13 +2739,38 @@ def populate_vehicles():
                 "value": vehicle_data["value"],
             },
         )
-    print(f"Populated {len(vehicles)} vehicles.")
+        created += 1
+        existing_names.add(vehicle_data["name"])
+    print(f"Populated {len(vehicles)} vehicles ({created} new).")
 
 
 def populate_ammunition():
+    from world.inventory.models import AmmoType as InventoryAmmoType
+
+    existing = set(
+        Ammunition.objects.values_list("name", "ammo_type").order_by()
+    )
+    created = 0
     for ammo_data in ammunition:
-        Ammunition.objects.get_or_create(**ammo_data)
-    print(f"Populated {len(ammunition)} cyberdecks.")
+        ammo_type_val = getattr(InventoryAmmoType, ammo_data["ammo_type"], ammo_data["ammo_type"])
+        key = (ammo_data["name"], ammo_type_val)
+        if key in existing:
+            continue
+        Ammunition.objects.get_or_create(
+            name=ammo_data["name"],
+            ammo_type=ammo_type_val,
+            defaults={
+                "weapon_type": ammo_data.get("weapon_type", "Generic"),
+                "damage_modifier": ammo_data.get("damage_modifier", 0),
+                "armor_piercing": ammo_data.get("armor_piercing", 0),
+                "description": ammo_data.get("description", "Standard ammunition"),
+                "cost": ammo_data.get("cost", 10),
+                "quantity": ammo_data.get("quantity", 0),
+            },
+        )
+        created += 1
+        existing.add(key)
+    print(f"Populated {len(ammunition)} ammunition types ({created} new).")
 
 def populate_all_equipment():
     populate_weapons()
