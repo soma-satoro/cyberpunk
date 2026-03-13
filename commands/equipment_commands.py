@@ -544,145 +544,6 @@ class CmdViewEquipment(MuxCommand):
         """Search for equipment matching string across all types."""
         self.caller.msg("\n".join(format_search_equipment(search_str, chargen_only=False)))
 
-
-def format_search_equipment(search_str, chargen_only=False):
-    """Search equipment by name/category/description. Returns list of output lines.
-    chargen_only: if True, restrict to items value/cost <= 1000 eb."""
-    CHARGEN_MAX = 1000
-    q = search_str.lower()
-    output = []
-    title = f"Chargen Search: '{search_str}'" if chargen_only else f"Equipment Search: '{search_str}'"
-    output.append(header(title))
-
-    # Weapons
-    weapons_q = Weapon.objects.filter(
-        models.Q(name__icontains=q) | models.Q(category__icontains=q) |
-        models.Q(description__icontains=q)
-    )
-    if chargen_only:
-        weapons_q = weapons_q.filter(value__lte=CHARGEN_MAX)
-    weapons = list(weapons_q.order_by('category', 'name')[:50])
-    if weapons:
-        output.append(section_header("Weapons", width=78))
-        for w in weapons:
-            nm = crop(w.name, width=28, suffix="...")
-            output.append(f"|c{nm:<28}|n |gDamage:|n {w.damage:<8} |gROF:|n {w.rof:<4} |gValue:|n |y{w.value} eb|n")
-        output.append("")
-
-    # Armor
-    armors_q = Armor.objects.filter(
-        models.Q(name__icontains=q) | models.Q(locations__icontains=q) |
-        models.Q(description__icontains=q)
-    )
-    if chargen_only:
-        armors_q = armors_q.filter(value__lte=CHARGEN_MAX)
-    armors = list(armors_q.order_by('name')[:50])
-    if armors:
-        output.append(section_header("Armor", width=78))
-        for a in armors:
-            nm = crop(a.name, width=28, suffix="...")
-            output.append(f"|c{nm:<28}|n |gSP:|n {a.sp} |gEV:|n {a.ev} |gValue:|n |y{a.value} eb|n")
-        output.append("")
-
-    # Gear
-    gears_q = Gear.objects.filter(
-        models.Q(name__icontains=q) | models.Q(category__icontains=q) |
-        models.Q(description__icontains=q)
-    )
-    if chargen_only:
-        gears_q = gears_q.filter(value__lte=CHARGEN_MAX)
-    gears = list(gears_q.order_by('category', 'name')[:50])
-    if gears:
-        output.append(section_header("Gear", width=78))
-        for g in gears:
-            nm = crop(g.name, width=28, suffix="...")
-            output.append(f"|c{nm:<28}|n |gCategory:|n {g.category:<14} |gValue:|n |y{g.value} eb|n")
-        output.append("")
-
-    # Cyberware
-    cyberware_q = Cyberware.objects.filter(
-        models.Q(name__icontains=q) | models.Q(type__icontains=q) |
-        models.Q(description__icontains=q)
-    )
-    if chargen_only:
-        cyberware_q = cyberware_q.filter(cost__lte=CHARGEN_MAX)
-    cyberware = list(cyberware_q.order_by('type', 'name')[:50])
-    if cyberware:
-        output.append(section_header("Cyberware", width=78))
-        for cw in cyberware:
-            nm = crop(cw.name, width=28, suffix="...")
-            output.append(f"|c{nm:<28}|n |gType:|n {str(cw.type):<16} |gValue:|n |y{cw.cost} eb|n")
-        output.append("")
-
-    # Ammunition
-    ammos_q = Ammunition.objects.filter(
-        models.Q(name__icontains=q) | models.Q(ammo_type__icontains=q) |
-        models.Q(description__icontains=q)
-    )
-    if chargen_only:
-        ammos_q = ammos_q.filter(cost__lte=CHARGEN_MAX)
-    ammos = list(ammos_q.order_by('ammo_type', 'name')[:50])
-    if ammos:
-        seen = set()
-        output.append(section_header("Ammunition", width=78))
-        for a in ammos:
-            key = (a.name.lower(), (a.ammo_type or "").lower().replace("_", " "))
-            if key in seen:
-                continue
-            seen.add(key)
-            nm = crop(a.name, width=28, suffix="...")
-            output.append(f"|c{nm:<28}|n |gType:|n {a.ammo_type:<16} |gCost:|n |y{a.cost} eb|n")
-        output.append("")
-
-    # Cyberdecks
-    decks_q = Cyberdeck.objects.filter(
-        models.Q(name__icontains=q) | models.Q(description__icontains=q)
-    )
-    if chargen_only:
-        decks_q = decks_q.filter(value__lte=CHARGEN_MAX)
-    decks = list(decks_q.order_by('name')[:50])
-    if decks:
-        output.append(section_header("Cyberdecks", width=78))
-        for d in decks:
-            nm = crop(d.name, width=28, suffix="...")
-            output.append(f"|c{nm:<28}|n |gHW:|n {d.hardware_slots} |gProg:|n {d.program_slots} |gValue:|n |y{d.value} eb|n")
-        output.append("")
-
-    # Vehicles
-    vehicles_q = VehicleModel.objects.filter(
-        models.Q(name__icontains=q) | models.Q(category__icontains=q) |
-        models.Q(description__icontains=q)
-    )
-    if chargen_only:
-        vehicles_q = vehicles_q.filter(value__lte=CHARGEN_MAX)
-    vehicles = list(vehicles_q.order_by('category', 'name')[:50])
-    if vehicles:
-        output.append(section_header("Vehicles", width=78))
-        for v in vehicles:
-            nm = crop(v.name, width=28, suffix="...")
-            output.append(f"|c{nm:<28}|n |gCategory:|n {v.category:<8} |gValue:|n |y{v.value} eb|n")
-        output.append("")
-
-    # Attachments
-    atts_q = WeaponAttachment.objects.filter(
-        models.Q(name__icontains=q) | models.Q(description__icontains=q) |
-        models.Q(effect_description__icontains=q)
-    )
-    if chargen_only:
-        atts_q = atts_q.filter(value__lte=CHARGEN_MAX)
-    atts = list(atts_q.order_by('name')[:50])
-    if atts:
-        output.append(section_header("Weapon Attachments", width=78))
-        for a in atts:
-            nm = crop(a.name, width=28, suffix="...")
-            output.append(f"|c{nm:<28}|n |gValue:|n |y{a.value} eb|n")
-        output.append("")
-
-    if len(output) <= 1:
-        output.append("No equipment found matching that search.")
-    output.append(footer())
-    return output
-
     def _info_equipment(self):
         """Show detailed info on a specific item (like +lookup/info)."""
         if not self.args or not self.args.strip():
@@ -846,6 +707,146 @@ def format_search_equipment(search_str, chargen_only=False):
             out.append(f"  {a.effect_description or a.description or '—'}")
         out.append(divider("", width=78))
         return "\n".join(out) + "\n"
+
+
+def format_search_equipment(search_str, chargen_only=False):
+    """Search equipment by name/category/description. Returns list of output lines.
+    chargen_only: if True, restrict to items value/cost <= 1000 eb."""
+    CHARGEN_MAX = 1000
+    q = search_str.lower()
+    output = []
+    title = f"Chargen Search: '{search_str}'" if chargen_only else f"Equipment Search: '{search_str}'"
+    output.append(header(title))
+
+    # Weapons
+    weapons_q = Weapon.objects.filter(
+        models.Q(name__icontains=q) | models.Q(category__icontains=q) |
+        models.Q(description__icontains=q)
+    )
+    if chargen_only:
+        weapons_q = weapons_q.filter(value__lte=CHARGEN_MAX)
+    weapons = list(weapons_q.order_by('category', 'name')[:50])
+    if weapons:
+        output.append(section_header("Weapons", width=78))
+        for w in weapons:
+            nm = crop(w.name, width=28, suffix="...")
+            output.append(f"|c{nm:<28}|n |gDamage:|n {w.damage:<8} |gROF:|n {w.rof:<4} |gValue:|n |y{w.value} eb|n")
+        output.append("")
+
+    # Armor
+    armors_q = Armor.objects.filter(
+        models.Q(name__icontains=q) | models.Q(locations__icontains=q) |
+        models.Q(description__icontains=q)
+    )
+    if chargen_only:
+        armors_q = armors_q.filter(value__lte=CHARGEN_MAX)
+    armors = list(armors_q.order_by('name')[:50])
+    if armors:
+        output.append(section_header("Armor", width=78))
+        for a in armors:
+            nm = crop(a.name, width=28, suffix="...")
+            output.append(f"|c{nm:<28}|n |gSP:|n {a.sp} |gEV:|n {a.ev} |gValue:|n |y{a.value} eb|n")
+        output.append("")
+
+    # Gear
+    gears_q = Gear.objects.filter(
+        models.Q(name__icontains=q) | models.Q(category__icontains=q) |
+        models.Q(description__icontains=q)
+    )
+    if chargen_only:
+        gears_q = gears_q.filter(value__lte=CHARGEN_MAX)
+    gears = list(gears_q.order_by('category', 'name')[:50])
+    if gears:
+        output.append(section_header("Gear", width=78))
+        for g in gears:
+            nm = crop(g.name, width=28, suffix="...")
+            output.append(f"|c{nm:<28}|n |gCategory:|n {g.category:<14} |gValue:|n |y{g.value} eb|n")
+        output.append("")
+
+    # Cyberware
+    cyberware_q = Cyberware.objects.filter(
+        models.Q(name__icontains=q) | models.Q(type__icontains=q) |
+        models.Q(description__icontains=q)
+    )
+    if chargen_only:
+        cyberware_q = cyberware_q.filter(cost__lte=CHARGEN_MAX)
+    cyberware = list(cyberware_q.order_by('type', 'name')[:50])
+    if cyberware:
+        output.append(section_header("Cyberware", width=78))
+        for cw in cyberware:
+            nm = crop(cw.name, width=28, suffix="...")
+            output.append(f"|c{nm:<28}|n |gType:|n {str(cw.type):<16} |gValue:|n |y{cw.cost} eb|n")
+        output.append("")
+
+    # Ammunition
+    ammos_q = Ammunition.objects.filter(
+        models.Q(name__icontains=q) | models.Q(ammo_type__icontains=q) |
+        models.Q(description__icontains=q)
+    )
+    if chargen_only:
+        ammos_q = ammos_q.filter(cost__lte=CHARGEN_MAX)
+    ammos = list(ammos_q.order_by('ammo_type', 'name')[:50])
+    if ammos:
+        seen = set()
+        output.append(section_header("Ammunition", width=78))
+        for a in ammos:
+            key = (a.name.lower(), (a.ammo_type or "").lower().replace("_", " "))
+            if key in seen:
+                continue
+            seen.add(key)
+            nm = crop(a.name, width=28, suffix="...")
+            output.append(f"|c{nm:<28}|n |gType:|n {a.ammo_type:<16} |gCost:|n |y{a.cost} eb|n")
+        output.append("")
+
+    # Cyberdecks
+    decks_q = Cyberdeck.objects.filter(
+        models.Q(name__icontains=q) | models.Q(description__icontains=q)
+    )
+    if chargen_only:
+        decks_q = decks_q.filter(value__lte=CHARGEN_MAX)
+    decks = list(decks_q.order_by('name')[:50])
+    if decks:
+        output.append(section_header("Cyberdecks", width=78))
+        for d in decks:
+            nm = crop(d.name, width=28, suffix="...")
+            output.append(f"|c{nm:<28}|n |gHW:|n {d.hardware_slots} |gProg:|n {d.program_slots} |gValue:|n |y{d.value} eb|n")
+        output.append("")
+
+    # Vehicles
+    vehicles_q = VehicleModel.objects.filter(
+        models.Q(name__icontains=q) | models.Q(category__icontains=q) |
+        models.Q(description__icontains=q)
+    )
+    if chargen_only:
+        vehicles_q = vehicles_q.filter(value__lte=CHARGEN_MAX)
+    vehicles = list(vehicles_q.order_by('category', 'name')[:50])
+    if vehicles:
+        output.append(section_header("Vehicles", width=78))
+        for v in vehicles:
+            nm = crop(v.name, width=28, suffix="...")
+            output.append(f"|c{nm:<28}|n |gCategory:|n {v.category:<8} |gValue:|n |y{v.value} eb|n")
+        output.append("")
+
+    # Attachments
+    atts_q = WeaponAttachment.objects.filter(
+        models.Q(name__icontains=q) | models.Q(description__icontains=q) |
+        models.Q(effect_description__icontains=q)
+    )
+    if chargen_only:
+        atts_q = atts_q.filter(value__lte=CHARGEN_MAX)
+    atts = list(atts_q.order_by('name')[:50])
+    if atts:
+        output.append(section_header("Weapon Attachments", width=78))
+        for a in atts:
+            nm = crop(a.name, width=28, suffix="...")
+            output.append(f"|c{nm:<28}|n |gValue:|n |y{a.value} eb|n")
+        output.append("")
+
+    if len(output) <= 1:
+        output.append("No equipment found matching that search.")
+    output.append(footer())
+    return output
+
 
 class CmdRemoveEquipment(Command):
     """
