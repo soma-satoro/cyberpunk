@@ -2,6 +2,9 @@
 +lookup command - Player-facing lookup for equipment, skills, stats, roles.
 """
 
+from django.db.models import Q
+from django.db.models.functions import Length
+
 from evennia.commands.default.muxcommand import MuxCommand
 from world.utils.formatting import header, footer, divider, section_header
 from world.utils.ansi_utils import wrap_ansi
@@ -15,13 +18,42 @@ from world.cyberware.models import Cyberware
 from world.netrunning.deckoptions import programs, hardware, black_ice, quickhacks
 
 
+def _match_item_by_words(model, name_field, words):
+    """Filter model where all words appear in name_field. Returns first match, preferring shorter names."""
+    if not words:
+        return None
+    q = Q()
+    for word in words:
+        q &= Q(**{f"{name_field}__icontains": word})
+    return model.objects.filter(q).annotate(name_len=Length(name_field)).order_by("name_len", "name").first()
+
+
+def _match_list_item_by_words(items, name_key="name", words=None):
+    """Find item in list where all words appear in name. Returns best match (shortest name) or None."""
+    if not words:
+        return None
+    matches = []
+    for item in items:
+        item_name = (item.get(name_key) or "").lower()
+        if all(w in item_name for w in words):
+            matches.append(item)
+    if not matches:
+        return None
+    return min(matches, key=lambda m: len(m.get(name_key, "")))
+
+
 def _find_item_info(name):
-    """Search equipment, cyberware, and netrunning data for item. Returns (source, data) or (None, None)."""
+    """Search equipment, cyberware, and netrunning data for item. Returns (source, data) or (None, None).
+    Supports exact match and partial string match (e.g. 'constitutional arms multi' finds 'Constitutional Arms Multi-Ammo Pistol').
+    """
     name_lower = name.strip().lower()
     name_clean = name.strip()
+    words = [w for w in name_lower.split() if w]
 
     # Weapons
     w = Weapon.objects.filter(name__iexact=name_clean).first()
+    if not w:
+        w = _match_item_by_words(Weapon, "name", words)
     if w:
         return ("Weapon", {
             "name": w.name, "description": getattr(w, "description", ""), "damage": w.damage,
@@ -31,6 +63,8 @@ def _find_item_info(name):
 
     # Armor
     a = Armor.objects.filter(name__iexact=name_clean).first()
+    if not a:
+        a = _match_item_by_words(Armor, "name", words)
     if a:
         return ("Armor", {
             "name": a.name, "description": getattr(a, "description", ""),
@@ -39,6 +73,8 @@ def _find_item_info(name):
 
     # Gear
     g = Gear.objects.filter(name__iexact=name_clean).first()
+    if not g:
+        g = _match_item_by_words(Gear, "name", words)
     if g:
         return ("Gear", {
             "name": g.name, "description": g.description, "category": g.category,
@@ -47,6 +83,8 @@ def _find_item_info(name):
 
     # Vehicle
     v = Vehicle.objects.filter(name__iexact=name_clean).first()
+    if not v:
+        v = _match_item_by_words(Vehicle, "name", words)
     if v:
         return ("Vehicle", {
             "name": v.name, "description": getattr(v, "description", ""), "category": v.category,
@@ -56,6 +94,8 @@ def _find_item_info(name):
 
     # Ammunition
     am = Ammunition.objects.filter(name__iexact=name_clean).first()
+    if not am:
+        am = _match_item_by_words(Ammunition, "name", words)
     if am:
         return ("Ammunition", {
             "name": am.name, "description": am.description, "ammo_type": am.ammo_type,
@@ -64,6 +104,8 @@ def _find_item_info(name):
 
     # Cyberdeck
     cd = Cyberdeck.objects.filter(name__iexact=name_clean).first()
+    if not cd:
+        cd = _match_item_by_words(Cyberdeck, "name", words)
     if cd:
         return ("Cyberdeck", {
             "name": cd.name, "description": getattr(cd, "description", ""),
@@ -73,6 +115,8 @@ def _find_item_info(name):
 
     # Weapon attachment
     wa = WeaponAttachment.objects.filter(name__iexact=name_clean).first()
+    if not wa:
+        wa = _match_item_by_words(WeaponAttachment, "name", words)
     if wa:
         return ("Weapon Attachment", {
             "name": wa.name, "description": wa.description, "value": wa.value,
@@ -82,6 +126,8 @@ def _find_item_info(name):
 
     # Cyberware
     cw = Cyberware.objects.filter(name__iexact=name_clean).first()
+    if not cw:
+        cw = _match_item_by_words(Cyberware, "name", words)
     if cw:
         return ("Cyberware", {
             "name": cw.name, "description": cw.description, "type": cw.type,
@@ -89,41 +135,107 @@ def _find_item_info(name):
         })
 
     # Netrunning: programs
-    for p in programs:
-        if p.get("name", "").lower() == name_lower:
-            return ("Netrunning Program", {
-                "name": p["name"], "type": p.get("type", ""), "atk": p.get("atk", 0),
-                "dfv": p.get("dfv", 0), "rez": p.get("rez", 0),
-                "effect": p.get("effect", ""), "cost": p.get("cost", 0),
-                "icon": p.get("icon", ""),
-            })
+    p = next((x for x in programs if (x.get("name") or "").lower() == name_lower), None)
+    if not p:
+        p = _match_list_item_by_words(programs, "name", words)
+    if p:
+        return ("Netrunning Program", {
+            "name": p["name"], "type": p.get("type", ""), "atk": p.get("atk", 0),
+            "dfv": p.get("dfv", 0), "rez": p.get("rez", 0),
+            "effect": p.get("effect", ""), "cost": p.get("cost", 0),
+            "icon": p.get("icon", ""),
+        })
 
     # Netrunning: hardware
-    for h in hardware:
-        if h.get("name", "").lower() == name_lower:
-            return ("Netrunning Hardware", {
-                "name": h["name"], "description": h.get("description", ""),
-                "slots": h.get("slots", 0), "cost": h.get("cost", 0),
-            })
+    h = next((x for x in hardware if (x.get("name") or "").lower() == name_lower), None)
+    if not h:
+        h = _match_list_item_by_words(hardware, "name", words)
+    if h:
+        return ("Netrunning Hardware", {
+            "name": h["name"], "description": h.get("description", ""),
+            "slots": h.get("slots", 0), "cost": h.get("cost", 0),
+        })
 
     # Netrunning: black ICE
-    for b in black_ice:
-        if b.get("name", "").lower() == name_lower:
-            return ("Black ICE", {
-                "name": b["name"], "effect": b.get("effect", ""), "atk": b.get("atk", 0),
-                "dfv": b.get("dfv", 0), "rez": b.get("rez", 0),
-                "cost": b.get("cost", 0), "icon": b.get("icon", ""),
-            })
+    b = next((x for x in black_ice if (x.get("name") or "").lower() == name_lower), None)
+    if not b:
+        b = _match_list_item_by_words(black_ice, "name", words)
+    if b:
+        return ("Black ICE", {
+            "name": b["name"], "effect": b.get("effect", ""), "atk": b.get("atk", 0),
+            "dfv": b.get("dfv", 0), "rez": b.get("rez", 0),
+            "cost": b.get("cost", 0), "icon": b.get("icon", ""),
+        })
 
     # Netrunning: quickhack
-    for q in quickhacks:
-        if q.get("name", "").lower() == name_lower:
-            return ("Quickhack", {
-                "name": q["name"], "dv": q.get("dv", 0), "tier": q.get("tier", ""),
-                "effect": q.get("effect", ""),
-            })
+    q = next((x for x in quickhacks if (x.get("name") or "").lower() == name_lower), None)
+    if not q:
+        q = _match_list_item_by_words(quickhacks, "name", words)
+    if q:
+        return ("Quickhack", {
+            "name": q["name"], "dv": q.get("dv", 0), "tier": q.get("tier", ""),
+            "effect": q.get("effect", ""),
+        })
 
     return (None, None)
+
+
+def format_item_info(source, data):
+    """Format item info for display. Returns list of output lines."""
+    out = [section_header(f"{source}: {data.get('name', '')}", width=78)]
+
+    if source == "Weapon":
+        out.append(f"  |gDamage:|n {data.get('damage', '—')}  |gROF:|n {data.get('rof', '—')}  |gHands:|n {data.get('hands', '—')}")
+        out.append(f"  |gCategory:|n {data.get('category', '—')}  |gValue:|n {data.get('value', 0)} eb  |gConceal:|n {'Yes' if data.get('concealable') else 'No'}")
+        if data.get("description"):
+            out.append(f"  {wrap_ansi(data['description'], 74)}")
+    elif source == "Armor":
+        out.append(f"  |gSP:|n {data.get('sp', 0)}  |gEV:|n {data.get('ev', 0)}  |gLocations:|n {data.get('locations', '—')}")
+        out.append(f"  |gValue:|n {data.get('value', 0)} eb")
+        if data.get("description"):
+            out.append(f"  {wrap_ansi(data['description'], 74)}")
+    elif source == "Gear":
+        out.append(f"  |gCategory:|n {data.get('category', '—')}  |gValue:|n {data.get('value', 0)} eb")
+        if data.get("description"):
+            out.append(f"  {wrap_ansi(data['description'], 74)}")
+    elif source == "Vehicle":
+        out.append(f"  |gCategory:|n {data.get('category', '—')}  |gSDP:|n {data.get('sdp', 0)}  |gSeats:|n {data.get('seats', 0)}")
+        out.append(f"  |gSpeed:|n {data.get('speed_narrative', '—')}  |gValue:|n {data.get('value', 0)} eb")
+        if data.get("description"):
+            out.append(f"  {wrap_ansi(data['description'], 74)}")
+    elif source == "Ammunition":
+        out.append(f"  |gType:|n {data.get('ammo_type', '—')}  |gCost:|n {data.get('cost', 0)} eb")
+        if data.get("description"):
+            out.append(f"  {wrap_ansi(data['description'], 74)}")
+    elif source == "Cyberdeck":
+        out.append(f"  |gHW:|n {data.get('hardware_slots', 0)}  |gProgram:|n {data.get('program_slots', 0)}  |gAny:|n {data.get('any_slots', 0)}  |gValue:|n {data.get('value', 0)} eb")
+        if data.get("description"):
+            out.append(f"  {wrap_ansi(data['description'], 74)}")
+    elif source == "Weapon Attachment":
+        out.append(f"  |gValue:|n {data.get('value', 0)} eb  DV{data.get('install_dv', 17)} {data.get('install_skill', 'Weaponstech')}")
+        out.append(f"  {wrap_ansi(data.get('effect_description') or data.get('description', '—'), 74)}")
+    elif source == "Cyberware":
+        out.append(f"  |gType:|n {data.get('type', '—')}  |gSlots:|n {data.get('slots', 0)}  |gHL:|n {data.get('humanity_loss', 0)}  |gCost:|n {data.get('cost', 0)} eb")
+        if data.get("description"):
+            out.append(f"  {wrap_ansi(data['description'], 74)}")
+    elif source == "Netrunning Program":
+        out.append(f"  |gType:|n {data.get('type', '—')}  |gATK/DFV/Rez:|n {data.get('atk', 0)}/{data.get('dfv', 0)}/{data.get('rez', 0)}  |gCost:|n {data.get('cost', 0)} eb")
+        out.append(f"  |gEffect:|n {wrap_ansi(data.get('effect', '—'), 74)}")
+        if data.get("icon"):
+            out.append(f"  |gIcon:|n {data['icon']}")
+    elif source == "Netrunning Hardware":
+        out.append(f"  |gSlots:|n {data.get('slots', 0)}  |gCost:|n {data.get('cost', 0)} eb")
+        if data.get("description"):
+            out.append(f"  {wrap_ansi(data['description'], 74)}")
+    elif source == "Black ICE":
+        out.append(f"  |gATK/DFV/Rez:|n {data.get('atk', 0)}/{data.get('dfv', 0)}/{data.get('rez', 0)}  |gCost:|n {data.get('cost', 0)} eb")
+        out.append(f"  |gEffect:|n {wrap_ansi(data.get('effect', '—'), 74)}")
+    elif source == "Quickhack":
+        out.append(f"  |gDV:|n {data.get('dv', 0)}  |gTier:|n {data.get('tier', '—')}")
+        out.append(f"  |gEffect:|n {wrap_ansi(data.get('effect', '—'), 74)}")
+
+    out.append(divider("", width=78))
+    return out
 
 
 class CmdLookup(MuxCommand):
@@ -353,57 +465,4 @@ class CmdLookup(MuxCommand):
             self.caller.msg(f"Item '{self.args.strip()}' not found. Try +lookup equipment to browse.")
             return
 
-        out = [section_header(f"{source}: {data.get('name', '')}", width=78)]
-
-        if source == "Weapon":
-            out.append(f"  |gDamage:|n {data.get('damage', '—')}  |gROF:|n {data.get('rof', '—')}  |gHands:|n {data.get('hands', '—')}")
-            out.append(f"  |gCategory:|n {data.get('category', '—')}  |gValue:|n {data.get('value', 0)} eb  |gConceal:|n {'Yes' if data.get('concealable') else 'No'}")
-            if data.get("description"):
-                out.append(f"  {wrap_ansi(data['description'], 74)}")
-        elif source == "Armor":
-            out.append(f"  |gSP:|n {data.get('sp', 0)}  |gEV:|n {data.get('ev', 0)}  |gLocations:|n {data.get('locations', '—')}")
-            out.append(f"  |gValue:|n {data.get('value', 0)} eb")
-            if data.get("description"):
-                out.append(f"  {wrap_ansi(data['description'], 74)}")
-        elif source == "Gear":
-            out.append(f"  |gCategory:|n {data.get('category', '—')}  |gValue:|n {data.get('value', 0)} eb")
-            if data.get("description"):
-                out.append(f"  {wrap_ansi(data['description'], 74)}")
-        elif source == "Vehicle":
-            out.append(f"  |gCategory:|n {data.get('category', '—')}  |gSDP:|n {data.get('sdp', 0)}  |gSeats:|n {data.get('seats', 0)}")
-            out.append(f"  |gSpeed:|n {data.get('speed_narrative', '—')}  |gValue:|n {data.get('value', 0)} eb")
-            if data.get("description"):
-                out.append(f"  {wrap_ansi(data['description'], 74)}")
-        elif source == "Ammunition":
-            out.append(f"  |gType:|n {data.get('ammo_type', '—')}  |gCost:|n {data.get('cost', 0)} eb")
-            if data.get("description"):
-                out.append(f"  {wrap_ansi(data['description'], 74)}")
-        elif source == "Cyberdeck":
-            out.append(f"  |gHW:|n {data.get('hardware_slots', 0)}  |gProgram:|n {data.get('program_slots', 0)}  |gAny:|n {data.get('any_slots', 0)}  |gValue:|n {data.get('value', 0)} eb")
-            if data.get("description"):
-                out.append(f"  {wrap_ansi(data['description'], 74)}")
-        elif source == "Weapon Attachment":
-            out.append(f"  |gValue:|n {data.get('value', 0)} eb  DV{data.get('install_dv', 17)} {data.get('install_skill', 'Weaponstech')}")
-            out.append(f"  {wrap_ansi(data.get('effect_description') or data.get('description', '—'), 74)}")
-        elif source == "Cyberware":
-            out.append(f"  |gType:|n {data.get('type', '—')}  |gSlots:|n {data.get('slots', 0)}  |gHL:|n {data.get('humanity_loss', 0)}  |gCost:|n {data.get('cost', 0)} eb")
-            if data.get("description"):
-                out.append(f"  {wrap_ansi(data['description'], 74)}")
-        elif source == "Netrunning Program":
-            out.append(f"  |gType:|n {data.get('type', '—')}  |gATK/DFV/Rez:|n {data.get('atk', 0)}/{data.get('dfv', 0)}/{data.get('rez', 0)}  |gCost:|n {data.get('cost', 0)} eb")
-            out.append(f"  |gEffect:|n {wrap_ansi(data.get('effect', '—'), 74)}")
-            if data.get("icon"):
-                out.append(f"  |gIcon:|n {data['icon']}")
-        elif source == "Netrunning Hardware":
-            out.append(f"  |gSlots:|n {data.get('slots', 0)}  |gCost:|n {data.get('cost', 0)} eb")
-            if data.get("description"):
-                out.append(f"  {wrap_ansi(data['description'], 74)}")
-        elif source == "Black ICE":
-            out.append(f"  |gATK/DFV/Rez:|n {data.get('atk', 0)}/{data.get('dfv', 0)}/{data.get('rez', 0)}  |gCost:|n {data.get('cost', 0)} eb")
-            out.append(f"  |gEffect:|n {wrap_ansi(data.get('effect', '—'), 74)}")
-        elif source == "Quickhack":
-            out.append(f"  |gDV:|n {data.get('dv', 0)}  |gTier:|n {data.get('tier', '—')}")
-            out.append(f"  |gEffect:|n {wrap_ansi(data.get('effect', '—'), 74)}")
-
-        out.append(divider("", width=78))
-        self.caller.msg("\n".join(out))
+        self.caller.msg("\n".join(format_item_info(source, data)))

@@ -1,5 +1,6 @@
 import random
 from evennia import Command
+from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils.search import search_object
 from evennia.utils.utils import crop
 from evennia.utils import gametime
@@ -23,6 +24,8 @@ from world.commerce.pricing import (
 
 # Import ChargenRoom for chargen buy
 from typeclasses.chargen import ChargenRoom
+from commands.list_commands import _find_item_info, format_item_info
+from commands.equipment_commands import format_search_equipment
 from world.chargen_constants import FASHION_ITEM_NAMES
 
 
@@ -583,7 +586,7 @@ class CmdBuy(Command):
             )
             inventory.add_gear(gear)
 
-class CmdListItems(Command):
+class CmdListItems(MuxCommand):
     """
     List items available from a merchant or the chargen catalog.
 
@@ -595,6 +598,11 @@ class CmdListItems(Command):
       list chargen/gear               - All gear
       list chargen/medical            - Gear in Medical category
       list chargen/shoulder_arms      - Weapons in shoulder_arms category
+      list chargen/search <string>    - Search chargen catalog (in chargen room)
+      list/search <string>            - Search all equipment
+      list/search chargen <string>    - Search chargen catalog (1000 eb or under)
+      list/info <item>                - Detailed info on an item
+      list/info chargen/<item>        - Same (chargen/ prefix optional)
 
     In the chargen room, list chargen shows equipment (1000 eb or under).
     Use subcategories for granular filtering (e.g. medical, shoulder_arms).
@@ -604,8 +612,42 @@ class CmdListItems(Command):
     aliases = ["list items"]
     locks = "cmd:all()"
     help_category = "Economy"
+    arg_regex = r"[\s/]|$"  # Allow / for list/info
+
+    def parse(self):
+        MuxCommand.parse(self)
 
     def func(self):
+        # list/search [chargen] <string> - search equipment
+        if "search" in (self.switches or []):
+            raw = (self.args or "").strip()
+            chargen_only = False
+            if raw.lower().startswith("chargen"):
+                rest = raw[7:].lstrip(" /")
+                if rest:
+                    chargen_only = True
+                    raw = rest
+            if not raw:
+                self.caller.msg("Usage: list/search <string> or list/search chargen <string>")
+                return
+            self.caller.msg("\n".join(format_search_equipment(raw, chargen_only=chargen_only)))
+            return
+
+        # list/info <item> or list/info chargen/<item>
+        if "info" in (self.switches or []):
+            item_name = (self.args or "").strip()
+            if item_name.lower().startswith("chargen/"):
+                item_name = item_name[8:].strip()
+            if not item_name:
+                self.caller.msg("Usage: list/info <item name> or list/info chargen/<item name>")
+                return
+            source, data = _find_item_info(item_name)
+            if not data:
+                self.caller.msg(f"Item '{item_name}' not found. Try |wlist chargen|n or |wequipdb/search <name>|n.")
+                return
+            self.caller.msg("\n".join(format_item_info(source, data)))
+            return
+
         if not self.args:
             self.caller.msg(
                 "Usage: list from <merchant> | list chargen/weapons | list chargen/armor | "
@@ -624,6 +666,14 @@ class CmdListItems(Command):
                 sub = args[8:].strip()  # "chargen gear" -> "gear"
             else:
                 sub = None
+            # list chargen/search <string>
+            if sub and sub.lower().startswith("search"):
+                search_str = sub[6:].strip()
+                if search_str:
+                    self.caller.msg("\n".join(format_search_equipment(search_str, chargen_only=True)))
+                else:
+                    self.caller.msg("Usage: list chargen/search <string>")
+                return
             self._list_chargen(sub)
             return
 
@@ -741,7 +791,9 @@ class CmdListItems(Command):
             else:
                 output.append(f"  |y{mc.title()}|n: |w{mc}|n")
         output.append("")
-        output.append("Examples: |wlist chargen gear|n  |wlist chargen medical|n  |wlist chargen shoulder_arms|n")
+        output.append("Examples: |wlist chargen gear|n  |wlist chargen medical|n  |wlist chargen/search pistol|n")
+        output.append("          |wlist/search pistol|n  |wlist/info Medium Pistol|n")
+        output.append("          |wlist/info constitutional arms multi|n  (fuzzy string matching)")
         output.append(footer())
         self.caller.msg("\n".join(output))
 

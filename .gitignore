@@ -79,3 +79,5 @@ nosetests.xml
 evennia.db3
 *.db3
 "evennia.db3" 
+world/mission_board/__pycache__/models.cpython-311.pyc
+world/mission_board/__pycache__/services.cpython-311.pyc
