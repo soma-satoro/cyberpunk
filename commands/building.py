@@ -725,6 +725,11 @@ class CmdManageBuilding(MuxCommand):
         +manage/sethousing/encampment <resources> [max_units] - Encampment area
         +manage/sethousing/clear              - Clear housing settings
         
+        +manage/desc [=text]       - Set room description (any room)
+        +manage/name [=name]       - Set room name (any room)
+        +manage/exit <exit>=<name> - Change exit display name
+        +manage/exitdesc <exit>=<text> - Change exit description
+        
     Example:
         +manage/setlobby
         +manage/addtype Studio
@@ -821,8 +826,8 @@ class CmdManageBuilding(MuxCommand):
 
     def check_lobby_required(self, location, switch):
         """Check if command requires an active lobby setup"""
-        # These commands can be used without a lobby
-        if switch in ["setlobby", "clear", "info", "sethousing"]:
+        # These commands can be used without a lobby (any room)
+        if switch in ["setlobby", "clear", "info", "sethousing", "desc", "name", "exit", "exitdesc"]:
             return True
             
         # For other commands, check if this is a lobby or connected to one
@@ -854,6 +859,47 @@ class CmdManageBuilding(MuxCommand):
 
         # Check if command requires lobby setup
         if not self.check_lobby_required(location, switch):
+            return
+
+        # Room/exit editing (any room, no lobby required)
+        if switch == "desc":
+            if self.rhs is not None:
+                location.db.desc = self.rhs
+                self.caller.msg("Room description updated.")
+            else:
+                self.caller.msg("Usage: +manage/desc =<description>")
+            return
+        elif switch == "name":
+            if self.rhs is not None:
+                location.key = self.rhs.strip()
+                self.caller.msg(f"Room renamed to '{location.key}'.")
+            else:
+                self.caller.msg("Usage: +manage/name =<new name>")
+            return
+        elif switch == "exit":
+            if not self.lhs or not self.rhs:
+                self.caller.msg("Usage: +manage/exit <exit>=<new name>")
+                return
+            exit_name = self.lhs.strip()
+            new_name = self.rhs.strip()
+            for ex in location.exits:
+                if ex.key.lower() == exit_name.lower() or (ex.aliases and exit_name.lower() in [a.lower() for a in ex.aliases.all()]):
+                    ex.key = new_name
+                    self.caller.msg(f"Exit renamed to '{new_name}'.")
+                    return
+            self.caller.msg(f"No exit named '{exit_name}' found.")
+            return
+        elif switch == "exitdesc":
+            if not self.lhs:
+                self.caller.msg("Usage: +manage/exitdesc <exit>=<description>")
+                return
+            exit_name = self.lhs.strip()
+            for ex in location.exits:
+                if ex.key.lower() == exit_name.lower() or (ex.aliases and exit_name.lower() in [a.lower() for a in ex.aliases.all()]):
+                    ex.db.desc = self.rhs.strip() if self.rhs else ""
+                    self.caller.msg(f"Exit '{ex.key}' description updated.")
+                    return
+            self.caller.msg(f"No exit named '{exit_name}' found.")
             return
 
         if switch == "types":

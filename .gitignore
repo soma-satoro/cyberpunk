@@ -74,3 +74,5 @@ nosetests.xml
 
 # VSCode config
 .vscode
+evennia.db3
+*.db3
