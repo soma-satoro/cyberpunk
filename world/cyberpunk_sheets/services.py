@@ -68,6 +68,29 @@ class CharacterMoneyService:
         # Fall back to old character sheet method
         return CharacterSheetMoneyService.get_balance(character)
 
+    @staticmethod
+    def get_fashion_budget(character):
+        """Get fashion budget remaining (chargen only, use-it-or-lose-it 800 eb pool)."""
+        char = character.character_sheet if hasattr(character, 'character_sheet') and character.character_sheet else character
+        if hasattr(char, 'fashion_budget_remaining'):
+            return getattr(char, 'fashion_budget_remaining', 0)
+        return 0
+
+    @staticmethod
+    def spend_fashion_money(character, amount):
+        """Spend from fashion budget during chargen. Returns True if successful."""
+        char = character.character_sheet if hasattr(character, 'character_sheet') and character.character_sheet else character
+        if not hasattr(char, 'fashion_budget_remaining'):
+            return False
+        budget = getattr(char, 'fashion_budget_remaining', 0)
+        if budget >= amount:
+            char.fashion_budget_remaining = budget - amount
+            char.save(skip_recalculation=True)
+            if hasattr(character, 'db') and character.character_sheet == char:
+                character.db.fashion_budget_remaining = char.fashion_budget_remaining
+            return True
+        return False
+
 # Keep old service for backward compatibility
 class CharacterSheetMoneyService:
     @staticmethod

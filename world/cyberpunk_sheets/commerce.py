@@ -22,6 +22,7 @@ from world.commerce.pricing import (
 
 # Import ChargenRoom for chargen buy
 from typeclasses.chargen import ChargenRoom
+from world.chargen_constants import FASHION_ITEM_NAMES
 
 
 class Merchant:
@@ -48,6 +49,16 @@ class Merchant:
 
 # Chargen only sells items at or under 1000 eb (nothing over 1000)
 CHARGEN_MAX_PRICE = 1000
+
+
+def _is_fashion_item(item, item_type, gear_category=None):
+    """Return True if item uses fashion budget (clothing/fashionware) during chargen."""
+    if item_type == "cyberware_implant":
+        return getattr(item.get("_cyberware"), "type", "") == "Fashionware"
+    if gear_category and (str(gear_category or "").lower() == "clothing"):
+        return True
+    name = item.get("name", "")
+    return name in FASHION_ITEM_NAMES
 
 
 def _get_chargen_catalog(category=None, subcategory=None):
@@ -256,7 +267,24 @@ class CmdBuy(Command):
             self.caller.msg(f"You already own {item['name']}.")
             return
 
-        if not CharacterMoneyService.spend_money(self.caller, price):
+        # Fashion items (clothing): use fashion budget in chargen
+        is_fashion = (
+            gear_category == "Clothing"
+            or (item.get("name") or "").strip() in FASHION_ITEM_NAMES
+        )
+        if is_fashion:
+            fashion_budget = CharacterMoneyService.get_fashion_budget(self.caller)
+            if fashion_budget >= price:
+                if not CharacterMoneyService.spend_fashion_money(self.caller, price):
+                    self.caller.msg(f"You don't have enough fashion budget. You have {fashion_budget} eb for clothing/fashionware.")
+                    return
+            else:
+                self.caller.msg(
+                    f"You don't have enough fashion budget for {item['name']}. "
+                    f"It costs {price} eb, you have {fashion_budget} eb fashion budget."
+                )
+                return
+        elif not CharacterMoneyService.spend_money(self.caller, price):
             self.caller.msg(
                 f"You don't have enough Eurodollars to buy {item['name']}. "
                 f"It costs {price} eb."
@@ -313,7 +341,21 @@ class CmdBuy(Command):
                 self.caller.msg(f"Not enough slots available for {cyberware.type}.")
                 return
 
-        if not CharacterMoneyService.spend_money(self.caller, final_cost):
+        # Fashionware: use fashion budget in chargen
+        is_fashionware = getattr(cyberware, "type", "") == "Fashionware"
+        if is_fashionware:
+            fashion_budget = CharacterMoneyService.get_fashion_budget(self.caller)
+            if fashion_budget >= final_cost:
+                if not CharacterMoneyService.spend_fashion_money(self.caller, final_cost):
+                    self.caller.msg(f"You don't have enough fashion budget. You have {fashion_budget} eb for fashionware.")
+                    return
+            else:
+                self.caller.msg(
+                    f"Not enough fashion budget for {cyberware.name}. "
+                    f"It costs {final_cost} eb, you have {fashion_budget} eb fashion budget."
+                )
+                return
+        elif not CharacterMoneyService.spend_money(self.caller, final_cost):
             self.caller.msg(
                 f"Not enough money to buy {cyberware.name}. It costs {final_cost} eb."
             )
@@ -327,7 +369,15 @@ class CmdBuy(Command):
             )
             inventory.cyberware.add(instance)
         except Exception as e:
-            CharacterMoneyService.add_money(self.caller, final_cost)
+            if is_fashionware:
+                CharacterMoneyService.spend_fashion_money.__self__ = None  # no-op, refund fashion
+                char = character_sheet.character if hasattr(character_sheet, 'character') and character_sheet.character else self.caller
+                sheet = getattr(char, 'character_sheet', character_sheet)
+                if hasattr(sheet, 'fashion_budget_remaining'):
+                    sheet.fashion_budget_remaining += final_cost
+                    sheet.save(skip_recalculation=True)
+            else:
+                CharacterMoneyService.add_money(self.caller, final_cost)
             self.caller.msg(f"Error installing cyberware: {str(e)}")
             return
 
@@ -505,7 +555,7 @@ class CmdBuy(Command):
                     'value': item['value']
                 }
             )
-            inventory.gear.add(gear)
+            inventory.add_gear(gear)
         elif merchant_type == "vehicle_dealer":
             vehicle_model, _ = VehicleModel.objects.get_or_create(
                 name=item['name'],
@@ -530,7 +580,7 @@ class CmdBuy(Command):
                     'value': item['value'],
                 }
             )
-            inventory.gear.add(gear)
+            inventory.add_gear(gear)
 
 class CmdListItems(Command):
     """
@@ -828,8 +878,8 @@ def execute_player_sale(caller, raw_string, **kwargs):
         seller_inv.armor.remove(item)
         buyer_inv.armor.add(item)
     elif category == 'gear':
-        seller_inv.gear.remove(item)
-        buyer_inv.gear.add(item)
+        seller_inv.remove_gear(item)
+        buyer_inv.add_gear(item)
     elif category == 'vehicle':
         seller_inv.vehicles.remove(item)
         buyer_inv.vehicles.add(item)
@@ -1013,8 +1063,8 @@ class CmdGive(Command):
             inventory.armor.remove(item)
             to_inv.armor.add(item)
         elif category == 'gear':
-            inventory.gear.remove(item)
-            to_inv.gear.add(item)
+            inventory.remove_gear(item)
+            to_inv.add_gear(item)
         elif category == 'vehicle':
             inventory.vehicles.remove(item)
             to_inv.vehicles.add(item)

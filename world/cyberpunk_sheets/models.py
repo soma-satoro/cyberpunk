@@ -148,6 +148,15 @@ class CharacterSheet(SharedMemoryModel):
     notoriety = models.IntegerField(default=0)
     is_complete = models.BooleanField(default=False)
 
+    # Chargen: fashion budget (800 eb use-it-or-lose-it for clothing/fashionware)
+    fashion_budget_remaining = models.IntegerField(default=0)
+
+    # Sell Your Soul: 1500 eb + Neural Link, in exchange for employer control
+    sell_your_soul = models.BooleanField(default=False)
+    sell_your_soul_employer_type = models.CharField(max_length=50, blank=True)  # military, crime, corporation
+    sell_your_soul_employer = models.CharField(max_length=100, blank=True)  # e.g. "NUSA Mechanised Combat Force"
+    sell_your_soul_catch = models.CharField(max_length=100, blank=True)  # Hostages, Blackmail, etc.
+
     # General lifepath fields
     cultural_origin = models.CharField(max_length=100, blank=True)
     personality = models.CharField(max_length=100, blank=True)
@@ -697,7 +706,7 @@ class CharacterSheet(SharedMemoryModel):
         if hasattr(self, 'inventory'):
             self.inventory.weapons.clear()
             self.inventory.armor.clear()
-            self.inventory.gear.clear()
+            self.inventory.clear_gear()
         else:
             # Use lazy import to avoid circular dependency
             Inventory = apps.get_model('inventory', 'Inventory')

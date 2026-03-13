@@ -112,6 +112,8 @@ class Mission(SharedMemoryModel):
     # Item/voucher rewards - stored as list of dbrefs
     voucher_rewards = models.JSONField(default=list)  # [dbref, dbref, ...]
     item_rewards = models.JSONField(default=list)     # [dbref, dbref, ...]
+    # Apartment rewards - staff missions only (posted_by_staff). List of RentableRoom main room dbrefs.
+    apartment_rewards = models.JSONField(default=list)  # [dbref, dbref, ...]
     rewards_pay_on_delivery = models.BooleanField(default=False)
 
     # Failure handling

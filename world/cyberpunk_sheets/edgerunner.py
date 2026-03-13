@@ -1,11 +1,16 @@
 import random, logging
 import traceback
-from world.cyberpunk_constants import ROLES, STATS, ROLE_SKILLS, ROLE_SKILL_NAME_MAP, EQUIPMENT, ROLE_STAT_TABLES, ROLE_CYBERWARE
+from world.cyberpunk_constants import ROLES, STATS, ROLE_SKILLS, ROLE_SKILL_NAME_MAP, EQUIPMENT, EQUIPMENT_OR_CHOICES, ROLE_STAT_TABLES, ROLE_CYBERWARE
 DOUBLE_COST_SKILLS = ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
 from world.cyberpunk_constants import LANGUAGES as CYBERPUNK_LANGUAGES
 from world.inventory.models import Inventory, Weapon, Armor, Gear, CyberwareInstance, Ammunition, AmmoType
-from world.equipment_data import weapons, armors, gears, ammunition
+from world.equipment_data import weapons, armors, gears, ammunition, cyberdecks as cyberdecks_data
 from world.equipment_data import weapons as weapon_data, armors as armor_data, gears as gear_data
+from world.chargen_constants import (
+    FASHION_BUDGET,
+    FASHION_ITEM_NAMES,
+    NETRUNNER_7_SLOT_CYBERDECKS,
+)
 from world.cyberware.cyberware_data import CYBERWARE_DATA
 from world.cyberware.models import Cyberware, CYBERWARE_HUMANITY_LOSS, CYBERWARE_COSTS
 from world.cyberware.utils import calculate_humanity_loss
@@ -53,10 +58,17 @@ class EdgerunnerChargen:
             
             logger.info(f"Edgerunner chargen completed for {full_name}")
 
-            # Add leftover eurodollars (2550 starting - cost of assigned gear/cyberware)
-            package_cost = cls.calculate_edgerunner_package_cost(role)
-            remaining_eurodollars = max(0, 2550 - package_cost)
+            # Add leftover eurodollars (2550 - non_fashion package cost); fashion comes from separate 800 eb pool
+            total_cost, fashion_cost = cls.calculate_edgerunner_package_cost_split(role)
+            non_fashion_cost = total_cost - fashion_cost
+            remaining_eurodollars = max(0, 2550 - non_fashion_cost)
             CharacterMoneyService.add_money(character, remaining_eurodollars)
+
+            # Fashion budget: 800 eb use-it-or-lose-it (reduced by fashion items in package)
+            sheet = character.character_sheet if hasattr(character, 'character_sheet') and character.character_sheet else character
+            if hasattr(sheet, 'fashion_budget_remaining'):
+                sheet.fashion_budget_remaining = max(0, FASHION_BUDGET - fashion_cost)
+                sheet.save(skip_recalculation=True)
 
             if hasattr(character, 'db'):
                 remaining_stat_points = cls.calculate_remaining_stat_points_typeclass(character)
@@ -65,13 +77,15 @@ class EdgerunnerChargen:
                 remaining_stat_points = cls.calculate_remaining_stat_points(character)
                 remaining_skill_points = cls.calculate_remaining_skill_points(character, role)
 
-            logger.info(f"Added {remaining_eurodollars} Eurodollars to character {full_name}")
+            logger.info(f"Added {remaining_eurodollars} Eurodollars, {sheet.fashion_budget_remaining} fashion budget to character {full_name}")
 
             # Prepare the final message
+            fashion_info = f"You have {sheet.fashion_budget_remaining} eb fashion budget (use for clothing/fashionware, or lose it). " if getattr(sheet, 'fashion_budget_remaining', 0) > 0 else ""
             final_message = (
                 f"Character created using the Edgerunner method for role: {role}.\n"
                 f"You have {remaining_stat_points} stat points and {remaining_skill_points} skill points left to allocate.\n"
-                f"{remaining_eurodollars} Eurodollars have been added to your account (2550 - {package_cost} spent on gear and cyberware).\n"
+                f"{remaining_eurodollars} Eurodollars have been added to your account (2550 - {non_fashion_cost} spent on gear and cyberware).\n"
+                f"{fashion_info}"
                 f"Use 'sheet' to view your full character details, 'inv' to view your inventory "
                 f"and 'inv/balance' to check your money."
             )
@@ -307,7 +321,78 @@ class EdgerunnerChargen:
         return total_cost
 
     @classmethod
-    def edgerunner_chargen_for_typeclass(cls, character, role, full_name):
+    def calculate_edgerunner_package_cost_split(cls, role):
+        """Return (total_cost, fashion_cost). Fashion cost is deducted from 800 eb fashion budget."""
+        total_cost = 0
+        fashion_cost = 0
+        role_equipment = EQUIPMENT.get(role, {})
+
+        def _is_fashion_item(equip_type, name, stats_or_data):
+            if equip_type == "gear":
+                if name in FASHION_ITEM_NAMES:
+                    return True
+                return (stats_or_data or {}).get("category") == "Clothing"
+            if equip_type == "armor":
+                return name in FASHION_ITEM_NAMES
+            if equip_type == "cyberware":
+                return (stats_or_data or {}).get("type") == "Fashionware"
+            return False
+
+        # Weapons
+        for weapon_name in role_equipment.get("weapons", []):
+            weapon_stats = next((w for w in weapon_data if w["name"] == weapon_name), None)
+            if weapon_stats:
+                total_cost += weapon_stats.get("value", 0)
+
+        # Armor
+        for armor_name in role_equipment.get("armor", []):
+            armor_stats = next((a for a in armor_data if a["name"] == armor_name), None)
+            if armor_stats:
+                total_cost += armor_stats.get("value", 0)
+                if _is_fashion_item("armor", armor_name, armor_stats):
+                    fashion_cost += armor_stats.get("value", 0)
+
+        # Gear (skip Cyberdeck for Netrunner - handled separately with named deck)
+        # Support (name, qty) tuples, plain name (qty 1), or {"or": index} (use first option for cost)
+        for gear_entry in role_equipment.get("gear", []):
+            if isinstance(gear_entry, dict) and "or" in gear_entry:
+                or_idx = gear_entry["or"]
+                or_groups = EQUIPMENT_OR_CHOICES.get(role, [])
+                if or_idx >= len(or_groups):
+                    continue
+                gear_entry = or_groups[or_idx]["options"][0]
+            if isinstance(gear_entry, (list, tuple)):
+                gear_name, qty = gear_entry[0], int(gear_entry[1])
+            else:
+                gear_name, qty = gear_entry, 1
+            if role == "Netrunner" and gear_name == "Cyberdeck":
+                continue
+            gear_stats = next((g for g in gear_data if g["name"] == gear_name), None)
+            if gear_stats:
+                item_val = gear_stats.get("value", 0) * qty
+                total_cost += item_val
+                if _is_fashion_item("gear", gear_name, gear_stats):
+                    fashion_cost += item_val
+
+        # Ammunition
+        for weapon_name in role_equipment.get("weapons", []):
+            weapon_type = weapon_name.split()[-1]
+            ammo = next((a for a in ammunition if a.get("weapon_type") == weapon_type), None)
+            if ammo and "cost" in ammo:
+                total_cost += 50 * ammo["cost"]
+
+        # Cyberware
+        for item_name in ROLE_CYBERWARE.get(role, []):
+            cw_data = CYBERWARE_DATA.get(item_name, {})
+            cost = cw_data.get("cost", CYBERWARE_COSTS.get(item_name, 100))
+            total_cost += cost
+            if _is_fashion_item("cyberware", item_name, cw_data):
+                fashion_cost += cost
+
+        return total_cost, fashion_cost
+
+    @classmethod
+    def edgerunner_chargen_for_typeclass(cls, character, role, full_name, gear_choices=None):
         """Create an Edgerunner character using the typeclass directly"""
         logger.info(f"Starting edgerunner_chargen_for_typeclass for {full_name}, role: {role}")
         try:
@@ -320,7 +405,7 @@ class EdgerunnerChargen:
             cls.assign_languages_to_typeclass(character, role)
             logger.info("Languages assigned to typeclass")
             
-            cls.assign_gear_to_typeclass(character, role)
+            cls.assign_gear_to_typeclass(character, role, gear_choices=gear_choices)
             logger.info(f"Gear assigned for role: {role}")
 
             cls.assign_cyberware_to_typeclass(character, role)
@@ -397,8 +482,9 @@ class EdgerunnerChargen:
             logger.info(f"Added language {random_lang} (level {random_level}) to character")
 
     @classmethod
-    def assign_gear_to_typeclass(cls, character, role):
-        """Assign gear to character typeclass directly"""
+    def assign_gear_to_typeclass(cls, character, role, gear_choices=None):
+        """Assign gear to character typeclass directly. gear_choices resolves {\"or\": index} entries."""
+        gear_choices = gear_choices or {}
         logger.info(f"Starting assign_gear_to_typeclass for role: {role}")
         from world.inventory.models import Inventory, Weapon, Armor, Gear, Ammunition, AmmoType
         
@@ -416,7 +502,7 @@ class EdgerunnerChargen:
         # Clear existing inventory
         inventory.weapons.clear()
         inventory.armor.clear()
-        inventory.gear.clear()
+        inventory.clear_gear()
         inventory.ammunition.clear()
         
         role_equipment = EQUIPMENT.get(role, {})
@@ -454,8 +540,25 @@ class EdgerunnerChargen:
                 inventory.armor.add(armor)
                 logger.info(f"Added armor: {armor_name}")
         
-        # Assign gear
-        for gear_name in role_equipment.get('gear', []):
+        # Assign gear (Netrunner: skip generic "Cyberdeck", get random 7-slot named deck instead)
+        # Support (name, qty) tuples, plain name (qty 1), or {"or": index} for menu choices
+        for gear_entry in role_equipment.get('gear', []):
+            if isinstance(gear_entry, dict) and "or" in gear_entry:
+                or_idx = gear_entry["or"]
+                choice_key = f"{role}_{or_idx}"
+                chosen = gear_choices.get(choice_key)
+                or_groups = EQUIPMENT_OR_CHOICES.get(role, [])
+                if chosen is None and or_idx < len(or_groups):
+                    chosen = or_groups[or_idx]["options"][0]  # default to first option
+                if chosen is None:
+                    continue
+                gear_entry = chosen  # resolve to (name, qty) or name
+            if isinstance(gear_entry, (list, tuple)):
+                gear_name, qty = gear_entry[0], int(gear_entry[1])
+            else:
+                gear_name, qty = gear_entry, 1
+            if role == "Netrunner" and gear_name == "Cyberdeck":
+                continue  # Handled separately below
             gear_stats = next((g for g in gear_data if g['name'] == gear_name), None)
             if gear_stats:
                 gear, created = Gear.objects.get_or_create(
@@ -467,28 +570,51 @@ class EdgerunnerChargen:
                         'value': gear_stats['value']
                     }
                 )
-                inventory.gear.add(gear)
-                logger.info(f"Added gear: {gear_name}")
+                inventory.add_gear(gear, quantity=qty)
+                logger.info(f"Added gear: {gear_name} x{qty}")
+
+        # Netrunner: assign random 7-slot cyberdeck from equipment DB
+        if role == "Netrunner":
+            deck_name = random.choice(NETRUNNER_7_SLOT_CYBERDECKS)
+            cd_data = next((cd for cd in cyberdecks_data if cd["name"] == deck_name), None)
+            if cd_data:
+                gear, created = Gear.objects.get_or_create(
+                    name=deck_name,
+                    defaults={
+                        'category': 'Cyberdeck',
+                        'description': cd_data.get('description', ''),
+                        'weight': 0.5,
+                        'value': cd_data.get('value', 500)
+                    }
+                )
+                inventory.add_gear(gear)
+                logger.info(f"Added Netrunner cyberdeck: {deck_name}")
         
         # Assign ammunition
         for weapon in inventory.weapons.all():
             weapon_type = weapon.name.split()[-1]  # Get the last word of the weapon name
             ammo = next((a for a in ammunition if a['weapon_type'] == weapon_type), None)
             if ammo:
-                ammo_obj, created = Ammunition.objects.get_or_create(
+                # Use filter().first() to handle duplicate Ammunition rows (e.g. from multiple populates)
+                ammo_obj = Ammunition.objects.filter(
                     name=ammo['name'],
-                    defaults={
-                        'ammo_type': getattr(AmmoType, ammo['ammo_type']),
-                        'weapon_type': ammo['weapon_type'],
-                        'damage_modifier': ammo['damage_modifier'],
-                        'armor_piercing': ammo['armor_piercing'],
-                        'description': ammo['description'],
-                        'cost': ammo['cost'],
-                        'quantity': 50  # Give 50 rounds of ammo
-                    }
-                )
-                if not created:
-                    # If the ammo already exists, update its quantity
+                    weapon_type=ammo['weapon_type'],
+                    ammo_type=getattr(AmmoType, ammo['ammo_type']),
+                ).first()
+                if ammo_obj is None:
+                    ammo_obj = Ammunition.objects.create(
+                        name=ammo['name'],
+                        weapon_type=ammo['weapon_type'],
+                        ammo_type=getattr(AmmoType, ammo['ammo_type']),
+                        damage_modifier=ammo['damage_modifier'],
+                        armor_piercing=ammo['armor_piercing'],
+                        description=ammo['description'],
+                        cost=ammo['cost'],
+                        quantity=50,
+                    )
+                    created = True
+                else:
+                    created = False
                     ammo_obj.quantity += 50
                     ammo_obj.save()
                 inventory.ammunition.add(ammo_obj)
@@ -670,6 +796,7 @@ class EdgerunnerChargen:
         sheet.attribute_points = 62
         sheet.skill_points = 60
         sheet.eurodollars = 2550
+        sheet.fashion_budget_remaining = FASHION_BUDGET  # 800 eb use-it-or-lose-it for fashion/fashionware
 
         default_skills = [
             'athletics', 'brawling', 'concentration', 'conversation', 'education',
@@ -755,7 +882,9 @@ class EdgerunnerChargen:
             sheet.add_language(random_lang, random_level)
 
     @staticmethod
-    def assign_gear(sheet, role):
+    def assign_gear(sheet, role, gear_choices=None):
+        """Assign role equipment to sheet's inventory. gear_choices resolves {"or": index} entries."""
+        gear_choices = gear_choices or {}
         logger.info(f"Starting assign_gear for role: {role}")
         from world.inventory.models import Inventory, Weapon, Armor, Gear, Ammunition, AmmoType
         
@@ -768,7 +897,7 @@ class EdgerunnerChargen:
         # Clear existing inventory
         inventory.weapons.clear()
         inventory.armor.clear()
-        inventory.gear.clear()
+        inventory.clear_gear()
         inventory.ammunition.clear()
         
         role_equipment = EQUIPMENT.get(role, {})
@@ -806,8 +935,39 @@ class EdgerunnerChargen:
                 inventory.armor.add(armor)
                 logger.info(f"Added armor: {armor_name}")
         
-        # Assign gear
-        for gear_name in role_equipment.get('gear', []):
+        # Assign gear (support (name, qty) tuples, plain name, or {"or": index} for menu choices)
+        for gear_entry in role_equipment.get('gear', []):
+            if isinstance(gear_entry, dict) and "or" in gear_entry:
+                or_idx = gear_entry["or"]
+                choice_key = f"{role}_{or_idx}"
+                chosen = gear_choices.get(choice_key)
+                or_groups = EQUIPMENT_OR_CHOICES.get(role, [])
+                if chosen is None and or_idx < len(or_groups):
+                    chosen = or_groups[or_idx]["options"][0]  # default to first option
+                if chosen is None:
+                    continue
+                gear_entry = chosen
+            if isinstance(gear_entry, (list, tuple)):
+                gear_name, qty = gear_entry[0], int(gear_entry[1])
+            else:
+                gear_name, qty = gear_entry, 1
+            # Netrunner: replace generic "Cyberdeck" with random 7-slot named cyberdeck
+            if role == "Netrunner" and gear_name == "Cyberdeck":
+                deck_name = random.choice(NETRUNNER_7_SLOT_CYBERDECKS)
+                deck_stats = next((d for d in cyberdecks_data if d.get("name") == deck_name), None)
+                if deck_stats:
+                    gear, created = Gear.objects.get_or_create(
+                        name=deck_name,
+                        defaults={
+                            'category': 'Cyberdeck',
+                            'description': deck_stats.get('description', ''),
+                            'weight': 0.5,
+                            'value': deck_stats.get('value', 500)
+                        }
+                    )
+                    inventory.add_gear(gear)
+                    logger.info(f"Added cyberdeck: {deck_name}")
+                continue
             gear_stats = next((g for g in gear_data if g['name'] == gear_name), None)
             if gear_stats:
                 gear, created = Gear.objects.get_or_create(
@@ -819,28 +979,34 @@ class EdgerunnerChargen:
                         'value': gear_stats['value']
                     }
                 )
-                inventory.gear.add(gear)
-                logger.info(f"Added gear: {gear_name}")
+                inventory.add_gear(gear, quantity=qty)
+                logger.info(f"Added gear: {gear_name} x{qty}")
         
         # Assign ammunition
         for weapon in inventory.weapons.all():
             weapon_type = weapon.name.split()[-1]  # Get the last word of the weapon name
             ammo = next((a for a in ammunition if a['weapon_type'] == weapon_type), None)
             if ammo:
-                ammo_obj, created = Ammunition.objects.get_or_create(
+                # Use filter().first() to handle duplicate Ammunition rows (e.g. from multiple populates)
+                ammo_obj = Ammunition.objects.filter(
                     name=ammo['name'],
-                    defaults={
-                        'ammo_type': getattr(AmmoType, ammo['ammo_type']),
-                        'weapon_type': ammo['weapon_type'],
-                        'damage_modifier': ammo['damage_modifier'],
-                        'armor_piercing': ammo['armor_piercing'],
-                        'description': ammo['description'],
-                        'cost': ammo['cost'],
-                        'quantity': 50  # Give 50 rounds of ammo
-                    }
-                )
-                if not created:
-                    # If the ammo already exists, update its quantity
+                    weapon_type=ammo['weapon_type'],
+                    ammo_type=getattr(AmmoType, ammo['ammo_type']),
+                ).first()
+                if ammo_obj is None:
+                    ammo_obj = Ammunition.objects.create(
+                        name=ammo['name'],
+                        weapon_type=ammo['weapon_type'],
+                        ammo_type=getattr(AmmoType, ammo['ammo_type']),
+                        damage_modifier=ammo['damage_modifier'],
+                        armor_piercing=ammo['armor_piercing'],
+                        description=ammo['description'],
+                        cost=ammo['cost'],
+                        quantity=50,
+                    )
+                    created = True
+                else:
+                    created = False
                     ammo_obj.quantity += 50
                     ammo_obj.save()
                 inventory.ammunition.add(ammo_obj)
@@ -932,7 +1098,7 @@ class EdgerunnerChargen:
         if hasattr(sheet, 'inventory'):
             sheet.inventory.weapons.all().delete()
             sheet.inventory.armor.all().delete()
-            sheet.inventory.gear.all().delete()
+            sheet.inventory.clear_gear()
         
         # Clear cyberware (use pk to avoid unsaved instance error)
         sheet_pk = getattr(sheet, 'pk', None)
@@ -953,6 +1119,11 @@ class EdgerunnerChargen:
         sheet.total_cyberware_humanity_loss = 0
         sheet._max_hp = 10
         sheet._current_hp = 10
+        sheet.fashion_budget_remaining = 0
+        sheet.sell_your_soul = False
+        sheet.sell_your_soul_employer_type = ""
+        sheet.sell_your_soul_employer = ""
+        sheet.sell_your_soul_catch = ""
         
         sheet.save()
         return sheet
@@ -960,7 +1131,7 @@ class EdgerunnerChargen:
     @classmethod
     def clean_duplicate_gear(cls):
         from django.db.models import Count
-        from world.inventory.models import Inventory
+        from world.inventory.models import Inventory, InventoryGear
 
         duplicate_gear = Gear.objects.values('name').annotate(name_count=Count('name')).filter(name_count__gt=1)
         for item in duplicate_gear:
@@ -968,9 +1139,9 @@ class EdgerunnerChargen:
             primary_item = gear_items.first()
             for duplicate_item in gear_items[1:]:
                 # Update all inventories that use the duplicate item
-                inventories = Inventory.objects.filter(gear=duplicate_item)
-                for inventory in inventories:
-                    inventory.gear.remove(duplicate_item)
-                    inventory.gear.add(primary_item)
+                for ig in InventoryGear.objects.filter(gear=duplicate_item).select_related('inventory'):
+                    inv, qty = ig.inventory, ig.quantity
+                    ig.delete()
+                    inv.add_gear(primary_item, quantity=qty)
                 duplicate_item.delete()
         logger.info("Cleaned up duplicate gear entries")

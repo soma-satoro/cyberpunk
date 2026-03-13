@@ -885,3 +885,6 @@ LockHandler on Patio: access type 'teleport_here' changed from 'teleport_here:tr
 LockHandler on Out: access type 'get' changed from 'get:all()' to 'get:false()' 
 LockHandler on Out: access type 'teleport' changed from 'teleport:true()' to 'teleport:false()' 
 LockHandler on Out: access type 'teleport_here' changed from 'teleport_here:true()' to 'teleport_here:false()'
+26-03-12 23:21:15-07 [-] LockHandler on @tasks: access type 'cmd' changed from 'cmd:all()' to 'cmd:perm(Developer)'
+26-03-12 23:21:15-07 [-] LockHandler on @tunnel: access type 'cmd' changed from 'cmd:all()' to 'cmd: perm(tunnel) or perm(Builder)'
+26-03-12 23:21:15-07 [-] LockHandler on @lock: access type 'cmd' changed from 'cmd:all()' to 'cmd: perm(locks) or perm(Builder)'

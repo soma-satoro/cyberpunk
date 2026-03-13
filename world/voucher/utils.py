@@ -330,7 +330,7 @@ def remove_voucher_duplicates_from_inventory(character, voucher):
                 removed.append(name)
         elif item_type == "gear":
             for g in list(inv.gear.filter(name__iexact=name_lower)):
-                inv.gear.remove(g)
+                inv.remove_gear(g)
                 removed.append(name)
         elif item_type == "cyberware":
             for cw in list(inv.cyberware.filter(installed=False, cyberware__name__iexact=name_lower)):

@@ -701,7 +701,7 @@ class CmdVoucher(MuxCommand):
         elif item_type == "armor":
             inv.armor.remove(removal_obj)
         elif item_type == "gear":
-            inv.gear.remove(removal_obj)
+            inv.remove_gear(removal_obj)
         elif item_type == "cyberware":
             inv.cyberware.remove(removal_obj)
             removal_obj.delete()

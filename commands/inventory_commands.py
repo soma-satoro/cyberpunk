@@ -98,14 +98,15 @@ class CmdInventory(MuxCommand):
             output += "|wNo armor in inventory.|n\n"
         output += "\n"
 
-        # Gear
+        # Gear (use get_gear_with_quantities if available to show qty)
         output += sheet_section("Gear", width=W)
-        gears = inv.gear.all()
-        if gears:
-            output += f"|y{'Gear':<25}{'Category':<20}{'Description':<30}|n\n"
-            for gear in gears:
-                description = (gear.description[:27] + "...") if len(gear.description or "") > 30 else (gear.description or "")
-                output += f"|w{gear.name:<25}{gear.category:<20}{description:<30}|n\n"
+        gear_items = inv.get_gear_with_quantities() if hasattr(inv, 'get_gear_with_quantities') else [(g, 1) for g in inv.gear.all()]
+        if gear_items:
+            output += f"|y{'Gear':<32}{'Category':<18}{'Description':<30}|n\n"
+            for gear, qty in gear_items:
+                desc = (gear.description[:27] + "...") if len(gear.description or "") > 30 else (gear.description or "")
+                name_display = f"{gear.name} (x{qty})" if qty > 1 else gear.name
+                output += f"|w{name_display:<32}{gear.category:<18}{desc:<30}|n\n"
         else:
             output += "|wNo gear in inventory.|n\n"
         output += "\n"
@@ -380,6 +381,6 @@ class CmdEquip(Command):
             return
 
         inventory, created = Inventory.objects.get_or_create(character=character_sheet)
-        inventory.gear.add(gear)
+        inventory.add_gear(gear)
         self.caller.msg(f"Added {gear.name} to {player.name}'s inventory.")
         player.msg(f"A {gear.name} has been added to your inventory.")

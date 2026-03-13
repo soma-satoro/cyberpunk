@@ -1825,6 +1825,13 @@ gears = [
         "value": 50
     },
     {
+        "name": "Tent and Camping Equipment",
+        "category": "Survival",
+        "description": "Tent and camping gear for nomads",
+        "weight": 3,
+        "value": 50
+    },
+    {
         "name": "Tool Bag",
         "category": "Tools",
         "description": "Contains various tools",
@@ -2217,6 +2224,11 @@ gears = [
         "value": 1000
     },
 ]
+
+# Extend with Cyberpunk RED fashion items (core rulebook)
+from world.fashion_data import build_fashion_gear_list
+gears.extend(build_fashion_gear_list())
+
 #Cyberdecks (External)
 cyberdecks = [
     {

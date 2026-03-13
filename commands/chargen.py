@@ -9,11 +9,15 @@ from world.cyberpunk_sheets.models import CharacterSheet
 from evennia.utils import evmenu
 from world.cyberpunk_constants import ROLE_SKILLS, ROLE_SKILL_NAME_MAP
 from world.cyberpunk_sheets.edgerunner import EdgerunnerChargen
+from world.cyberpunk_constants import EQUIPMENT_OR_CHOICES
+from commands.edgerunner_gear_menu import start_edgerunner_gear_menu
 from world.cyberpunk_sheets.services import CharacterMoneyService
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils import logger
 from typeclasses.chargen import ChargenRoom
 from evennia.utils.utils import class_from_module
+from world.sellyoursoul_menu import start_sellyoursoul_menu
+from world.chargen_constants import FASHION_BUDGET
 
 def get_character_model():
     return class_from_module(settings.BASE_CHARACTER_TYPECLASS)
@@ -144,6 +148,12 @@ class CmdChargen(MuxCommand):
             logger.info("User confirmed. Proceeding with character creation.")
             method, role, full_name = self.caller.ndb._chargen_confirm
             del self.caller.ndb._chargen_confirm
+            if method == "edgerunner" and EQUIPMENT_OR_CHOICES.get(role):
+                if start_edgerunner_gear_menu(
+                    self.caller, method, role, full_name,
+                    on_complete=self._on_gear_menu_complete
+                ):
+                    return
             self.create_character(method, role, full_name)
             return
 
@@ -197,10 +207,26 @@ class CmdChargen(MuxCommand):
         except Exception as e:
             logger.error(f"Error checking for existing sheets: {str(e)}")
 
-        # No existing character data found, proceed with creation
+        # No existing character data found - show gear OR menu if needed, else proceed
+        if method == "edgerunner" and EQUIPMENT_OR_CHOICES.get(role):
+            if start_edgerunner_gear_menu(
+                self.caller, method, role, full_name,
+                on_complete=self._on_gear_menu_complete
+            ):
+                return  # Menu is running; it will call create_character when done
         self.create_character(method, role, full_name)
 
-    def create_character(self, method, role, full_name):
+    def _on_gear_menu_complete(self, caller, menu=None):
+        """Called when gear choices menu exits. Run create_character with stored choices."""
+        if hasattr(caller.ndb, "_chargen_params") and hasattr(caller.ndb, "_chargen_gear_choices"):
+            method, role, full_name = caller.ndb._chargen_params
+            gear_choices = caller.ndb._chargen_gear_choices
+            del caller.ndb._chargen_params
+            del caller.ndb._chargen_gear_choices
+            self.create_character(method, role, full_name, gear_choices=gear_choices)
+        # If no params (menu was aborted?), do nothing
+
+    def create_character(self, method, role, full_name, gear_choices=None):
         logger.info(f"Creating character with method: {method}, role: {role}, full_name: {full_name}")
         try:
             char = self.caller
@@ -241,7 +267,7 @@ class CmdChargen(MuxCommand):
             
             # Generate character based on method
             if method == "edgerunner":
-                result = self.edgerunner_chargen(char, sheet, role)
+                result = self.edgerunner_chargen(char, sheet, role, gear_choices=gear_choices)
             else:  # complete_package
                 result = self.complete_package_chargen(char, sheet)
             
@@ -254,7 +280,7 @@ class CmdChargen(MuxCommand):
             self.caller.msg(f"An error occurred during character creation: {str(e)}")
             return False
 
-    def edgerunner_chargen(self, char, sheet, role):
+    def edgerunner_chargen(self, char, sheet, role, gear_choices=None):
         """Create character using edgerunner method, storing data in DB attributes."""
         # Generate stat table
         stat_templates = EdgerunnerChargen.generate_stat_table(role)
@@ -291,13 +317,19 @@ class CmdChargen(MuxCommand):
                 setattr(sheet, sheet_skill_name, skill_value)
         
         # Assign gear and cyberware
-        EdgerunnerChargen.assign_gear(sheet, role)  # Still using sheet for now
+        EdgerunnerChargen.assign_gear(sheet, role, gear_choices=gear_choices or {})
         EdgerunnerChargen.assign_cyberware(sheet, role)  # Still using sheet for now
 
-        # Allot leftover eurodollars (2550 starting - cost of assigned gear/cyberware)
-        package_cost = EdgerunnerChargen.calculate_edgerunner_package_cost(role)
-        remaining_eurodollars = max(0, 2550 - package_cost)
+        # Allot leftover eurodollars (2550 - non_fashion cost); fashion comes from separate 800 eb pool
+        total_cost, fashion_cost = EdgerunnerChargen.calculate_edgerunner_package_cost_split(role)
+        non_fashion_cost = total_cost - fashion_cost
+        remaining_eurodollars = max(0, 2550 - non_fashion_cost)
         CharacterMoneyService.add_money(char, remaining_eurodollars)
+
+        # Fashion budget: 800 eb use-it-or-lose-it, reduced by clothing/fashionware in package
+        if hasattr(sheet, 'fashion_budget_remaining'):
+            sheet.fashion_budget_remaining = max(0, FASHION_BUDGET - fashion_cost)
+            sheet.save(skip_recalculation=True)
         
         # Initialize default languages: English and Streetslang at 4, then a random language
         char.add_language("English", 4)
@@ -322,12 +354,16 @@ class CmdChargen(MuxCommand):
         detailed_info = "\nDetailed stat generation:\n"
         for name, value, row in zip(stat_names, final_stats, rows_selected):
             detailed_info += f"{name.capitalize()}: {value} (Row {row})\n"
+
+        fashion_budget = getattr(sheet, 'fashion_budget_remaining', 0)
+        fashion_info = f"You have {fashion_budget} eb fashion budget for clothing/fashionware (use it or lose it). " if fashion_budget > 0 else ""
         
         return (
             f"Character created using the Edgerunner method for role: {role}.\n"
             f"Your stats have been assigned as follows:\n{stat_display}\n{detailed_info}\n"
-            f"{remaining_eurodollars} Eurodollars have been added to your account (2550 - {package_cost} spent on gear and cyberware).\n"
-            f"Use 'sheet' to view your full character details, 'inv/balance' to check your money."
+            f"{remaining_eurodollars} Eurodollars have been added to your account (2550 - {non_fashion_cost} spent on gear and cyberware).\n"
+            f"{fashion_info}"
+            f"Use 'sheet' to view your full character details, 'inv' to view inventory, and 'inv/balance' to check your money."
         )
 
     def complete_package_chargen(self, char, sheet):
@@ -359,13 +395,19 @@ class CmdChargen(MuxCommand):
 
         # For compatibility
         sheet.eurodollars = 2550
+        sheet.fashion_budget_remaining = 800  # 800 eb for fashion/fashionware (use-it-or-lose-it)
         for skill in default_skills:
             setattr(sheet, skill, 2)
         sheet.add_language("English", 4)
         sheet.add_language("Streetslang", 4)
         sheet.save()
         
-        return f"Character created using the Complete Package method.\nYou have 62 attribute points and 52 skill points to spend.\nUse 'selfstat' to allocate them."
+        return (
+            f"Character created using the Complete Package method.\n"
+            f"You have 62 attribute points and 52 skill points to spend.\n"
+            f"You have 800 eb fashion budget for clothing/fashionware (use it or lose it).\n"
+            f"Use 'selfstat' to allocate them."
+        )
 
     def reset_character(self):
         """Reset the character to default values."""
@@ -526,6 +568,30 @@ class ConfirmCmdSet(CmdSet):
 
     def at_cmdset_creation(self):
         self.add(CmdConfirmReset())
+
+
+class CmdSellYourSoul(Command):
+    """
+    During chargen: opt into Sell Your Soul for 1500 eb + free Neural Link.
+    Choose employer (Military/Crime/Corporation) and catch (Hostages, Blackmail, etc.).
+
+    Usage:
+      sellyoursoul
+    """
+    key = "sellyoursoul"
+    aliases = ["sellyoursoul", "soul"]
+    locks = "cmd:all()"
+    help_category = "Character"
+
+    def func(self):
+        if not isinstance(self.caller.location, ChargenRoom):
+            self.caller.msg("You can only use this command in a character generation room.")
+            return
+        if self.caller.tags.has("approved", category="approval"):
+            self.caller.msg("Your character is already approved.")
+            return
+        start_sellyoursoul_menu(self.caller)
+
 
 class CmdListCharacterSheets(Command):
     """

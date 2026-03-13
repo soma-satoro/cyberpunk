@@ -260,6 +260,27 @@ class InventoryWeapon(SharedMemoryModel):
         unique_together = [['inventory', 'weapon']]
 
 
+class InventoryGear(SharedMemoryModel):
+    """Through model for inventory gear with quantity support (e.g. Leisurewear Top x5)."""
+    inventory = models.ForeignKey(
+        'Inventory',
+        on_delete=models.CASCADE,
+        related_name='inventory_gear_entries'
+    )
+    gear = models.ForeignKey(
+        'Gear',
+        on_delete=models.CASCADE,
+        related_name='inventory_instances'
+    )
+    quantity = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        unique_together = [['inventory', 'gear']]
+
+    def __str__(self):
+        return f"{self.gear.name} x{self.quantity}"
+
+
 class Inventory(SharedMemoryModel):
     # Keep for backward compatibility
     character = models.OneToOneField(
@@ -284,7 +305,13 @@ class Inventory(SharedMemoryModel):
         blank=True
     )
     armor = models.ManyToManyField('Armor', blank=True)
-    gear = models.ManyToManyField('Gear', blank=True)
+    gear = models.ManyToManyField(
+        'Gear',
+        through='InventoryGear',
+        through_fields=('inventory', 'gear'),
+        blank=True,
+        related_name='inventories'
+    )
     vehicles = models.ManyToManyField('Vehicle', blank=True)
     cyberware = models.ManyToManyField(CyberwareInstance, blank=True)
     ammunition = models.ManyToManyField(Ammunition, blank=True)
@@ -300,6 +327,34 @@ class Inventory(SharedMemoryModel):
 
     def __str__(self):
         return f"Inventory for {self.get_character_name()}"
+
+    def add_gear(self, gear, quantity=1):
+        """Add gear to inventory (uses through model; supports quantity)."""
+        ig, created = InventoryGear.objects.get_or_create(
+            inventory=self, gear=gear, defaults={"quantity": 0}
+        )
+        ig.quantity += quantity
+        ig.save()
+
+    def remove_gear(self, gear, quantity=1):
+        """Remove gear from inventory (uses through model)."""
+        try:
+            ig = InventoryGear.objects.get(inventory=self, gear=gear)
+            ig.quantity -= quantity
+            if ig.quantity <= 0:
+                ig.delete()
+            else:
+                ig.save()
+        except InventoryGear.DoesNotExist:
+            pass
+
+    def clear_gear(self):
+        """Remove all gear from inventory."""
+        self.inventory_gear_entries.all().delete()
+
+    def get_gear_with_quantities(self):
+        """Return list of (gear, quantity) tuples."""
+        return [(ig.gear, ig.quantity) for ig in self.inventory_gear_entries.select_related("gear").all()]
         
     def get_character_name(self):
         """Get the character's name from typeclass or sheet"""
@@ -335,9 +390,18 @@ class Inventory(SharedMemoryModel):
                         duplicate = cls.objects.filter(character_object_id=char_pk).exclude(id=inventory.id).first()
                         if duplicate:
                             # Merge duplicate into canonical (sheet-linked) inventory
-                            for m2m in ['weapons', 'armor', 'gear', 'vehicles', 'cyberware', 'ammunition']:
-                                for obj in getattr(duplicate, m2m).all():
-                                    getattr(inventory, m2m).add(obj)
+                            for obj in duplicate.weapons.all():
+                                inventory.weapons.add(obj)
+                            for obj in duplicate.armor.all():
+                                inventory.armor.add(obj)
+                            for ig in duplicate.inventory_gear_entries.select_related("gear").all():
+                                inventory.add_gear(ig.gear, ig.quantity)
+                            for obj in duplicate.vehicles.all():
+                                inventory.vehicles.add(obj)
+                            for obj in duplicate.cyberware.all():
+                                inventory.cyberware.add(obj)
+                            for obj in duplicate.ammunition.all():
+                                inventory.ammunition.add(obj)
                             duplicate.delete()
                         inventory.character_object_id = char_pk
                         try:
@@ -346,9 +410,18 @@ class Inventory(SharedMemoryModel):
                             # Duplicate exists - merge and retry (may have been missed or created by race)
                             duplicate = cls.objects.filter(character_object_id=char_pk).exclude(id=inventory.id).first()
                             if duplicate:
-                                for m2m in ['weapons', 'armor', 'gear', 'vehicles', 'cyberware', 'ammunition']:
-                                    for obj in getattr(duplicate, m2m).all():
-                                        getattr(inventory, m2m).add(obj)
+                                for obj in duplicate.weapons.all():
+                                    inventory.weapons.add(obj)
+                                for obj in duplicate.armor.all():
+                                    inventory.armor.add(obj)
+                                for ig in duplicate.inventory_gear_entries.select_related("gear").all():
+                                    inventory.add_gear(ig.gear, ig.quantity)
+                                for obj in duplicate.vehicles.all():
+                                    inventory.vehicles.add(obj)
+                                for obj in duplicate.cyberware.all():
+                                    inventory.cyberware.add(obj)
+                                for obj in duplicate.ammunition.all():
+                                    inventory.ammunition.add(obj)
                                 duplicate.delete()
                             inventory.character_object_id = char_pk
                             inventory.save()
@@ -376,6 +449,7 @@ class Inventory(SharedMemoryModel):
             inventory.save()
 
         return inventory, True
+
 
 class Cyberdeck(SharedMemoryModel):
     name = models.CharField(max_length=255)

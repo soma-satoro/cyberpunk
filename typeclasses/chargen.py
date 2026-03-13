@@ -95,7 +95,7 @@ class ChargenRoom(DefaultRoom):
         # Header with room name
         string = header(name, width=78, bcolor="|m", fillchar=ANSIString("|m-|n")) + "\n"
         
-        # Add remaining points information for the looker
+        # Add remaining points and fashion budget for the looker
         if inherits_from(looker, "typeclasses.characters.Character"):
             # Force a refresh of the character sheet
             if hasattr(looker, 'character_sheet'):
@@ -103,7 +103,12 @@ class ChargenRoom(DefaultRoom):
             
             remaining_stat_points, remaining_skill_points = self.get_remaining_points(looker)
             if remaining_stat_points is not None and remaining_skill_points is not None:
-                points_info = f"|wRemaining Points:|n Stat Points: |g{remaining_stat_points}|n, Skill Points: |g{remaining_skill_points}|n\n"
+                points_info = f"|wRemaining Points:|n Stat Points: |g{remaining_stat_points}|n, Skill Points: |g{remaining_skill_points}|n"
+                # Add fashion budget (use-it-or-lose-it for clothing in chargen)
+                fashion_budget = getattr(looker.character_sheet, 'fashion_budget_remaining', 0)
+                if fashion_budget is not None and fashion_budget > 0:
+                    points_info += f", Fashion Budget: |g{fashion_budget}|n eb"
+                points_info += "\n"
                 string += points_info + "\n"
 
         # Process room description

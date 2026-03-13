@@ -283,6 +283,45 @@ def complete_mission(mission, survivors=None):
                 if hasattr(obj, 'move_to') and obj.location:
                     obj.move_to(lead, quiet=True)
 
+    # Apartment rewards: staff missions only. One per team member in order (lead, 2nd, 3rd...).
+    # Each person gets at most one; those who already have a staff-provided apartment are skipped.
+    if mission.posted_by_staff and (getattr(mission, 'apartment_rewards', None) or []):
+        from typeclasses.rental import RentableRoom
+        apt_recipients = payees if survivors is not None else team
+        already_awarded_this_mission = set()
+        for dbref in (mission.apartment_rewards or []):
+            ref = f"#{dbref}" if isinstance(dbref, int) else str(dbref)
+            objs = search_object(ref)
+            if not objs:
+                continue
+            obj = objs[0]
+            if isinstance(obj, RentableRoom):
+                main = obj.get_main_room()
+            elif hasattr(obj, 'get_main_room'):
+                main = obj.get_main_room()
+                if not isinstance(main, RentableRoom):
+                    continue
+            else:
+                continue
+            # Find next eligible recipient: in team order, not yet given one this mission,
+            # and doesn't already have a staff-provided apartment
+            awarded_to = None
+            for mtm in apt_recipients:
+                char = mtm.character
+                if not char or char.id in already_awarded_this_mission:
+                    continue
+                has_awarded = char.attributes.get('awarded_apartments', category='rental') or []
+                if has_awarded:
+                    continue
+                success, msg = main.award_to(char)
+                if success:
+                    already_awarded_this_mission.add(char.id)
+                    awarded_to = char
+                    logger.log_info(f"Mission #{mission.id}: Awarded apartment #{main.id} to {char.key}")
+                    break
+            if not awarded_to:
+                break
+
 
 def fail_mission(mission):
     """Apply notoriety and optional money penalty on failure."""

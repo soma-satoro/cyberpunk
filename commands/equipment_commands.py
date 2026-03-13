@@ -132,7 +132,7 @@ class CmdAddGear(Command):
             return
 
         inventory, created = Inventory.objects.get_or_create(character=character_sheet)
-        inventory.gear.add(gear)
+        inventory.add_gear(gear)
         self.caller.msg(f"Added {gear.name} to {player.name}'s inventory.")
         player.msg(f"A {gear.name} has been added to your inventory.")
 
@@ -585,7 +585,7 @@ class CmdRemoveEquipment(Command):
     def remove_gear(self, inventory, gear_name, player):
         try:
             gear = inventory.gear.get(name__iexact=gear_name.strip('"'))
-            inventory.gear.remove(gear)
+            inventory.remove_gear(gear)
             self.caller.msg(f"Removed {gear.name} from {player.name}'s inventory.")
             player.msg(f"A {gear.name} has been removed from your inventory.")
         except Gear.DoesNotExist:

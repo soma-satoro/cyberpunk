@@ -383,69 +383,121 @@ ROLE_SKILLS = {
     }    
 }
 
-# Role-specific equipment
+# Gear OR choices: roles with "choose one" options. Used to show menu during chargen.
+# Format: role -> list of {prompt, options}. Each option is (name, qty) or plain name.
+EQUIPMENT_OR_CHOICES = {
+    "Rockerboy": [
+        {"prompt": "Choose one:", "options": ["Bug Detector", "Electric Guitar"]},
+    ],
+    "Media": [
+        {"prompt": "Choose one:", "options": [("Disposable Cell Phone", 2), "Grapple Gun"]},
+    ],
+}
+
+# Role-specific equipment (gear items support (name, qty) or plain name for qty 1)
+# Use {"or": index} as placeholder - replaced by menu choice; index refers to EQUIPMENT_OR_CHOICES[role][index]
+# From Cyberpunk RED core rulebook - Edgerunner starting outfits
 EQUIPMENT = {
-                "Rockerboy": {
-                    "weapons": ["Very Heavy Pistol", "Heavy Melee Weapon"],
-                    "armor": ["Light Armorjack"],
-                    "gear": ["Agent", "Computer", "Bug Detector", "Glow Paint", "Pocket Amp", 
-                          "Radio Scanner/Music Player", "Video Camera", "Generic Chic", 
-                          "Leisurewear", "Urbanflash"],
-                },
-                "Solo": {
-                    "weapons": ["Assault Rifle", "Very Heavy Pistol", "Heavy Melee Weapon"],
-                    "armor": ["Light Armorjack"],
-                    "gear": ["Bulletproof Shield", "Agent", "Leisurewear"]
-                },
-                "Netrunner": {
-                    "weapons": ["Very Heavy Pistol"],
-                    "armor": ["Light Armorjack"],
-                    "gear": ["Agent", "Cyberdeck", "Virtuality Goggles", 
-                        "Generic Chic", "Leisurewear", "Urban Flash"]
-                },
-                "Tech": {
-                    "weapons": ["Shotgun", "Assault Rifle"],
-                    "armor": ["Light Armorjack"],
-                    "gear": ["Flashbang Grenade", "Agent", "Anti-Smog Breathing Mask", "Disposable Cell Phone", "Duct Tape", "Flashlight", 
-                     "Road Flare", "Tech Bag", "Generic Chic", "Leisurewear"]
-                },
-                "Medtech": {
-                    "weapons": ["Shotgun", "Assault Rifle"],
-                    "armor": ["Light Armorjack"],
-                    "gear": ["Agent", "Airhypo", "Handcuffs", "Flashlight", "Generic Chic", "Glow Paint", 
-                        "Medtech Bag", "Leisurewear"]
-                },
-                "Media": {
-                    "weapons": ["Heavy Pistol", "Very Heavy Pistol"],
-                    "armor": ["Light Armorjack"],
-                    "gear": ["Agent", "Audio Recorder", "Binoculars", "Disposable Cellphone", "Flashlight", 
-                      "Computer", "Radio Scanner/Music Player", "Scrambler/Descrambler", "Video Camera", 
-                      "Generic Chic", "Leisurewear", "Mirrorshades"]
-                },
-                "Lawman": {
-                    "weapons": ["Assault Rifle", "Shotgun", "Heavy Pistol"],
-                    "armor": ["Light Armorjack"],
-                    "gear": ["Bulletproof Shield", "Smoke Grenade", "Agent", "Flashlight", "Handcuffs", "Radio Communicator", "Road Flare", 
-                       "Generic Chic", "Leisurewear", "Mirrorshades"]
-                },
-                "Exec": {
-                    "weapons": ["Very Heavy Pistol"],
-                    "armor": ["Light Armorjack"],
-                    "gear": ["Radio Communicator", "Scrambler/Descrambler", "Businesswear", "Mirrorshades"]
-                },
-                "Fixer": {
-                    "weapons": ["Heavy Pistol", "Very Heavy Pistol", "Light Melee Weapon"],
-                    "armor": ["Light Armorjack"],
-                    "gear": ["Agent", "Bug Detector", "Computer", "Disposable Phone", "Generic Chic", 
-                      "Mirrorshades", "Urbanflash"]
-                },
-                "Nomad": {
-                    "weapons": ["Heavy Pistol", "Very Heavy Pistol", "Heavy Melee Weapon"],
-                    "armor": ["Light Armorjack"],
-                    "gear": ["Agent", "Anti-Smog Breathing Mask", "Duct Tape", "Flashlight", "Grapple Gun", "Inflatable Bed & Sleep-Bag", 
-                      "Medtech Bag", "Radio Communicator", "Rope", "Techtool", "Tent and Camping Equipment", 
-                      "Bohemian Chic", "Nomad Leathers"]
-                }
+    "Rockerboy": {
+        "weapons": ["Very Heavy Pistol", "Heavy Melee Weapon"],
+        "armor": ["Light Armorjack"],
+        "gear": [
+            "Agent", "Computer", {"or": 0}, ("Glow Paint", 5), "Pocket Amplifier",
+            "Radio Scanner/Music Player", "Video Camera",
+            "Generic Chic Jacket", ("Generic Chic Jewelry", 3), ("Generic Chic Top", 4),
+            "Leisurewear Jewelry", "Leisurewear Mirrorshades", "Leisurewear Footwear",
+            "Urban Flash Bottoms", "Urban Flash Top",
+        ],
+    },
+    "Solo": {
+        "weapons": ["Assault Rifle", "Very Heavy Pistol", "Heavy Melee Weapon"],
+        "armor": ["Light Armorjack"],
+        "gear": [
+            "Agent",
+            ("Leisurewear Footwear", 2), ("Leisurewear Jacket", 3), "Leisurewear Mirrorshades",
+            ("Leisurewear Bottoms", 2), ("Leisurewear Top", 2),
+        ],
+    },
+    "Netrunner": {
+        "weapons": ["Very Heavy Pistol"],
+        "armor": ["Light Armorjack"],
+        "gear": [
+            "Agent", "Cyberdeck", "Virtuality Goggles",
+            ("Generic Chic Top", 10),
+            ("Leisurewear Footwear", 2), "Leisurewear Jewelry", ("Leisurewear Bottoms", 2),
+            "Urban Flash Jacket",
+        ],
+    },
+    "Tech": {
+        "weapons": ["Shotgun", "Assault Rifle"],
+        "armor": ["Light Armorjack"],
+        "gear": [
+            "Agent", "Anti-Smog Breathing Mask", "Disposable Cell Phone", ("Duct Tape", 5),
+            "Flashlight", ("Roadflare", 6), "Tech Bag",
+            ("Generic Chic Bottoms", 8), ("Generic Chic Top", 10),
+            ("Leisurewear Footwear", 2),
+        ],
+    },
+    "Medtech": {
+        "weapons": ["Shotgun", "Assault Rifle"],
+        "armor": ["Light Armorjack"],
+        "gear": [
+            "Agent", "Airhypo", "Handcuffs", "Flashlight", ("Generic Chic Jacket", 3),
+            "Glow Paint", "Medtech Bag",
+            "Leisurewear Footwear", ("Leisurewear Bottoms", 3), ("Leisurewear Top", 5),
+        ],
+    },
+    "Media": {
+        "weapons": ["Heavy Pistol", "Very Heavy Pistol"],
+        "armor": ["Light Armorjack"],
+        "gear": [
+            "Agent", "Audio Recorder", "Binoculars", {"or": 0},
+            "Flashlight", "Computer", "Radio Scanner/Music Player", "Scrambler/Descrambler", "Video Camera",
+            "Generic Chic Footwear", "Generic Chic Bottoms", "Generic Chic Top",
+            "Leisurewear Jacket", "Urban Flash Mirrorshades",
+        ],
+    },
+    "Lawman": {
+        "weapons": ["Assault Rifle", "Shotgun", "Heavy Pistol"],
+        "armor": ["Light Armorjack"],
+        "gear": [
+            "Agent", "Flashlight", ("Handcuffs", 2), "Radio Communicator", ("Roadflare", 10),
+            "Generic Chic Jacket", ("Generic Chic Bottoms", 2), ("Generic Chic Top", 3),
+            ("Leisurewear Footwear", 2), ("Leisurewear Jacket", 2), ("Leisurewear Bottoms", 2),
+            "Leisurewear Mirrorshades", ("Leisurewear Top", 2),
+        ],
+    },
+    "Exec": {
+        "weapons": ["Very Heavy Pistol"],
+        "armor": ["Light Armorjack"],
+        "gear": [
+            ("Radio Communicator", 4), "Scrambler/Descrambler",
+            "Businesswear Footwear", "Businesswear Jacket", "Businesswear Bottoms",
+            "Businesswear Mirrorshades", "Businesswear Top", ("Businesswear Jewelry", 2),
+        ],
+    },
+    "Fixer": {
+        "weapons": ["Heavy Pistol", "Very Heavy Pistol", "Light Melee Weapon"],
+        "armor": ["Light Armorjack"],
+        "gear": [
+            "Agent", "Bug Detector", "Computer", ("Disposable Cell Phone", 2),
+            "Generic Chic Contact Lenses", "Generic Chic Jewelry",
+            "Leisurewear Mirrorshades",
+            "Urban Flash Footwear", "Urban Flash Jacket", "Urban Flash Bottoms", "Urban Flash Top",
+        ],
+    },
+    "Nomad": {
+        "weapons": ["Heavy Pistol", "Very Heavy Pistol", "Heavy Melee Weapon"],
+        "armor": ["Light Armorjack"],
+        "gear": [
+            "Agent", "Anti-Smog Breathing Mask", "Duct Tape", "Flashlight", "Grapple Gun",
+            "Inflatable Bed & Sleep-bag", "Medtech Bag", ("Radio Communicator", 2),
+            "Rope", "Techtool", "Tent and Camping Equipment",
+            "Bohemian Jewelry",
+            ("Nomad Leathers Top", 4), ("Nomad Leathers Bottoms", 2), ("Nomad Leathers Footwear", 2),
+            "Nomad Leathers Jacket", "Nomad Leathers Hats",
+        ],
+    },
 }
 
 # Role-specific cyberware

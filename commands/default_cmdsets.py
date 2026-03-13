@@ -17,7 +17,7 @@ own cmdsets by inheriting from them or directly from `evennia.CmdSet`.
 
 from evennia import default_cmds, CmdSet
 from .character_commands import CmdSheet, CmdRoll, CmdLuck, CmdShortDesc, CmdOOC, CmdPlusOoc, CmdPlusIc, CmdMeet
-from .chargen import CmdChargen, CmdListCharacterSheets, CmdLifepath, CmdSelfStat, CmdSetLanguage
+from .chargen import CmdChargen, CmdListCharacterSheets, CmdLifepath, CmdSelfStat, CmdSetLanguage, CmdSellYourSoul
 from .admin_commands import CmdStat, CmdHeal, CmdApprove, CmdUnapprove, CmdSpawnRipperdoc, CmdGradientName, CmdClearAllStates, CmdClearRental, CmdCleanupDuplicates, CmdExamine, CmdAssociateAllCharacterSheets, CmdViewCharacterSheetID, CmdSetCharacterSheetID, CmdAllSheets, CmdViewSheetAttributes, CmdSyncLanguages, CmdJoin, CmdSummon
 from .inventory_commands import CmdInventory
 from .voucher_commands import CmdVoucher, CmdConceal, CmdOwner
@@ -71,6 +71,7 @@ from .CmdFinger import CmdFinger
 from .CmdGradient import CmdGradientName
 from .where import CmdWhere
 from .CmdWho import CmdWho
+from .coords_commands import CmdCoords, CmdGo
 from .commonmux.CmdPage import CmdPage
 #from .vehicle_commands import CmdEnterVehicle, CmdExitVehicle
 from .dice_commands import CmdDice
@@ -119,6 +120,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdMystery())
         self.add(CmdInvestigate())
         self.add(CmdChargen())
+        self.add(CmdSellYourSoul())
         self.add(CmdManageBuilding())
         self.add(CmdRoom())
         self.add(CmdAreaManage())
@@ -130,6 +132,8 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdHangout())
         self.add(CmdWho())
         self.add(CmdWhere())
+        self.add(CmdCoords())
+        self.add(CmdGo())
         self.add(CmdPlots())
         self.add(CmdWatch())
         self.add(CmdWeather())

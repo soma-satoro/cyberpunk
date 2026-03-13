@@ -128,6 +128,9 @@ class CmdMission(MuxCommand):
       mission/mine                - List missions you're on
       mission/faction <#>=<faction> - Set mission's faction (staff/fixer/faction head)
       mission/fixer <#>=<npc>      - Staff: assign an NPC as the mission fixer (bypasses payout requirements)
+      mission/reward <#>=apartment:#id[,apartment:#id,...] - Staff: add apartment rewards (staff missions only)
+      mission/reward <#>/clear     - Staff: clear apartment rewards
+      mission/reward <#>/remove=#id[,#id,...] - Staff: remove apartment rewards by dbref
       mission/seeds               - Fixers: list available story seeds
       mission/seed <#>            - View story seed details
       mission/seed/create <name>=<desc>/<max_budget>[/rep][/FactionName][/faction_rep][/voucher:#id][/item:#id] - Staff: create seed
@@ -197,6 +200,8 @@ class CmdMission(MuxCommand):
             self.cmd_faction()
         elif "fixer" in self.switches:
             self.cmd_fixer()
+        elif "reward" in self.switches:
+            self.cmd_reward()
         elif "seeds" in self.switches:
             self.cmd_seeds()
         elif "grab" in self.switches:
@@ -261,6 +266,9 @@ class CmdMission(MuxCommand):
         if mission.money_pay_on_delivery:
             out += " (pay on delivery)"
         out += f", {mission.rep_amount} rep"
+        apt_rewards = getattr(mission, 'apartment_rewards', None) or []
+        if mission.posted_by_staff and apt_rewards:
+            out += f" |cApartment rewards:|n {len(apt_rewards)}"
         if getattr(mission, 'faction_rep_amount', 0) > 0 and mission.faction:
             out += f", {mission.faction_rep_amount} {mission.faction.name} rep"
         elif mission.faction and mission.rep_amount and not getattr(mission, 'faction_rep_amount', 0):
@@ -835,6 +843,92 @@ class CmdMission(MuxCommand):
         display = _get_character_display_name(npc)
         services.mission_add_comment_and_mail(mission, self.caller.key, f"Fixer assigned: {display} (NPC)")
         self.caller.msg(f"Mission #{mission.id} fixer set to {display} (NPC - bypasses payout requirements).")
+
+    def cmd_reward(self):
+        """Staff: add/remove apartment rewards on staff missions. Only staff missions can have apartment rewards."""
+        if not _is_staff(self.caller):
+            self.caller.msg("Only staff can set mission apartment rewards.")
+            return
+        if not self.args:
+            self.caller.msg("Usage: mission/reward <#>=apartment:#id[,apartment:#id,...] | /clear | /remove=#id,#id")
+            return
+        from typeclasses.rental import RentableRoom
+
+        if "/clear" in self.args:
+            mid = self.args.replace("/clear", "").strip()
+            mission = self._get_mission(mid)
+            if not mission:
+                self.caller.msg("Mission not found.")
+                return
+            if not mission.posted_by_staff:
+                self.caller.msg("Only staff missions can have apartment rewards.")
+                return
+            mission.apartment_rewards = []
+            mission.save()
+            self.caller.msg(f"Cleared apartment rewards for mission #{mission.id}.")
+            return
+
+        if "/remove=" in self.args:
+            mid, rest = self.args.split("/remove=", 1)
+            mid = mid.strip()
+            mission = self._get_mission(mid)
+            if not mission:
+                self.caller.msg("Mission not found.")
+                return
+            if not mission.posted_by_staff:
+                self.caller.msg("Only staff missions can have apartment rewards.")
+                return
+            ids_str = rest.strip()
+            to_remove = []
+            for part in ids_str.split(","):
+                part = part.strip().strip("#")
+                if part.isdigit():
+                    to_remove.append(int(part))
+            rewards = list(mission.apartment_rewards or [])
+            for rid in to_remove:
+                if rid in rewards:
+                    rewards.remove(rid)
+            mission.apartment_rewards = rewards
+            mission.save()
+            self.caller.msg(f"Mission #{mission.id} apartment rewards: {len(rewards)} remaining.")
+            return
+
+        if "=" not in self.args:
+            self.caller.msg("Usage: mission/reward <#>=apartment:#id[,apartment:#id,...] | /clear | /remove=#id,#id")
+            return
+
+        mid, rest = self.args.split("=", 1)
+        mission = self._get_mission(mid.strip())
+        if not mission:
+            self.caller.msg("Mission not found.")
+            return
+        if not mission.posted_by_staff:
+            self.caller.msg("Only staff missions can have apartment rewards.")
+            return
+
+        apartment_rewards = list(mission.apartment_rewards or [])
+        for part in rest.split(","):
+            part = part.strip()
+            if not part.lower().startswith("apartment:"):
+                continue
+            id_str = part[10:].strip().strip("#")
+            if not id_str.isdigit():
+                continue
+            objs = search_object(f"#{id_str}")
+            if not objs:
+                self.caller.msg(f"Object #{id_str} not found.")
+                continue
+            obj = objs[0]
+            main = obj.get_main_room() if hasattr(obj, 'get_main_room') else obj
+            if not isinstance(main, RentableRoom):
+                self.caller.msg(f"#{main.id} is not a rentable apartment.")
+                continue
+            main_id = main.id
+            if main_id not in apartment_rewards:
+                apartment_rewards.append(main_id)
+        mission.apartment_rewards = apartment_rewards
+        mission.save()
+        self.caller.msg(f"Mission #{mission.id} apartment rewards: {len(apartment_rewards)} apartment(s).")
 
     def cmd_seeds(self):
         """List story seeds. Fixers see available; staff see all."""

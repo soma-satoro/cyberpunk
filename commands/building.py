@@ -730,6 +730,9 @@ class CmdManageBuilding(MuxCommand):
         +manage/exit <exit>=<name> - Change exit display name
         +manage/exitdesc <exit>=<text> - Change exit description
         
+        +manage/award <character>[=<type>] - Award current room (RentableRoom) to character (staff)
+        +manage/revoke <character> - Revoke awarded apartment from character (staff, be in the apartment)
+        
     Example:
         +manage/setlobby
         +manage/addtype Studio
@@ -827,7 +830,7 @@ class CmdManageBuilding(MuxCommand):
     def check_lobby_required(self, location, switch):
         """Check if command requires an active lobby setup"""
         # These commands can be used without a lobby (any room)
-        if switch in ["setlobby", "clear", "info", "sethousing", "desc", "name", "exit", "exitdesc"]:
+        if switch in ["setlobby", "clear", "info", "sethousing", "desc", "name", "exit", "exitdesc", "award", "revoke"]:
             return True
             
         # For other commands, check if this is a lobby or connected to one
@@ -900,6 +903,36 @@ class CmdManageBuilding(MuxCommand):
                     self.caller.msg(f"Exit '{ex.key}' description updated.")
                     return
             self.caller.msg(f"No exit named '{exit_name}' found.")
+            return
+        elif switch == "award":
+            if not self.args:
+                self.caller.msg("Usage: +manage/award <character>[=<type>]")
+                return
+            char_arg = self.lhs.strip() if self.lhs else self.args.strip().split("=")[0].strip()
+            rental_type = self.rhs.strip() if self.rhs else None
+            target = self.caller.search(char_arg, typeclass="typeclasses.characters.Character")
+            if not target:
+                return
+            if not isinstance(location, RentableRoom):
+                self.caller.msg("You must be in a RentableRoom (apartment) to award it.")
+                return
+            main = location.get_main_room()
+            success, msg = main.award_to(target, rental_type)
+            self.caller.msg(msg)
+            return
+        elif switch == "revoke":
+            if not self.args:
+                self.caller.msg("Usage: +manage/revoke <character>")
+                return
+            target = self.caller.search(self.args.strip(), typeclass="typeclasses.characters.Character")
+            if not target:
+                return
+            if not isinstance(location, RentableRoom):
+                self.caller.msg("You must be in the awarded apartment to revoke it.")
+                return
+            main = location.get_main_room()
+            success, msg = main.revoke_award(target)
+            self.caller.msg(msg)
             return
 
         if switch == "types":

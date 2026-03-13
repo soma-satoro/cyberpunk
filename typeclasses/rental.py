@@ -55,6 +55,7 @@ class RentableRoom(Room):
         # room_owners: {room_id: char_id} - which co-resident owns which room
         self.db.room_owners = {}
         self.db.partner_pending = None  # char awaiting +rent/partner confirm
+        self.db.is_awarded = False  # True = staff/mission award, no rent, stacks with rented_room
 
     def get_main_room(self):
         """Get the main room of this apartment (self if main, else parent)."""
@@ -114,6 +115,87 @@ class RentableRoom(Room):
             self.db.rent_cost = data.get("rent") or 0
             self.db.purchase_cost = data.get("purchase") or 0
         self.db.is_temporary = is_temporary
+
+    def award_to(self, character, rental_type=None):
+        """
+        Award this apartment to a character (staff or mission reward).
+        No rent, no eurodollar check. Stacks with rented_room - character can have
+        both a rental and awarded apartments (e.g. corporate housing + personal rental).
+        """
+        main = self.get_main_room()
+        if main.db.owner and main.db.owner.id != character.id:
+            return False, "This apartment is already assigned to someone else."
+        if main.db.owner and main.db.owner.id == character.id:
+            return True, f"{character.name} already has this apartment awarded."
+
+        if not hasattr(character, 'character_sheet') or not character.character_sheet:
+            return False, "Character has no character sheet."
+
+        rental_type = rental_type or main.db.rental_type
+        if not rental_type:
+            rental_type = "Studio Apartment"  # Default for awards
+        if rental_type not in self.RENTAL_TYPES:
+            return False, f"Invalid rental type: {rental_type}"
+
+        main.set_rental_type(rental_type)
+        main.db.owner = character
+        main.db.residents = [character]
+        main.db.co_residents = {}
+        main.db.partners = []
+        main.db.room_owners = {}
+        main.db.purchased = True  # No rent for awarded
+        main.db.rent_cost = 0
+        main.db.is_awarded = True
+        main.db.rent_due_date = None
+
+        awarded = list(character.attributes.get('awarded_apartments', category='rental') or [])
+        main_id = main.id
+        if main_id not in awarded:
+            awarded.append(main_id)
+        character.attributes.add('awarded_apartments', awarded, category='rental')
+
+        for child in main.db.child_rooms or []:
+            if child:
+                child.db.owner = character
+                child.db.residents = [character]
+                child.db.purchased = True
+                child.db.is_awarded = True
+
+        return True, f"Awarded {rental_type} to {character.name} (corporate/staff housing, no rent)."
+
+    def revoke_award(self, character):
+        """Staff revokes an awarded apartment from a character."""
+        main = self.get_main_room()
+        if not main.db.is_awarded:
+            return False, "This is not an awarded apartment."
+        if not main.db.owner or main.db.owner.id != character.id:
+            return False, f"{character.name} is not the recipient of this award."
+
+        awarded = list(character.attributes.get('awarded_apartments', category='rental') or [])
+        if main.id in awarded:
+            awarded.remove(main.id)
+        character.attributes.add('awarded_apartments', awarded, category='rental')
+
+        if character.db.home_location == main:
+            character.db.home_location = None
+
+        main.db.owner = None
+        main.db.residents = []
+        main.db.co_residents = {}
+        main.db.partners = []
+        main.db.room_owners = {}
+        main.db.is_awarded = False
+        main.db.purchased = False
+
+        for child in main.db.child_rooms or []:
+            if child:
+                child.db.owner = None
+                child.db.residents = []
+                child.db.purchased = False
+                child.db.is_awarded = False
+
+        character.msg("Your awarded apartment has been revoked.")
+        return True, f"Revoked apartment from {character.name}."
 
     def rent_to(self, character, rental_type=None):
         """
@@ -239,7 +321,13 @@ class RentableRoom(Room):
         main = self.get_main_room()
         if main.db.owner:
             main.db.owner.msg("You have been evicted from your apartment due to non-payment.")
-            main.db.owner.attributes.remove('rented_room')
+            if main.db.is_awarded:
+                awarded = list(main.db.owner.attributes.get('awarded_apartments', category='rental') or [])
+                if main.id in awarded:
+                    awarded.remove(main.id)
+                main.db.owner.attributes.add('awarded_apartments', awarded, category='rental')
+            else:
+                main.db.owner.attributes.remove('rented_room')
             if main.db.owner.db.home_location == main:
                 main.db.owner.db.home_location = None
 
@@ -250,7 +338,13 @@ class RentableRoom(Room):
             main.db.owner = new_owner
             main.db.residents = [new_owner] + [c for c in co_list[1:] if c]
             main.db.co_residents = {k: v for k, v in (main.db.co_residents or {}).items() if v != new_owner}
-            new_owner.attributes.add('rented_room', main)
+            if main.db.is_awarded:
+                awarded = list(new_owner.attributes.get('awarded_apartments', category='rental') or [])
+                if main.id not in awarded:
+                    awarded.append(main.id)
+                new_owner.attributes.add('awarded_apartments', awarded, category='rental')
+            else:
+                new_owner.attributes.add('rented_room', main)
             new_owner.msg("You have taken over as primary renter of the apartment.")
         else:
             main.db.owner = None
@@ -259,6 +353,7 @@ class RentableRoom(Room):
             main.db.partners = []
             main.db.room_owners = {}
             main.db.rent_due_date = None
+            main.db.is_awarded = False
             stop_rent_collection_script(main)
 
         for child in main.db.child_rooms or []:
@@ -276,7 +371,13 @@ class RentableRoom(Room):
         if not owner or (hasattr(owner, 'id') and owner.id != character.id):
             return False, "You are not the primary renter."
 
-        character.attributes.remove('rented_room')
+        if main.db.is_awarded:
+            awarded = list(character.attributes.get('awarded_apartments', category='rental') or [])
+            if main.id in awarded:
+                awarded.remove(main.id)
+            character.attributes.add('awarded_apartments', awarded, category='rental')
+        else:
+            character.attributes.remove('rented_room')
         if character.db.home_location == main:
             character.db.home_location = None
 
@@ -297,18 +398,31 @@ class RentableRoom(Room):
             new_owner = co_list[0]
             main.db.owner = new_owner
             main.db.residents = [new_owner] + [c for c in co_list[1:] if c] + partner_list
-            new_owner.attributes.add('rented_room', main)
+            if main.db.is_awarded:
+                awarded = list(new_owner.attributes.get('awarded_apartments', category='rental') or [])
+                if main.id not in awarded:
+                    awarded.append(main.id)
+                new_owner.attributes.add('awarded_apartments', awarded, category='rental')
+            else:
+                new_owner.attributes.add('rented_room', main)
             new_owner.msg("You have taken over as primary renter.")
         elif partner_list:
             new_owner = partner_list[0]
             main.db.owner = new_owner
             main.db.residents = [new_owner] + partner_list[1:]
-            new_owner.attributes.add('rented_room', main)
+            if main.db.is_awarded:
+                awarded = list(new_owner.attributes.get('awarded_apartments', category='rental') or [])
+                if main.id not in awarded:
+                    awarded.append(main.id)
+                new_owner.attributes.add('awarded_apartments', awarded, category='rental')
+            else:
+                new_owner.attributes.add('rented_room', main)
             new_owner.msg("You have taken over as primary renter.")
         else:
             main.db.owner = None
             main.db.residents = []
             main.db.rent_due_date = None
+            main.db.is_awarded = False
             stop_rent_collection_script(main)
 
         for child in main.db.child_rooms or []:

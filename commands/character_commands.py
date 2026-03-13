@@ -365,6 +365,15 @@ class CmdSheet(MuxCommand):
         else:
             output += "|wNone|n\n"
 
+        # Sell Your Soul (if chosen during chargen)
+        sheet = target.character_sheet if hasattr(target, 'character_sheet') and target.character_sheet else None
+        if sheet and getattr(sheet, 'sell_your_soul', False):
+            output += sheet_section("Sell Your Soul", width=W)
+            employer = getattr(sheet, 'sell_your_soul_employer', '') or "Unknown"
+            catch = getattr(sheet, 'sell_your_soul_catch', '') or "Unknown"
+            output += f"|yEmployer:|n {employer}\n"
+            output += f"|yCatch:|n {catch}\n"
+
         output += footer(width=W, fillchar="-")
         self.caller.msg(output)
 
