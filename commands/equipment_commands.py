@@ -483,7 +483,7 @@ class CmdViewEquipment(MuxCommand):
             return section_header("Cyberdecks", width=78) + "\nNo cyberdecks found.\n"
         out = [section_header("Cyberdecks", width=78)]
         for d in decks:
-            out.append(f"|c{d.name:<28}|n |gHW:|n {d.hardware_slots} |gProg:|n {d.program_slots} |gAny:|n {d.any_slots} |gValue:|n |y{d.value} eb|n")
+            out.append(f"|c{d.name:<28}|n    |gHW:|n {d.hardware_slots} |gProg:|n {d.program_slots} |gAny:|n {d.any_slots} |gValue:|n |y{d.value} eb|n")
         out.append(divider("", width=78))
         return "\n".join(out) + "\n"
 

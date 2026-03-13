@@ -46,8 +46,7 @@ def role(accessing_obj, accessed_obj, *args, **kwargs):
     
     required_role = args[0]
     
-    character_sheet = getattr(accessing_obj, 'character_sheet', None)
-    if character_sheet is not None:
-        return getattr(character_sheet, 'role', None) == required_role
-
+    if hasattr(accessing_obj, 'character_sheet'):
+        return accessing_obj.character_sheet.role == required_role
+    
     return False

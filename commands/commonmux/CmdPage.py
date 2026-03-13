@@ -9,7 +9,7 @@ from evennia.comms.models import Msg
 from evennia.utils.search import search_object
 from typeclasses.characters import Character
 from django.contrib.auth.models import User as AccountDB
-from utils.search_helpers import search_character
+from world.utils.search_helpers import search_character
 import re
 
 class CmdPage(DefaultCmdPage):

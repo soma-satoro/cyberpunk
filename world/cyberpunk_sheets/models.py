@@ -685,7 +685,7 @@ class CharacterSheet(SharedMemoryModel):
         
         # Clear existing cyberware - Use lazy import to avoid circular dependency
         CyberwareInstance = apps.get_model('inventory', 'CyberwareInstance')
-        CyberwareInstance.objects.filter(character=self).delete()
+        CyberwareInstance.objects.filter(character_sheet=self).delete()
         
         # Clear existing languages
         self.sheet_language_proficiencies.all().delete()

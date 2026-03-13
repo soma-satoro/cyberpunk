@@ -25,16 +25,16 @@ from django.conf import settings
 from evennia import utils
 
 CONNECTION_SCREEN = """
-|r==============================================================|n
- Welcome to |c{}|n
+|b==============================================================|n
+ Welcome to |g{}|n, version {}!
 
  If you have an existing account, connect to it by typing:
       |wconnect <username> <password>|n
- If you need to create an account, type:
+ If you need to create an account, type (without the <>'s):
       |wcreate <username> <password>|n
 
- Each account can have up to 4 characters.
+ If you have spaces in your username, enclose it in quotes.
  Enter |whelp|n for more info. |wlook|n will re-show this screen.
-|r==============================================================|n""".format(
-    settings.SERVERNAME
+|b==============================================================|n""".format(
+    settings.SERVERNAME, utils.get_evennia_version("short")
 )

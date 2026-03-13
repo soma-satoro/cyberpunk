@@ -141,38 +141,7 @@ class CmdAdminMoney(Command):
 
         self.caller.msg(f"Current balance for {target.name}: {CharacterSheetMoneyService.get_balance(target_cs)} Eurodollars")
 
-class CmdRentRoom(Command):
-    """
-    Rent a room
-    
-    Usage:
-      rent [<room name>]
-    
-    Attempts to rent the specified room or the current room for your character.
-    """
-
-    key = "rent"
-    locks = "cmd:all()"
-    help_category = "Economy"
-
-    def func(self):
-        caller = self.caller
-        if self.args:
-            room = caller.search(self.args, global_search=True)
-        else:
-            room = caller.location
-
-        if not room or not isinstance(room, RentableRoom):
-            caller.msg("That doesn't seem to be a rentable room.")
-            return
-        
-        success, message = room.rent_to(caller)
-        caller.msg(message)
-        if success and room.db.is_temporary:
-            # Cancel any scheduled destruction for temporary rooms
-            for script in room.scripts.all():
-                if script.key == "check_and_destroy":
-                    script.stop()
+# CmdRentRoom replaced by CmdRent in rent_commands.py
 
 class CmdLeaveRental(Command):
     """

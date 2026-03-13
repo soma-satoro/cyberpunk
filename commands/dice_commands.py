@@ -45,6 +45,10 @@ class CmdDice(Command):
                 sides = DICE[key]
                 break
         else:
+            # Check if they used roll syntax (stat + skill vs difficulty) - suggest +roll instead
+            if " + " in args:
+                self.caller.msg("Syntax: +dice <number of dice><die size>, e.g., 3d10. To roll for a skill check, use +roll.")
+                return
             self.caller.msg("Usage: dice [NdX] [+/- modifier] [vs N]  (X: 4,6,8,10,12,20,100)")
             return
 

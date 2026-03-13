@@ -1,5 +1,76 @@
-evennia.db3
-server/conf/settings.py
-server/logs/http_requests.log
-server/logs/portal.log
-server/logs/server.log
+*.py[cod]
+
+# C extensions
+*.so
+
+# Packages
+*.egg
+*.egg-info
+dist
+build
+eggs
+parts
+var
+sdist
+develop-eggs
+.installed.cfg
+lib
+lib64
+__pycache__
+
+# Other
+*.swp
+*.log
+*.log.*
+*.pid
+*.restart
+*.db3
+
+# Installation-specific.
+# For group efforts, comment out some or all of these.
+server/conf/secret_settings.py
+server/logs/*.log.*
+server/.static/*
+server/.media/*
+world/commerce/migrations/*
+world/cyberpunk_sheets/migrations/*
+world/cyberpunk/migrations/*
+world/cyberware/migrations/*
+world/elflines/migrations/*
+world/factions/migrations/*
+world/hangouts/migrations/*
+world/inventory/migrations/*
+world/jobs/migrations/*
+world/languages/migrations/*
+world/mail/migrations/*
+world/mission_board/migrations/*
+world/mystery/migrations/*
+world/netrunning/migrations/*
+world/plots/migrations/*
+world/requests/migrations/*
+world/utils/migrations/*
+world/voucher/migrations/*
+books/*
+newcommands/*
+
+# Installer logs
+pip-log.txt
+
+# Unit test / coverage reports
+.coverage
+.tox
+nosetests.xml
+
+# Translations
+*.mo
+
+# Mr Developer
+.mr.developer.cfg
+.project
+.pydevproject
+
+# PyCharm config
+.idea
+
+# VSCode config
+.vscode

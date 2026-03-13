@@ -36,7 +36,8 @@ from .mystery_commands import (
 )
 from .cyberware_admin_commands import CmdAddCyberware
 from .staff_commands import CmdRemoveCyberware, CmdSetLifepath, CmdReputation, CmdNotoriety, CmdConfig
-from .economy import CmdAdminMoney, CmdGiveMoney, CmdBalance, CmdRentRoom, CmdLeaveRental
+from .economy import CmdAdminMoney, CmdGiveMoney, CmdBalance, CmdLeaveRental
+from .rent_commands import CmdRent, CmdHome
 from world.cyberpunk_sheets.commerce import CmdBuy, CmdListItems, CmdGive, CmdSellItem, CmdHaggle
 from .ip_commands import CmdIP
 from .vote_commands import CmdVote
@@ -168,7 +169,8 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         # CmdMaskedSay/Pose/Emit removed - they overrode with wrong format ("says:" vs "says, \"\"")
         #self.add(CmdEnterVehicle())
         #self.add(CmdExitVehicle())
-        self.add(CmdRentRoom())
+        self.add(CmdRent())
+        self.add(CmdHome())
         self.add(CmdLeaveRental())
         self.add(CmdOOC())
         self.add(CmdPlusOoc())

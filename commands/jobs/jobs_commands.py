@@ -1,10 +1,11 @@
 from evennia import CmdSet
 from django.db import models, transaction, connection
-from evennia.utils import create, evtable
+from evennia.utils import create, evtable, logger
 from evennia.comms.models import ChannelDB
 from evennia.commands.default.muxcommand import MuxCommand
-from world.jobs.models import Job, JobTemplate, Queue, JobAttachment, ArchivedJob
+from world.jobs.models import Job, JobTemplate, Queue, JobAttachment, ArchivedJob, Queue
 from evennia.utils.search import search_account, search_object
+from django.db import models, transaction, connection
 from evennia.utils.utils import crop
 from evennia.utils.ansi import ANSIString
 from world.utils.ansi_utils import wrap_ansi
@@ -53,13 +54,14 @@ class CmdJobs(MuxCommand):
       +jobs/clear_archive        - Clear all archived jobs and reset job numbers (Admin only)
 
     Categories:
-      PLOTS       - Plot-related requests
-      IMPROVE     - Improvement/advancement requests
-      EQUIPMENT   - Equipment requests
-      NETRUNNING  - Netrunning requests
-      CYBERWARE   - Cyberware installation/removal
-      BUILD       - Building/room requests
-      CUSTOM      - Custom/miscellaneous requests
+      REQ    - General requests
+      BUG    - Bug reports
+      PLOT   - Plot-related requests
+      BUILD  - Building/room requests
+      MISC   - Miscellaneous requests
+      XP     - XP requests
+      PRP    - PRP requests
+      EQUIP  - Equipment requests
     """
 
     key = "+jobs"
@@ -272,17 +274,53 @@ class CmdJobs(MuxCommand):
 
     def determine_category(self, specified_category=None):
         """
-        Determine the job category based on specified category or default.
-
+        Determine the job category based on character splat or specified category.
+        
         Args:
             specified_category (str, optional): Category explicitly specified by the user
-
+            
         Returns:
             str: The determined category code
         """
+        # If a category was explicitly specified, use it
         if specified_category:
-            return specified_category
-        return "CUSTOM"
+            return specified_category  # Return as-is, case conversion happens later
+
+        # For non-staff, determine category based on splat
+        if not self.caller.check_permstring("Admin"):
+            stats = self.caller.db.stats
+            if stats and 'other' in stats and 'splat' in stats['other']:
+                splat = stats['other']['splat'].get('Splat', {}).get('perm', '')
+                
+                # Map splat to category
+                splat_category_map = {
+                    'Mage': 'MAGE',
+                    'Vampire': 'VAMP',
+                    'Changeling': 'LING',
+                    'Companion': 'COMP',
+                    'Mortal': 'MORT',
+                    'Possessed': 'POSS',
+                    'Shifter': 'SHIFT',
+                }
+                
+                # Handle Mortal+ subtypes
+                if splat == 'Mortal+':
+                    if 'identity' in stats and 'lineage' in stats['identity']:
+                        mortal_type = stats['identity']['lineage'].get('Type', {}).get('perm', '')
+                        mortal_plus_map = {
+                            'Kinain': 'LING',
+                            'Ghoul': 'VAMP',
+                            'Kinfolk': 'SHIFT',
+                            'Sorcerer': 'MAGE',
+                        }
+                        return mortal_plus_map.get(mortal_type, 'MORT')
+                else:
+                    category = splat_category_map.get(splat)
+                    if category:
+                        return category
+
+        # Default category if nothing else matched
+        return "REQ"
 
     def create_job_from_simple_syntax(self):
         """Handle simplified job creation with automatic category detection."""
@@ -339,7 +377,7 @@ class CmdJobs(MuxCommand):
                     )
 
         except Exception as e:
-            self.caller.msg("|bError creating job.|n")
+            self.caller.msg(f"|bError creating job: {str(e)}|n")
             return
 
     def create_job(self):
@@ -375,8 +413,9 @@ class CmdJobs(MuxCommand):
         category = self.determine_category(specified_category).upper()
 
         # Validate category - make case-insensitive comparison
-        valid_categories = ["PLOTS", "IMPROVE", "EQUIPMENT", "NETRUNNING",
-                          "CYBERWARE", "BUILD", "CUSTOM"]
+        valid_categories = ["REQ", "BUG", "PLOT", "BUILD", "MISC", "XP", 
+                          "PRP", "VAMP", "SHIFT", "MORT", "POSS", "COMP", 
+                          "LING", "MAGE", "EQUIP"]
         
         if category not in valid_categories:
             self.caller.msg(f"Invalid category. Valid categories are: {', '.join(valid_categories)}")
@@ -424,7 +463,7 @@ class CmdJobs(MuxCommand):
                     )
 
         except Exception as e:
-            self.caller.msg("|bError creating job.|n")
+            self.caller.msg(f"|bError creating job: {str(e)}|n")
             return
 
     def add_comment(self):
@@ -563,7 +602,7 @@ class CmdJobs(MuxCommand):
         except Job.DoesNotExist:
             self.caller.msg(f"Job #{job_id} not found.")
         except Exception as e:
-            self.caller.msg("An error occurred while adding the player.")
+            self.caller.msg(f"Error adding player: {str(e)}")
 
     def remove_player(self):
         if not self.args or "=" not in self.args:
@@ -733,7 +772,11 @@ class CmdJobs(MuxCommand):
                 job_id = int(self.args.strip())
                 comment = ""
 
+            # Debug: Log the job we're trying to approve
+            logger.log_info(f"Attempting to approve job #{job_id}")
+            
             job = Job.objects.get(id=job_id)
+            logger.log_info(f"Found job: #{job.id} - {job.title} (archive_id: {job.archive_id})")
             
             if job.status in ['closed', 'rejected', 'completed', 'cancelled']:
                 self.caller.msg(f"Job #{job_id} is already {job.status}.")
@@ -745,11 +788,16 @@ class CmdJobs(MuxCommand):
                 max_archived = ArchivedJob.objects.aggregate(models.Max('archive_id'))['archive_id__max'] or 0
                 max_job = Job.objects.exclude(archive_id__isnull=True).aggregate(models.Max('archive_id'))['archive_id__max'] or 0
                 next_archive_id = max(max_archived, max_job) + 1
+                
+                logger.log_info(f"Max archive_id from ArchivedJob: {max_archived}")
+                logger.log_info(f"Max archive_id from Job: {max_job}")
+                logger.log_info(f"Calculated next_archive_id: {next_archive_id}")
 
                 # Verify the archive_id is truly unique
-                while (ArchivedJob.objects.filter(archive_id=next_archive_id).exists() or
+                while (ArchivedJob.objects.filter(archive_id=next_archive_id).exists() or 
                        Job.objects.filter(archive_id=next_archive_id).exists()):
                     next_archive_id += 1
+                    logger.log_info(f"Archive ID {next_archive_id-1} was taken, trying {next_archive_id}")
 
                 # Create comments text
                 comments_text = "\n\n".join([f"{comment['author']} [{comment['created_at']}]: {comment['text']}" 
@@ -758,6 +806,9 @@ class CmdJobs(MuxCommand):
                 # Add the approval comment if provided
                 if comment:
                     comments_text += f"\n\nApproval Comment [{timezone.now().strftime('%Y-%m-%d %H:%M:%S')}]: {comment}"
+
+                # Debug: Log archive job creation attempt
+                logger.log_info(f"Creating archived job with archive_id: {next_archive_id}")
 
                 # Create the archived job
                 archived_job = ArchivedJob.objects.create(
@@ -773,6 +824,15 @@ class CmdJobs(MuxCommand):
                     status='closed',
                     comments=comments_text
                 )
+                logger.log_info(f"Successfully created archived job with archive_id: {archived_job.archive_id}")
+
+                # Double-check for conflicts one last time
+                conflicts = Job.objects.filter(archive_id=next_archive_id)
+                if conflicts.exists():
+                    logger.log_err(f"WARNING: Found {conflicts.count()} jobs with archive_id {next_archive_id}")
+                    for j in conflicts:
+                        logger.log_err(f"Conflicting job: #{j.id} - {j.title}")
+                    raise Exception(f"Archive ID {next_archive_id} is already in use")
 
                 # Now update and save the original job
                 job.status = 'closed'
@@ -789,7 +849,9 @@ class CmdJobs(MuxCommand):
                         'created_at': timezone.now().strftime('%Y-%m-%d %H:%M:%S')
                     })
 
+                logger.log_info(f"Attempting to save job #{job.id} with archive_id: {job.archive_id}")
                 job.save()
+                logger.log_info(f"Successfully saved job #{job.id}")
 
             # Notify the requester
             if job.requester and job.requester != self.caller.account:
@@ -805,8 +867,10 @@ class CmdJobs(MuxCommand):
             self.caller.msg("Usage: +job/approve <#>[=<comment>]")
         except Job.DoesNotExist:
             self.caller.msg(f"Job #{job_id} not found.")
-        except Exception:
-            self.caller.msg("An error occurred while approving the job.")
+        except Exception as e:
+            logger.log_err(f"Error in approve_job: {str(e)}")
+            logger.log_err(f"Full error details:", exc_info=True)
+            self.caller.msg(f"Error approving job: {str(e)}")
 
     def reject_job(self):
         """Handle job rejection with optional comment."""
@@ -889,7 +953,8 @@ class CmdJobs(MuxCommand):
         except Job.DoesNotExist:
             self.caller.msg(f"Job #{job_id} not found.")
         except Exception as e:
-            self.caller.msg("An error occurred while rejecting the job.")
+            self.caller.msg(f"Error rejecting job: {str(e)}")
+            logger.log_err(f"Error in reject_job: {str(e)}")
 
     def attach_object(self):
         if not self.args or "=" not in self.args:
@@ -1179,7 +1244,7 @@ class CmdJobs(MuxCommand):
                     self.caller.msg("Could not send notification - invalid recipient username.")
                     
             except Exception as e:
-                self.caller.msg("Failed to send notification.")
+                self.caller.msg(f"Failed to send notification: {str(e)}")
 
     def send_mail_to_all_participants(self, job, message, exclude_account=None):
         """Send a mail notification to all participants in a job."""
@@ -1290,7 +1355,8 @@ class CmdJobs(MuxCommand):
         except Job.DoesNotExist:
             self.caller.msg(f"Job #{job_id} not found.")
         except Exception as e:
-            self.caller.msg("An error occurred while changing job status.")
+            self.caller.msg(f"Error changing job status: {str(e)}")
+            logger.log_err(f"Error in _change_job_status: {str(e)}")
 
     def display_note(self, note):
         """Display a note with formatting."""
@@ -1590,6 +1656,9 @@ class CmdJobs(MuxCommand):
                 for participant in job.participants.all():
                     participant_usernames.append(participant.username)
                 
+                # Log the original job participants
+                logger.log_info(f"Original Job #{job.id} has participants: {', '.join(participant_usernames)}")
+                
                 # Store all job data needed for recreation
                 job_data.append({
                     'title': job.title,
@@ -1654,14 +1723,24 @@ class CmdJobs(MuxCommand):
                     new_id = new_job.id
                     old_to_new_mapping[old_id] = new_id
                     
+                    logger.log_info(f"Recreated job: #{old_id} -> #{new_id}")
+                    
                     # Now add participants using their IDs
                     for participant_id in job_info['participant_ids']:
                         try:
                             account = AccountDB.objects.get(id=participant_id)
                             new_job.participants.add(account)
+                            logger.log_info(f"Added participant {account.username} to job #{new_id}")
                         except AccountDB.DoesNotExist:
-                            pass
+                            logger.log_err(f"Could not find participant account with ID {participant_id}")
                     
+                    # Double-check the participants
+                    new_participants = list(new_job.participants.all())
+                    new_participant_usernames = [p.username for p in new_participants]
+                    
+                    logger.log_info(f"Job #{new_id} should have participants: {', '.join(job_info['participant_usernames'])}")
+                    logger.log_info(f"Job #{new_id} actually has participants: {', '.join(new_participant_usernames)}")
+
             # After transaction, handle SQLite VACUUM separately
             if 'sqlite' in connection.settings_dict['ENGINE']:
                 with connection.cursor() as cursor:
@@ -1674,7 +1753,9 @@ class CmdJobs(MuxCommand):
             self.post_to_jobs_channel(self.caller.name, "ALL", "cleared the jobs archive")
 
         except Exception as e:
-            self.caller.msg("An error occurred while clearing the archive.")
+            self.caller.msg(f"Error clearing archive: {str(e)}")
+            logger.log_err(f"Error in clear_archive: {str(e)}")
+            logger.log_err("Full error details:", exc_info=True)
 
     def transfer_job(self):
         """Transfer a job to a different category/queue."""
@@ -1691,8 +1772,9 @@ class CmdJobs(MuxCommand):
         new_category = new_category.strip().upper()  # Convert to uppercase for consistency
         
         # Validate category - make case-insensitive comparison
-        valid_categories = ["PLOTS", "IMPROVE", "EQUIPMENT", "NETRUNNING",
-                          "CYBERWARE", "BUILD", "CUSTOM"]
+        valid_categories = ["REQ", "BUG", "PLOT", "BUILD", "MISC", "XP", 
+                          "PRP", "VAMP", "SHIFT", "MORT", "POSS", "COMP", 
+                          "LING", "MAGE", "EQUIP"]
         
         if new_category not in valid_categories:
             self.caller.msg(f"Invalid category. Valid categories are: {', '.join(valid_categories)}")
@@ -1760,7 +1842,7 @@ class CmdJobs(MuxCommand):
         except Job.DoesNotExist:
             self.caller.msg(f"Job #{job_id} not found.")
         except Exception as e:
-            self.caller.msg("An error occurred while transferring the job.")
+            self.caller.msg(f"Error transferring job: {str(e)}")
 
     def list_jobs_from_player(self):
         """List all jobs associated with a player (staff only)."""
@@ -1892,189 +1974,22 @@ class CmdJobs(MuxCommand):
             self.caller.msg(output)
             
         except Exception as e:
-            self.caller.msg("An error occurred while listing jobs.")
-
-class CmdRequest(MuxCommand):
-    """
-    Submit a request to staff.
-
-    Usage:
-      +request <category>/<title>=<description>
-      +request <title>=<description>
-      +request/view <#>
-      +request/comment <#>=<text>
-      +request/list
-
-    Categories:
-      PLOTS       - Plot-related requests
-      IMPROVE     - Improvement/advancement requests
-      EQUIPMENT   - Equipment requests
-      NETRUNNING  - Netrunning requests
-      CYBERWARE   - Cyberware installation/removal
-      BUILD       - Building/room requests
-      CUSTOM      - Custom/miscellaneous requests
-
-    Examples:
-      +request EQUIPMENT/New Smartgun=I'd like to purchase a Militech Crusher.
-      +request CYBERWARE/Neural Link=Requesting neural link installation.
-      +request Bug Report=The door in room 5 doesn't open.
-    """
-
-    key = "+request"
-    aliases = ["+req"]
-    locks = "cmd:all()"
-    help_category = "Requests"
-
-    VALID_CATEGORIES = ["PLOTS", "IMPROVE", "EQUIPMENT", "NETRUNNING",
-                        "CYBERWARE", "BUILD", "CUSTOM"]
-
-    def func(self):
-        if "list" in self.switches or (not self.args and not self.switches):
-            self.list_my_requests()
-            return
-        if "view" in self.switches:
-            self.view_request()
-            return
-        if "comment" in self.switches:
-            self.add_comment()
-            return
-
-        if not self.args or "=" not in self.args:
-            self.caller.msg("Usage: +request <category>/<title>=<description>")
-            self.caller.msg(f"Categories: {', '.join(self.VALID_CATEGORIES)}")
-            return
-
-        parts = self.args.split("=", 1)
-        title_part = parts[0].strip()
-        description = parts[1].strip().replace("%r", "\n")
-
-        category = "CUSTOM"
-        title = title_part
-
-        if "/" in title_part:
-            cat, title = title_part.split("/", 1)
-            cat = cat.strip().upper()
-            title = title.strip()
-            if cat in self.VALID_CATEGORIES:
-                category = cat
-            else:
-                self.caller.msg(f"Invalid category '{cat}'. Valid: {', '.join(self.VALID_CATEGORIES)}")
-                return
-
-        if not title or not description:
-            self.caller.msg("Both title and description are required.")
-            return
-
-        queue, _ = Queue.objects.get_or_create(
-            name=category, defaults={'automatic_assignee': None}
-        )
-
-        job = Job.objects.create(
-            title=title,
-            description=description,
-            requester=self.caller.account,
-            queue=queue,
-            status='open'
-        )
-
-        self.caller.msg(f"|gRequest #{job.id} submitted to {category}: {title}|n")
-
-        try:
-            from evennia.comms.models import ChannelDB
-            jobs_channel = ChannelDB.objects.get(db_key="Jobs")
-            jobs_channel.msg(f"|y[REQUEST]|n {self.caller.name} submitted #{job.id} to {category}: {title}")
-        except ChannelDB.DoesNotExist:
-            pass
-
-    def list_my_requests(self):
-        jobs = Job.objects.filter(
-            requester=self.caller.account,
-            status__in=['open', 'claimed']
-        ).order_by('-created_at')
-
-        if not jobs:
-            self.caller.msg("You have no open requests.")
-            return
-
-        output = header("Your Requests", width=78, fillchar="|b-|n") + "\n"
-        output += f"|c{'#':<6}{'Category':<14}{'Title':<30}{'Status':<10}|n\n"
-        output += divider("", width=78, fillchar="-") + "\n"
-
-        for job in jobs:
-            status = "|gOpen|n" if job.status == 'open' else "|yClaimed|n"
-            output += f" {job.id:<5} {job.queue.name:<13} {job.title[:28]:<29} {status}\n"
-
-        output += footer(width=78, fillchar="|b-|n")
-        self.caller.msg(output)
-
-    def view_request(self):
-        if not self.args:
-            self.caller.msg("Usage: +request/view <#>")
-            return
-
-        try:
-            job_id = int(self.args.strip())
-            job = Job.objects.get(id=job_id, requester=self.caller.account)
-        except ValueError:
-            self.caller.msg("Please provide a valid request number.")
-            return
-        except Job.DoesNotExist:
-            self.caller.msg(f"Request #{self.args.strip()} not found or you don't have access.")
-            return
-
-        output = header(f"Request #{job.id}", width=78, fillchar="|b-|n") + "\n"
-        output += f"|cTitle:|n {job.title}\n"
-        output += f"|cCategory:|n {job.queue.name}\n"
-        output += f"|cStatus:|n {job.status.capitalize()}\n"
-        output += f"|cCreated:|n {job.created_at.strftime('%Y-%m-%d %H:%M')}\n"
-        if job.assignee:
-            output += f"|cAssigned to:|n {job.assignee.username}\n"
-        output += divider("Description", width=78, fillchar="-") + "\n"
-        output += f"{job.description}\n"
-
-        if job.comments:
-            output += divider("Comments", width=78, fillchar="-") + "\n"
-            for comment in job.comments:
-                output += f"|c{comment['author']}|n [{comment['created_at']}]:\n"
-                output += f"  {comment['text']}\n"
-
-        output += footer(width=78, fillchar="|b-|n")
-        self.caller.msg(output)
-
-    def add_comment(self):
-        if not self.args or "=" not in self.args:
-            self.caller.msg("Usage: +request/comment <#>=<text>")
-            return
-
-        try:
-            job_id, comment_text = self.args.split("=", 1)
-            job_id = int(job_id.strip())
-            comment_text = comment_text.strip()
-        except ValueError:
-            self.caller.msg("Usage: +request/comment <#>=<text>")
-            return
-
-        try:
-            job = Job.objects.get(id=job_id, requester=self.caller.account)
-        except Job.DoesNotExist:
-            self.caller.msg(f"Request #{job_id} not found or you don't have access.")
-            return
-
-        job.comments.append({
-            'author': self.caller.name,
-            'text': comment_text,
-            'created_at': timezone.now().strftime('%Y-%m-%d %H:%M:%S')
-        })
-        job.save()
-        self.caller.msg(f"Comment added to request #{job_id}.")
-
+            self.caller.msg(f"Error listing jobs for player: {str(e)}")
+            logger.log_err(f"Error in list_jobs_from_player: {str(e)}", exc_info=True)
 
 class JobSystemCmdSet(CmdSet):
     """
     This cmdset contains the jobs commands
     """
     key = "JobSystem"
-
+    
     def at_cmdset_creation(self):
+        """
+        Called when cmdset is first created.
+        """
         self.add(CmdJobs())
-        self.add(CmdRequest())
+        # Create/update help entry when cmdset is created
+        from evennia.utils import create
+        create.create_help_entry("jobs_system", CmdJobs.__doc__, category="General", 
+                               locks="view:all()", aliases=["jobs"], 
+                               tags=[("jobs", "help"), ("system", "help"), ("help", "help")])

@@ -15,11 +15,11 @@ def check_cyberware_requirements(character, cyberware):
     
     # Specific checks for main cyberware
     if cyberware.name.lower() == "cybereye":
-        cybereye_count = CyberwareInstance.objects.filter(character=character, cyberware__name__iexact="Cybereye", installed=True).count()
+        cybereye_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cybereye", installed=True).count()
         print(f"Debug: Current Cybereye count: {cybereye_count}")
         
         if cybereye_count >= 2:
-            multioptic_mount = CyberwareInstance.objects.filter(character=character, cyberware__name__iexact="MultiOptic Mount", installed=True).exists()
+            multioptic_mount = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="MultiOptic Mount", installed=True).exists()
             print(f"Debug: MultiOptic Mount exists: {multioptic_mount}")
             
             if not multioptic_mount:
@@ -30,7 +30,7 @@ def check_cyberware_requirements(character, cyberware):
                 return False, "You cannot install more than seven Cybereyes, even with a MultiOptic Mount."
     
     elif cyberware.name.lower() == "cyberarm":
-        cyberarm_count = CyberwareInstance.objects.filter(character=character, cyberware__name__iexact="Cyberarm", installed=True).count()
+        cyberarm_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cyberarm", installed=True).count()
         print(f"Debug: Current Cyberarm count: {cyberarm_count}")
         
         if cyberarm_count >= 4:
@@ -38,7 +38,7 @@ def check_cyberware_requirements(character, cyberware):
             return False, "You cannot install more than four Cyberarms, even with an Artificial Shoulder Mount."
         
         if cyberarm_count >= 2:
-            artificial_shoulder_mount = CyberwareInstance.objects.filter(character=character, cyberware__name__iexact="Artificial Shoulder Mount", installed=True).exists()
+            artificial_shoulder_mount = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Artificial Shoulder Mount", installed=True).exists()
             print(f"Debug: Artificial Shoulder Mount exists: {artificial_shoulder_mount}")
             
             if not artificial_shoulder_mount:
@@ -46,11 +46,11 @@ def check_cyberware_requirements(character, cyberware):
                 return False, "You need to install an Artificial Shoulder Mount to have more than two Cyberarms."
     
     elif cyberware.name.lower() == "cyberaudio suite":
-        cyberaudio_suite_count = CyberwareInstance.objects.filter(character=character, cyberware__name__iexact="Cyberaudio Suite", installed=True).count()
+        cyberaudio_suite_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cyberaudio Suite", installed=True).count()
         print(f"Debug: Current Cyberaudio Suite count: {cyberaudio_suite_count}")
         
         if cyberaudio_suite_count >= 1:
-            sensor_array = CyberwareInstance.objects.filter(character=character, cyberware__name__iexact="Sensor Array", installed=True).exists()
+            sensor_array = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Sensor Array", installed=True).exists()
             print(f"Debug: Sensor Array exists: {sensor_array}")
             
             if not sensor_array:
@@ -58,7 +58,7 @@ def check_cyberware_requirements(character, cyberware):
                 return False, "You need to install a Sensor Array to have more than one Cyberaudio Suite."
     
     elif cyberware.name.lower() == "cyberleg":
-        cyberleg_count = CyberwareInstance.objects.filter(character=character, cyberware__name__iexact="Cyberleg", installed=True).count()
+        cyberleg_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cyberleg", installed=True).count()
         print(f"Debug: Current Cyberleg count: {cyberleg_count}")
         if cyberleg_count >= 2:
             print("Debug: Maximum number of Cyberlegs (2) reached")
@@ -66,7 +66,7 @@ def check_cyberware_requirements(character, cyberware):
     
     # Check slot availability for cyberware options
     elif cyberware.type.lower() in ["cybereye", "cyberaudio", "cyberarm", "cyberleg"]:
-        main_cyberware_count = CyberwareInstance.objects.filter(character=character, cyberware__name__iexact=cyberware.type, installed=True).count()
+        main_cyberware_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact=cyberware.type, installed=True).count()
         if main_cyberware_count == 0:
             print(f"Debug: No {cyberware.type} installed")
             return False, f"You need to install a {cyberware.type} before installing {cyberware.name}."
@@ -78,8 +78,8 @@ def check_cyberware_requirements(character, cyberware):
 
     # Check for cyberlimb options
     elif cyberware.type.lower() == "cyberlimb":
-        cyberarm_count = CyberwareInstance.objects.filter(character=character, cyberware__name__iexact="Cyberarm", installed=True).count()
-        cyberleg_count = CyberwareInstance.objects.filter(character=character, cyberware__name__iexact="Cyberleg", installed=True).count()
+        cyberarm_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cyberarm", installed=True).count()
+        cyberleg_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cyberleg", installed=True).count()
         
         # Special checks for Grip Foot and Jump Booster
         if cyberware.name.lower() in ["grip foot", "jump booster"]:
@@ -96,22 +96,22 @@ def check_cyberware_requirements(character, cyberware):
 
 def count_available_slots(character, slot_type):
     if slot_type == "cybereye":
-        cybereye_count = CyberwareInstance.objects.filter(character=character, cyberware__name__iexact="Cybereye", installed=True).count()
+        cybereye_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cybereye", installed=True).count()
         total_slots = cybereye_count * 3
     elif slot_type == "cyberaudio":
-        cyberaudio_count = CyberwareInstance.objects.filter(character=character, cyberware__name__iexact="Cyberaudio Suite", installed=True).count()
+        cyberaudio_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cyberaudio Suite", installed=True).count()
         total_slots = cyberaudio_count * 3
     elif slot_type == "cyberarm":
-        cyberarm_count = CyberwareInstance.objects.filter(character=character, cyberware__name__iexact="Cyberarm", installed=True).count()
+        cyberarm_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cyberarm", installed=True).count()
         total_slots = cyberarm_count * 4
     elif slot_type == "cyberleg":
-        cyberleg_count = CyberwareInstance.objects.filter(character=character, cyberware__name__iexact="Cyberleg", installed=True).count()
+        cyberleg_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cyberleg", installed=True).count()
         total_slots = cyberleg_count * 3
     else:
         return 0, 0
 
     used_slots = CyberwareInstance.objects.filter(
-        character=character,
+        character_sheet=character,
         cyberware__type__iexact=slot_type,
         installed=True
     ).exclude(cyberware__name__in=["Cybereye", "Cyberaudio Suite", "Cyberarm", "Cyberleg"]).count()
@@ -251,7 +251,7 @@ class CmdImplantCyberware(Command):
         # Display updated installed cyberware list
         self.caller.msg("Installed Cyberware:")
         try:
-            installed_cyberware = CyberwareInstance.objects.filter(character=character_sheet, installed=True)
+            installed_cyberware = CyberwareInstance.objects.filter(character_sheet=character_sheet, installed=True)
             for cw in installed_cyberware:
                 self.caller.msg(f"- {cw.cyberware.name} ({cw.cyberware.type})")
                 if cw.cyberware.is_weapon:
@@ -262,7 +262,7 @@ class CmdImplantCyberware(Command):
         # Display all cyberware in inventory (including not installed)
         self.caller.msg("\nAll Cyberware in Inventory:")
         try:
-            all_cyberware = CyberwareInstance.objects.filter(character=character_sheet)
+            all_cyberware = CyberwareInstance.objects.filter(character_sheet=character_sheet)
             for cw in all_cyberware:
                 status = "Installed" if cw.installed else "Not Installed"
                 self.caller.msg(f"- {cw.cyberware.name} ({cw.cyberware.type}) - {status}")

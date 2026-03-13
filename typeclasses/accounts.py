@@ -5,72 +5,90 @@ The Account represents the game "account" and each login has only one
 Account object. An Account is what chats on default channels but has no
 other in-game-world existence. Rather the Account puppets Objects (such
 as Characters) in order to actually participate in the game world.
+
+
+Guest
+
+Guest accounts are simple low-level accounts that are created/deleted
+on the fly and allows users to test the game without the commitment
+of a full registration. Guest accounts are deactivated by default; to
+activate them, add the following line to your settings file:
+
+    GUEST_ENABLED = True
+
+You will also need to modify the connection screen to reflect the
+possibility to connect with a guest account. The setting file accepts
+several more options for customizing the Guest account system.
+
 """
 
-from django.apps import apps
 from evennia import logger
+from evennia import DefaultAccount
+from evennia.accounts.accounts import DefaultAccount, DefaultGuest
 from evennia.accounts.models import AccountDB
-
-# use app registry to avoid nonetype error
-DefaultAccount = apps.get_model("accounts", "DefaultAccount")
-DefaultGuest = apps.get_model("accounts", "DefaultGuest")
 
 class Account(DefaultAccount):
     """
-    Player account that supports multiple characters (up to 4).
-    Use +charlist to see your characters, +ic <name> to play one,
-    and +charcreate <name> to make a new one.
+    This class describes the actual OOC account (i.e. the user connecting
+    to the MUD). It does NOT have visual appearance in the game world (that
+    is handled by the character which is connected to this). Accounts are
+    created when the user first connects to the game (with a unique
+    username) and reconnects to it ever after with the same user to gain
+    access. An account can be connected to several characters.
     """
+    class Meta:
+        """
+        This defines metadata for the Account model.
+        """
+        app_label = 'accounts'
+
+    objects = AccountDB.objects
 
     def at_account_creation(self):
         """
-        Called once when the account is first created.
+        This is called once, the very first time the account is created
+        (i.e. first time they register with the game). It's a good
+        place to store attributes all accounts should have, like
+        configuration values etc.
         """
+        # set an (empty) attribute holding the characters this account has
         self.db.characters = []
 
-    def at_post_login(self, session=None, **kwargs):
+    def __init__(self, *args, **kwargs):
+        logger.log_info(f"Initializing custom Account: {args[0] if args else 'No args'}")
+        super().__init__(*args, **kwargs)
+
+    def at_server_reload(self):
+        logger.log_info(f"at_server_reload called for Account {self.id}")
+        super().at_server_reload()
+
+    def unpuppet_all(self):
+        logger.log_info(f"unpuppet_all called for Account {self.id}")
+        for session in self.sessions.all():
+            self.unpuppet_object(session)
+
+    def unpuppet_object(self, session):
+        logger.log_info(f"unpuppet_object called for Account {self.id}")
+        super().unpuppet_object(session)
+
+    def at_server_shutdown(self):
+        logger.log_info(f"at_server_shutdown called for Account {self.id}")
+        self.msg("Server is shutting down. Thank you for playing!")
+        super().at_server_shutdown()
+        
+    def at_post_login(self, session=None):
         """
         Called after the account has successfully logged in.
-        Shows a character selection screen.
         """
-        super().at_post_login(session, **kwargs)
-        self.show_character_menu(session)
-
-    def show_character_menu(self, session=None):
-        """
-        Display the list of available characters and instructions.
-        """
-        characters = self.db._playable_characters or []
-
-        self.msg("|r============================================================|n")
-        self.msg("|r  Welcome back to Night City, %s|n" % self.key)
-        self.msg("|r============================================================|n")
-
-        if characters:
-            self.msg("|wYour characters:|n")
-            for i, char in enumerate(characters, 1):
-                status = ""
-                if char.tags.has("approved", category="approval"):
-                    status = "|g[Approved]|n"
-                else:
-                    status = "|y[Pending]|n"
-                self.msg(f"  {i}. |c{char.key}|n {status}")
-            self.msg("")
-            self.msg("|wTo play a character:|n +ic <character name>")
-        else:
-            self.msg("|wYou have no characters yet.|n")
-
-        remaining = 4 - len(characters)
-        if remaining > 0:
-            self.msg(f"|wTo create a new character:|n +charcreate <name>")
-            self.msg(f"|wCharacter slots remaining:|n {remaining}")
-
-        self.msg("|r============================================================|n")
-
+        super().at_post_login(session)
+        logger.log_info(f"Account logged in: {self.name}")
 
 class Guest(DefaultGuest):
     """
     This class is used for guest logins. Unlike Accounts, Guests and their
     characters are deleted after disconnection.
     """
+
     pass
+
+logger.log_info(f"Account class methods: {[method for method in dir(Account) if not method.startswith('__')]}")

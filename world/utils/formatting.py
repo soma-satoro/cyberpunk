@@ -50,6 +50,20 @@ def footer(width=78, fillchar="-"):
     return "|b" + fillchar * width + "|n\n"
 
 
+def footer_with_right_text(width=78, right_text="", fillchar="-", color="|m"):
+    """
+    Create a footer line with right-aligned text (e.g. for room resource display).
+    Used for: ------------------------------[Res: Very Expensive]---
+    """
+    if isinstance(fillchar, ANSIString):
+        fillchar = "-"
+    elif not fillchar or fillchar == "|m" or len(str(fillchar)) > 1:
+        fillchar = "-"
+    clean_right = str(ANSIString(right_text).clean()) if right_text else ""
+    padding = max(0, width - len(clean_right))
+    return color + (fillchar * padding) + "|n" + right_text + "\n"
+
+
 def sheet_header(title, width=80):
     """Character sheet header: '-------- Character Sheet for {name} --------' (80 chars)."""
     from evennia.utils.ansi import ANSIString
@@ -99,3 +113,15 @@ def divider(title, width=78, fillchar="-", color="|b", text_color="|y"):
 
 
 section_header = divider  # Alias for backward compatibility
+
+
+def format_key_value(name: str, value: str, width: int = 40) -> str:
+    """
+    Format a key-value pair for display (e.g. rental info, status tables).
+    Produces: "  Name....... Value"
+    """
+    val_str = str(value) if value is not None else "None"
+    name_clean = str(ANSIString(name).clean())
+    val_clean = str(ANSIString(val_str).clean())
+    dots = max(0, width - len(name_clean) - len(val_clean) - 2)
+    return f" |w{name}|n{'.' * dots} {val_str}"

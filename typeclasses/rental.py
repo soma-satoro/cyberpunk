@@ -1,224 +1,340 @@
+"""
+RentableRoom - Apartments and housing that can be rented or purchased.
+
+Uses eurodollar-based costs. Monthly rent is a threshold check (abstracted).
+Purchase removes monthly checks. Supports co-residents, partners, room customization.
+"""
+
 from evennia import create_object
 from evennia.utils import create, delay
 from .rooms import Room
 from world.cyberpunk_sheets.models import CharacterSheet
 from world.cyberpunk_sheets.services import CharacterSheetMoneyService
+from world.rental_data import RENTAL_TYPES
+from world.rental_service import (
+    get_character_eurodollars,
+    get_effective_rent_cost,
+    get_effective_purchase_cost,
+    create_apartment_rooms,
+    ensure_rent_collection_script,
+    stop_rent_collection_script,
+)
 from .scripts import RentCollectionScript
 from evennia.utils.ansi import ANSIString
 from world.utils.ansi_utils import wrap_ansi
 from world.utils.formatting import header, footer, divider
 
+
 class RentableRoom(Room):
     """
-    A room that can be rented by players for a monthly fee.
+    A room that can be rented or purchased by players.
+    Uses eurodollar costs. Rent is threshold-based (abstracted, no deduction).
     """
 
-    RENTAL_TYPES = {
-        "Cube Hotel": {"cost": 900, "rooms": 1},
-        "Cargo Container": {"cost": 1000, "rooms": 1},
-        "Studio Apartment": {"cost": 1500, "rooms": 1},
-        "Two-Bedroom Apartment": {"cost": 2500, "rooms": 2},
-        "Corporate Conapt": {"cost": 0, "rooms": 3, "role": "Exec"},
-        "Upscale Conapt": {"cost": 7500, "rooms": 3},
-        "Luxury Penthouse": {"cost": 15000, "rooms": 5},
-    }
+    RENTAL_TYPES = RENTAL_TYPES
 
     def at_object_creation(self):
         """Set up the rentable room."""
         super().at_object_creation()
         self.db.rental_type = None
-        self.db.renter = None
+        self.db.owner = None  # Primary renter/owner
         self.db.rent_due_date = None
         self.db.child_rooms = []
-        self.db.is_temporary = False  # New attribute to mark temporary units
+        self.db.is_temporary = False
+        self.db.purchased = False  # If True, no monthly rent check
+        self.db.rent_cost = 0
+        self.db.purchase_cost = 0
+        self.db.rent_cost_modifier = 0  # Staff can modify
+        self.db.purchase_cost_modifier = 0
+        # residents: [char] - primary + co-residents + partners
+        self.db.residents = []
+        # co_residents: {room_id: char} - co-resident assigned to which room
+        self.db.co_residents = {}
+        # partners: [char] - romantic partners (same authority as primary)
+        self.db.partners = []
+        # room_owners: {room_id: char_id} - which co-resident owns which room
+        self.db.room_owners = {}
+        self.db.partner_pending = None  # char awaiting +rent/partner confirm
+
+    def get_main_room(self):
+        """Get the main room of this apartment (self if main, else parent)."""
+        if getattr(self.db, 'is_child_room', False) and self.db.parent_room:
+            return self.db.parent_room
+        return self
+
+    def is_primary_owner(self, character):
+        """Check if character is the primary owner."""
+        return self.db.owner and self.db.owner.id == character.id
+
+    def is_resident(self, character):
+        """Check if character is any kind of resident (owner, co-resident, partner)."""
+        if not character:
+            return False
+        main = self.get_main_room()
+        if main.db.owner and main.db.owner.id == character.id:
+            return True
+        for r in main.db.residents or []:
+            if r and r.id == character.id:
+                return True
+        for p in main.db.partners or []:
+            if p and p.id == character.id:
+                return True
+        for rid, c in (main.db.co_residents or {}).items():
+            if c and c.id == character.id:
+                return True
+        return False
+
+    def can_modify_room(self, character):
+        """Check if character can modify this room (desc, name, exits)."""
+        if not character:
+            return False
+        main = self.get_main_room()
+        if main.is_primary_owner(character):
+            return True
+        if self.db.is_child_room and self.db.room_role:
+            room_owners = main.db.room_owners or {}
+            return room_owners.get(self.id) == character.id
+        # Partners have same authority as primary
+        for p in main.db.partners or []:
+            if p and p.id == character.id:
+                return True
+        return False
+
+    def can_lock_door(self, character):
+        """Check if character can lock/unlock doors (owner, co-residents, partners)."""
+        return self.is_resident(character)
 
     def set_rental_type(self, rental_type, is_temporary=False):
-        """Set the rental type for this room and mark if it's temporary."""
-        if rental_type in self.RENTAL_TYPES:
-            self.db.rental_type = rental_type
-            self.db.rent_cost = self.RENTAL_TYPES[rental_type]["cost"]
-            self.db.is_temporary = is_temporary
-            self.generate_child_rooms(self.RENTAL_TYPES[rental_type]["rooms"])
-        else:
+        """Set the rental type for this room."""
+        if rental_type not in self.RENTAL_TYPES:
             raise ValueError(f"Invalid rental type: {rental_type}")
+        data = self.RENTAL_TYPES[rental_type]
+        self.db.rental_type = rental_type
+        if rental_type != "Custom":
+            self.db.rent_cost = data.get("rent") or 0
+            self.db.purchase_cost = data.get("purchase") or 0
+        self.db.is_temporary = is_temporary
 
-    def generate_child_rooms(self, num_rooms):
-        """Generate child rooms for multi-room rentals."""
-        for i in range(num_rooms - 1):  # -1 because the main room counts as one
-            room = create_object(
-                RentableRoom,
-                key=f"{self.key} - Room {i+2}",
-                location=None,  # Set to None so it's not placed in the current location
-            )
-            room.db.parent_room = self
-            self.db.child_rooms.append(room)
+    def rent_to(self, character, rental_type=None):
+        """
+        Rent the room to a character.
+        For vacant apartments: rental_type from building's available types.
+        Does NOT deduct eurodollars (abstracted). Checks threshold only.
+        """
+        if self.db.owner and not self.db.residents:
+            # Vacant - allow new rental
+            pass
+        elif self.db.owner:
+            return False, "This apartment is already rented."
 
-    def rent_to(self, character):
-        """Rent the room to a character."""
-        if self.db.renter:
-            return False, "This room is already rented."
-
-        # Check if the character is already renting another room
         if character.attributes.has('rented_room'):
-            return False, "You are already renting another room. Leave that one first."
+            existing = character.attributes.get('rented_room')
+            if existing and existing != self.get_main_room():
+                return False, "You are already renting another place. Leave that one first."
 
-        rental_type = self.db.rental_type
-        if rental_type == "Corporate Conapt" and not character.check_permstring("Exec"):
-            return False, "You need to be an Executive to rent this type of apartment."
-
-        if not hasattr(character, 'character_sheet'):
+        if not hasattr(character, 'character_sheet') or not character.character_sheet:
             return False, "You don't have a character sheet."
 
         sheet = character.character_sheet
-        if isinstance(sheet, CharacterSheet):
-            character_sheet = sheet
-        else:
+        if isinstance(sheet, int):
             try:
-                character_sheet = CharacterSheet.objects.get(id=sheet)
+                sheet = CharacterSheet.objects.get(id=sheet)
             except CharacterSheet.DoesNotExist:
                 return False, "Your character sheet could not be found."
 
-        if not CharacterSheetMoneyService.spend_money(character_sheet, self.db.rent_cost):
-            return False, "You don't have enough Eurodollars to rent this room."
+        rental_type = rental_type or self.db.rental_type
+        if not rental_type:
+            return False, "No rental type specified."
 
-        self.db.renter = character
+        if rental_type not in self.RENTAL_TYPES:
+            return False, f"Invalid rental type: {rental_type}"
+
+        data = self.RENTAL_TYPES[rental_type]
+        if data.get("role_required") and not character.check_permstring(data["role_required"]):
+            return False, f"You need to be {data['role_required']} to rent this type."
+
+        rent_cost = get_effective_rent_cost(self) if self.db.rent_cost is not None else (data.get("rent") or 0)
+        if rent_cost > 0:
+            balance = get_character_eurodollars(character)
+            if balance < rent_cost:
+                return False, f"You need at least {rent_cost} Eurodollars to rent this. You have {balance}."
+
+        self.set_rental_type(rental_type)
+        self.db.owner = character
+        self.db.residents = [character]
+        self.db.co_residents = {}
+        self.db.partners = []
+        self.db.room_owners = {}
+        self.db.purchased = False
         self.db.rent_due_date = self.get_next_rent_due_date()
-        character.attributes.add('rented_room', self)
-        
-        # Set up a script to handle monthly rent collection
-        create.create_script(
-            RentCollectionScript,
-            key=f"rent_collection_{self.id}",
-            obj=self,
-            interval=2592000,  # 30 days in seconds
-            persistent=True,
-        )
+        character.attributes.add('rented_room', self.get_main_room())
 
-        return True, f"You have successfully rented the {rental_type} for {self.db.rent_cost} Eurodollars per month."
+        ensure_rent_collection_script(self.get_main_room())
+
+        return True, f"You have rented this {rental_type}. Monthly rent: {rent_cost}eb (threshold check)."
+
+    def purchase_by(self, character):
+        """Purchase the apartment. Deducts eurodollars and stops monthly checks."""
+        if self.db.purchased:
+            return False, "This apartment is already owned."
+        if self.db.owner and self.db.owner != character:
+            return False, "Someone else is renting this apartment."
+
+        purchase_cost = get_effective_purchase_cost(self)
+        if purchase_cost <= 0:
+            return False, "This apartment cannot be purchased."
+
+        sheet = character.character_sheet
+        if not sheet:
+            return False, "You don't have a character sheet."
+        if isinstance(sheet, int):
+            sheet = CharacterSheet.objects.get(id=sheet)
+
+        if not CharacterSheetMoneyService.spend_money(sheet, purchase_cost):
+            return False, f"You need {purchase_cost} Eurodollars to purchase. You have {get_character_eurodollars(character)}."
+
+        self.db.purchased = True
+        self.db.owner = character
+        if character not in (self.db.residents or []):
+            self.db.residents = [character] + (self.db.residents or [])
+        stop_rent_collection_script(self.get_main_room())
+
+        for child in self.db.child_rooms or []:
+            if child:
+                child.db.purchased = True
+                child.db.owner = character
+
+        return True, f"You have purchased this apartment for {purchase_cost} Eurodollars. No more monthly rent!"
+
+    def collect_rent(self):
+        """
+        Monthly rent check. Threshold-based: if balance >= rent, keep apartment.
+        Does NOT deduct eurodollars (abstracted).
+        """
+        main = self.get_main_room()
+        if not main.db.owner:
+            return False, "No one is renting this apartment."
+        if main.db.purchased:
+            return True, "Apartment is owned, no rent due."
+
+        rent_cost = get_effective_rent_cost(main)
+        if rent_cost <= 0:
+            main.db.rent_due_date = main.get_next_rent_due_date()
+            return True, "Rent check passed (corporate housing)."
+
+        sheet = main.db.owner.character_sheet
+        if not sheet:
+            main.evict_renter()
+            return False, "Rent check failed: no character sheet. Evicted."
+        balance = CharacterSheetMoneyService.get_balance(sheet)
+        if balance >= rent_cost:
+            main.db.rent_due_date = main.get_next_rent_due_date()
+            return True, f"Rent check passed. Balance {balance}eb >= {rent_cost}eb."
+        else:
+            main.evict_renter()
+            return False, f"Rent check failed. Balance {balance}eb < {rent_cost}eb. Evicted."
+
+    def evict_renter(self):
+        """Remove the primary renter. Promote co-resident or mark vacant."""
+        main = self.get_main_room()
+        if main.db.owner:
+            main.db.owner.msg("You have been evicted from your apartment due to non-payment.")
+            main.db.owner.attributes.remove('rented_room')
+            if main.db.owner.db.home_location == main:
+                main.db.owner.db.home_location = None
+
+        # Promote first co-resident to primary if any
+        co_list = list((main.db.co_residents or {}).values())
+        if co_list:
+            new_owner = co_list[0]
+            main.db.owner = new_owner
+            main.db.residents = [new_owner] + [c for c in co_list[1:] if c]
+            main.db.co_residents = {k: v for k, v in (main.db.co_residents or {}).items() if v != new_owner}
+            new_owner.attributes.add('rented_room', main)
+            new_owner.msg("You have taken over as primary renter of the apartment.")
+        else:
+            main.db.owner = None
+            main.db.residents = []
+            main.db.co_residents = {}
+            main.db.partners = []
+            main.db.room_owners = {}
+            main.db.rent_due_date = None
+            stop_rent_collection_script(main)
+
+        for child in main.db.child_rooms or []:
+            if child:
+                child.db.owner = main.db.owner
+                child.db.residents = main.db.residents
+                child.db.co_residents = main.db.co_residents
+                child.db.partners = main.db.partners
+                child.db.room_owners = main.db.room_owners
+
+    def leave_rental(self, character):
+        """Character leaves the rental. Apartment becomes vacant or co-resident takes over."""
+        main = self.get_main_room()
+        owner = main.db.owner
+        if not owner or (hasattr(owner, 'id') and owner.id != character.id):
+            return False, "You are not the primary renter."
+
+        character.attributes.remove('rented_room')
+        if character.db.home_location == main:
+            character.db.home_location = None
+
+        # Remove from partners
+        if main.db.partners:
+            main.db.partners = [p for p in main.db.partners if p and p.id != character.id]
+        # Remove from co_residents
+        if main.db.co_residents:
+            main.db.co_residents = {k: v for k, v in main.db.co_residents.items() if v and v.id != character.id}
+        # Remove from residents
+        if main.db.residents:
+            main.db.residents = [r for r in main.db.residents if r and r.id != character.id]
+
+        # Promote co-resident or partner
+        co_list = list((main.db.co_residents or {}).values())
+        partner_list = main.db.partners or []
+        if co_list:
+            new_owner = co_list[0]
+            main.db.owner = new_owner
+            main.db.residents = [new_owner] + [c for c in co_list[1:] if c] + partner_list
+            new_owner.attributes.add('rented_room', main)
+            new_owner.msg("You have taken over as primary renter.")
+        elif partner_list:
+            new_owner = partner_list[0]
+            main.db.owner = new_owner
+            main.db.residents = [new_owner] + partner_list[1:]
+            new_owner.attributes.add('rented_room', main)
+            new_owner.msg("You have taken over as primary renter.")
+        else:
+            main.db.owner = None
+            main.db.residents = []
+            main.db.rent_due_date = None
+            stop_rent_collection_script(main)
+
+        for child in main.db.child_rooms or []:
+            if child:
+                child.db.owner = main.db.owner
+                child.db.residents = main.db.residents
+                child.db.co_residents = main.db.co_residents
+                child.db.partners = main.db.partners
+
+        return True, "You have left your rental. The apartment is now vacant."
 
     def get_next_rent_due_date(self):
-        """Calculate the next rent due date (30 days from now)."""
+        """Next rent due (30 days)."""
         from django.utils import timezone
         return timezone.now() + timezone.timedelta(days=30)
 
-    def collect_rent(self):
-        """Collect rent from the renter."""
-        if not self.db.renter:
-            return False, "This room is not currently rented."
-
-        character_sheet = CharacterSheet.objects.get(account=self.db.renter.account)
-        if CharacterSheetMoneyService.spend_money(character_sheet, self.db.rent_cost):
-            self.db.rent_due_date = self.get_next_rent_due_date()
-            return True, f"Rent of {self.db.rent_cost} Eurodollars collected successfully."
-        else:
-            self.evict_renter()
-            return False, "Rent collection failed. The renter has been evicted."
-
-    def evict_renter(self):
-        """Evict the current renter and schedule room destruction if empty."""
-        if self.db.renter:
-            self.db.renter.msg("You have been evicted from your rented room due to non-payment.")
-            self.db.renter.attributes.remove('rented_room')
-            self.db.renter = None
-            self.db.rent_due_date = None
-            # Remove the rent collection script
-            for script in self.scripts.all():
-                if script.key.startswith("rent_collection_"):
-                    script.stop()
-            
-            # Schedule room destruction
-            if self.db.is_temporary:
-                delay(300, self.check_and_destroy)  # Check after 5 minutes
-
-    def check_and_destroy(self):
-        """Check if the room is still empty and destroy it if it's temporary."""
-        if self.db.is_temporary and not self.db.renter and not self.contents:
-            # Destroy child rooms first
-            for child_room in self.db.child_rooms:
-                child_room.delete()
-            # Destroy this room
-            self.delete()
-        elif self.db.is_temporary:
-            # If the room is occupied or not temporary, schedule another check
-            delay(3600, self.check_and_destroy)  # Check again after 1 hour
-
-    def leave_rental(self, character):
-        """Allow a character to leave their rental."""
-        if self.db.renter != character:
-            return False, "You are not renting this room."
-
-        self.db.renter = None
-        self.db.rent_due_date = None
-        character.attributes.remove('rented_room')
-
-        # Remove the rent collection script
-        for script in self.scripts.all():
-            if script.key.startswith("rent_collection_"):
-                script.stop()
-
-        # Schedule room destruction if it's temporary
-        if self.db.is_temporary:
-            delay(300, self.check_and_destroy)  # Check after 5 minutes
-
-        return True, "You have successfully left your rental. Your security deposit will be refunded."
-
     def return_appearance(self, looker, **kwargs):
-        """Customize the room's appearance."""
-        if not looker:
-            return ""
-
-        name = self.get_display_name(looker, **kwargs)
-        desc = self.db.desc
-
-        # Header with room name
-        string = header(name, width=78, bcolor="|m", fillchar=ANSIString("|m-|n")) + "\n"
-
-        # Process room description
-        if desc:
-            paragraphs = desc.split('%r')
-            formatted_paragraphs = []
-            for i, p in enumerate(paragraphs):
-                if not p.strip():
-                    if i > 0 and not paragraphs[i-1].strip():
-                        formatted_paragraphs.append('')  # Add blank line for double %r
-                    continue
-            
-                lines = p.split('%t')
-                formatted_lines = []
-                for j, line in enumerate(lines):
-                    if j == 0 and line.strip():
-                        formatted_lines.append(wrap_ansi(line.strip(), width=76))
-                    elif line.strip():
-                        formatted_lines.append(wrap_ansi('    ' + line.strip(), width=76))
-            
-                formatted_paragraphs.append('\n'.join(formatted_lines))
-        
-            string += '\n'.join(formatted_paragraphs) + "\n\n"
-
-        # Add rental information
-        if self.db.rental_type:
-            string += f"|wRental Type:|n {self.db.rental_type}\n"
-            string += f"|wMonthly Rent:|n {self.db.rent_cost} Eurodollars\n"
-            if self.db.renter:
-                string += f"|wRented by:|n {self.db.renter.name}\n"
-                string += f"|wRent Due Date:|n {self.db.rent_due_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            else:
-                string += "|wStatus:|n Available for rent\n"
-
-        string += footer(width=78, fillchar=ANSIString("|m-|n"))
-
-        return string
+        """Room appearance without rental info - use +rent/status to see rental details."""
+        return super().return_appearance(looker, **kwargs)
 
     def at_object_delete(self):
-        """Clean up when the room is deleted."""
-        super().at_object_delete()
-        # Remove any remaining scripts
-        for script in self.scripts.all():
-            script.stop()
-        # Remove references from the parent location
-        parent_location = self.location
-        if parent_location and hasattr(parent_location, 'db'):
-            exits = parent_location.exits
-            for exit in exits:
-                if exit.destination == self:
-                    exit.delete()
+        """Clean up when deleted. Must return True to allow deletion."""
+        result = super().at_object_delete()
+        try:
+            for script in self.scripts.all():
+                script.stop()
+        except Exception:
+            pass
+        return result if result is not None else True

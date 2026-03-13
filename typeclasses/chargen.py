@@ -3,7 +3,7 @@ from evennia.utils import delay
 from evennia.utils.ansi import ANSIString
 from world.utils.calculation_utils import get_remaining_points
 from world.utils.ansi_utils import wrap_ansi
-from world.utils.formatting import header, footer, divider
+from world.utils.formatting import header, footer, divider, footer_with_right_text
 from world.cyberpunk_constants import STATS, ROLE_SKILLS
 from evennia.utils.utils import inherits_from
 import logging
@@ -194,7 +194,12 @@ class ChargenRoom(DefaultRoom):
             # Split into two columns
             string += self.format_two_columns(direction_strings)
 
-        string += footer(width=78, fillchar=ANSIString("|m-|n"))
+        # Resource descriptor in lower right (Cyberpunk standard)
+        from world.cyberpunk_constants import resource_level_to_descriptor
+        res_level = self.db.resources if self.db.resources is not None else None
+        res_desc = resource_level_to_descriptor(res_level)
+        res_str = f"[Res: {res_desc}]" if res_desc != "Not set" else ""
+        string += footer_with_right_text(width=78, right_text=res_str, fillchar="-", color="|m")
 
         return string
     

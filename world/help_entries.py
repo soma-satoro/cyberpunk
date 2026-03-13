@@ -102,7 +102,7 @@ Use |w+room|n to configure room properties. Target: |where|n, room name, or |w#d
   View current tags on the room.
 
 Other useful +room options:
-  |w+room/res here=<number>|n     - Set resources (0-5)
+  |w+room/res here=<value>|n     - Set resources: 0-6 or Cheap, Everyday, Costly, Premium, Expensive, Very Expensive, Luxury
   |w+room/type here=<type>|n      - Set room type (e.g. Beach Town, Bar)
   |w+room/coords here=<x>,<y>|n   - Set coordinates for area maps
   |w+room/unfindable here=on|n    - Hide room from +where (staff can still see)
@@ -1145,6 +1145,249 @@ A |wmystery|n has a goal and a complexity pool. |wClues|n reduce complexity when
 6. Use +clues to verify your setup
 
 See also: +help investigation
+        """,
+    },
+    {
+        "key": "elflines",
+        "aliases": ["elo", "elflines online", "+elo"],
+        "category": "General",
+        "text": """
+Elflines Online (ELO) is the massively multiplayer online game within the Cyberpunk universe. Played via the Segotari RUSH REVOLUTION Braindance headset, edgerunners escape the meat world to fight the forces of darkness as elves in the Elflands.
+
+# Commands
+
+|w+elo|n
+  Show your ELO status and character summary.
+
+|w+elo/sheet|n
+  View your ELO character sheet.
+
+|wsheet/elo|n
+  Elflines Online character generation: allocate stats (50 pts, 3-8 each), skills (60 pts, max 6 each), set elfname, and pick equipment (200gp). New characters get 50 STAT points, 60 skill points, and 200gp. No LUCK. Stats 3-8 at creation. Language (Elven) is free at 4.
+
+|w+elo/login|n
+  Enter the Elflands. Requires subscription (20eb/month, included in Generic Prepak+) and a RUSH REVOLUTION headset. You leave the meat world and appear in the ELO lobby.
+
+|w+elo/logout|n
+  Leave the Elflands and return to the meat world.
+
+|w+elo/who|n
+  List players currently in the Elflands.
+
+|w+elo/armory|n
+  List equipment available in ELO (armor, weapons, consumables) and gp prices.
+
+# Elflines (Guilds)
+
+|w+elfline|n
+  List your Elflines.
+
+|w+elfline/create <name>|n
+  Found a new Elfline. You become the leader.
+
+|w+elfline/join <name>|n
+  Join an existing Elfline.
+
+|w+elfline/leave [<name>]|n
+  Leave your current Elfline.
+
+|w+elfline/info [<name>]|n
+  View Elfline details, leader, and member count.
+
+|w+elfline/invite <player>|n
+  Invite someone to your Elfline (leader/officer only).
+
+|w+elfline/kick <player>|n
+  Remove a member (leader only).
+
+# Lore
+
+The forests of the Elflands were once protected by a great hero. With the hero gone, the forces of darkness spread miasma and drove the elves behind settlement walls. A new generation of heroes rises to fight back. Elflines (guilds) are your family in the game—more than the parents who ignored you or the sibling who stole your Kibble.
+
+# Staff
+
+Builders use |w+elosetup|n to create the ELO Lobby room. Then add exits to build the Elflands grid. Use typeclass |wtypeclasses.elflines_rooms.ElflinesRoom|n for ELO rooms.
+        """,
+    },
+    # === Apartment Rental System ===
+    {
+        "key": "rental workflow",
+        "aliases": ["rent", "apartments", "housing", "rent workflow"],
+        "category": "Economy",
+        "text": """
+The apartment rental system lets you rent or purchase housing in Night City. Costs are in Eurodollars (eb). Rent is a |wthreshold check|n—you must maintain enough eb to keep your apartment, but no eb is deducted monthly. You can also |wpurchase|n an apartment outright to avoid monthly checks.
+
+|yFinding Apartments|n
+
+|w+rent/search|n
+  List all buildings with available apartments. Shows location (hierarchy), area code, available slots, apartment types, and any non-default cost modifiers. Use this to find where to rent without scouring the grid.
+
+|yRenting an Apartment|n
+
+|w+rent <type>|n
+  Rent at your current location. You must specify an apartment type (e.g. |w+rent Studio Apartment|n or |w+rent One-Bedroom Apartment|n). Use |w+rent/status|n in the lobby or on a floor to see available types.
+  Use this in:
+  - A building |wlobby|n — assigns you an apartment on a random floor
+  - On a specific |wfloor|n — assigns you an apartment on that floor
+  - Inside a |wvacant apartment|n — take over the existing unit
+
+You need enough Eurodollars to meet the rent threshold. Check your balance with |wbalance|n.
+
+|yCustomizing Your Apartment|n
+
+|w+rent/desc =<text>|n
+  Change the description of the room you're in.
+
+|w+rent/name =<name>|n
+  Rename the room (e.g. change "Bedroom 2" to "Workshop").
+
+|w+rent/exit <exit>=<new name>|n
+  Change the display name of an exit. Aliases (B1, B2, O, etc.) stay the same.
+  Example: +rent/exit Bedroom 2=Workshop
+
+|w+rent/home|n
+  Set this apartment as your IC home. Use the |whome|n command to return here.
+
+|yCo-Residents and Partners|n
+
+|w+rent/add <character>|n
+  Add a co-resident (primary renter only). They get a room and can set this as their home. Available on One-Bedroom and larger apartments.
+
+|w+rent/remove <character>|n
+  Remove a co-resident (primary renter only).
+
+|w+rent/partner <character>|n
+  Invite a romantic partner to move in. They must go to your apartment and type |w+rent/partner confirm|n to accept. Partners have the same authority as you.
+
+|yDoors and Security|n
+
+|w+rent/lock [<exit>]|n
+  Lock the door. Residents and partners can lock/unlock.
+
+|w+rent/unlock [<exit>]|n
+  Unlock the door.
+
+|yOther Commands|n
+
+|w+rent/purchase|n
+  Buy the apartment outright. Deducts eb once; no more monthly rent checks.
+
+|w+rent/info|n
+  Show rental details (type, cost, residents, status).
+
+|w+rent/leave|n
+  Leave your rental. If you're primary, a co-resident takes over or the apartment becomes vacant.
+
+|whome|n
+  Return to your IC home (after using +rent/home).
+
+|yLocation Format|n
+
+Apartments display as: |wRoom/Apt# -- Building Name -- District|n
+Example: 212 Main Room -- Kabuki Heights -- Watson
+
+See also: +help balance, +help rental staff
+        """,
+    },
+    {
+        "key": "rental staff",
+        "aliases": ["staff rental", "rental creation", "apartment building", "housing setup"],
+        "category": "Building and Housing",
+        "locks": "read:perm(Builder)",
+        "text": """
+Staff guide to setting up apartment buildings and rental floors. Requires Builder permission.
+
+|yOverview|n
+
+Apartments are created when players use |w+rent <type>|n. Staff configure the building lobby, add floor rooms, set floor numbers, and choose which apartment types are available. Costs can be modified per building or per apartment.
+
+|yInitial Building Setup|n
+
+|w+manage/setlobby|n
+  Set the current room as the building lobby. Do this first.
+
+|w+manage/sethousing/apartment <resources> [max_units]|n
+  Configure as an apartment building. Resources and max_units are legacy; rental costs come from apartment types.
+
+|w+manage/addtype <type>|n
+  Add apartment types available in this building. Use exact names:
+  Cube Hotel, Cargo Container, Studio Apartment, One-Bedroom Apartment,
+  Two-Bedroom Apartment, Corporate Conapt, Upscale Conapt, Luxury Penthouse,
+  Corporate Beaverville House, Corporate Beaverville McMansion
+
+  Example: +manage/addtype "One-Bedroom Apartment"
+
+|w+manage/types|n
+  List all available types and which are enabled for this building.
+
+|yAdding Floors|n
+
+1. Create the floor room (e.g. with |wdig|n) and add exits between lobby and floor.
+2. Stand in the floor room.
+3. |w+manage/addroom|n — Adds this room to the building zone.
+4. |w+manage/floor <number> [max_units]|n — Set floor number and max units per floor (default 6).
+   Example: +manage/floor 4 6 — Floor 4, up to 6 apartments (401–406).
+
+The floor number becomes the prefix for apartment numbers. Floor 4 with unit 05 = apartment 405.
+
+|yCost Modification|n
+
+|w+manage/setcost <room>=<rent_modifier>,<purchase_modifier>|n
+  Adjust costs for a specific apartment. Modifiers are added to base costs.
+  Example: +manage/setcost #12345=500,5000 — Adds 500eb to rent, 5000eb to purchase.
+
+# Creating Apartments (Staff)
+
+|w+manage/createapt [type] [=rent,purchase,rooms]|n
+  Create an apartment on the current floor. Use in lobby (random floor) or on a floor.
+  |w+manage/createapt|n — Create using first available type
+  |w+manage/createapt "Luxury Penthouse"|n — Create with default costs
+  |w+manage/createapt "Luxury Penthouse"=20000,200000|n — Override rent and purchase
+  |w+manage/createapt "Luxury Penthouse"=20000,200000,6|n — Override all (6 rooms)
+  |w+manage/createapt Custom=5000,75000,4|n — Bespoke: 4 rooms, 5k rent, 75k purchase
+
+Custom apartments use generic room names (Room 2, Room 3, ...). Add "Custom" to available types with +manage/addtype Custom first.
+
+|yOther +manage Commands|n
+
+|w+manage/info|n
+  Show building info, connected rooms, available types.
+
+|w+manage/removeroom|n
+  Remove current room from the building zone.
+
+|w+manage/apartments|n
+  List apartments in the building.
+
+|w+manage/apartments/floor=<number>|n
+  List apartments on a specific floor.
+
+|w+manage/apartments <player>|n
+  List apartments owned by a player.
+
+|yWorkflow Summary|n
+
+1. Create lobby room, set description and exits to floors.
+2. +manage/setlobby
+3. +manage/addtype "Studio Apartment"
+4. +manage/addtype "One-Bedroom Apartment"
+5. (Repeat for each floor) dig Floor 4; add exits lobby<->floor; +manage/addroom; +manage/floor 4 6
+6. Players can now +rent in the lobby or on any floor.
+
+|yRoom Layouts|n
+
+Apartment types generate rooms automatically:
+- One-Bedroom: Main Room, Bedroom
+- Two-Bedroom: Main Room, Bedroom 1, Bedroom 2
+- Corporate Conapt: Main Room, Bedroom, Side Room
+- Upscale Conapt: Main Room, Bedroom 1, Bedroom 2, Side Room
+- Luxury Penthouse: Main Room, Bedroom 1, Bedroom 2, Side Room, Patio
+- Beaverville House: Main Room, Bedroom 1, Bedroom 2, Side Room, Yard
+- McMansion: Main Room, Bedroom 1–3, Side Room, Yard
+
+Exits use aliases (B1, B2, SR, O, etc.) that players cannot change.
+
+See also: +help rental workflow, +help room creation
         """,
     },
 ]

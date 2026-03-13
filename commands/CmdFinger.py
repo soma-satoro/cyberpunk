@@ -270,11 +270,7 @@ class CmdFinger(MuxCommand):
             
             # If no direct match or search failed, try alias
             if not target:
-                from evennia.objects.models import ObjectDB
-                alias_matches = ObjectDB.objects.get_objs_with_key_or_alias(search_term, exact=True)
-                char_matches = [obj for obj in alias_matches if isinstance(obj, Character)]
-                if char_matches:
-                    target = char_matches[0]
+                target = Character.get_by_alias(search_term.lower())
 
             if not target:
                 self.caller.msg(f"Could not find a character named '{search_term}'.")
@@ -386,7 +382,7 @@ class CmdFinger(MuxCommand):
                 return True
                 
             except Exception as e:
-                self.caller.msg("Error setting finger field.")
+                self.caller.msg(f"Error setting finger field: {str(e)}")
                 return True
         
         return False 

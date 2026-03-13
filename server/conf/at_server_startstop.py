@@ -131,10 +131,16 @@ def at_server_start():
     if not WorldScript.objects.filter(db_key="WorldScript").exists():
         create_script(WorldScript)
     
-    # Start RentCollectionScripts for all rentable rooms
+    # Start RentCollectionScripts for rented (non-purchased) apartments only
+    processed = set()
     for room in RentableRoom.objects.all():
-        if not room.scripts.get("rent_collection_" + str(room.id)):
-            create_script(RentCollectionScript, obj=room)
+        main = room.get_main_room() if hasattr(room, 'get_main_room') else room
+        if main.id in processed:
+            continue
+        processed.add(main.id)
+        if main.db.owner and not getattr(main.db, 'purchased', False):
+            if not main.scripts.get("rent_collection_" + str(main.id)):
+                create_script(RentCollectionScript, obj=main)
 
     initialize_weapons()
     initialize_weapon_attachments()

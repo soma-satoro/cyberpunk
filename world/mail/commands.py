@@ -44,7 +44,7 @@ class CmdMail(Command):
         # Validate recipients
         valid_recipients = []
         for recipient in recipients:
-            player = self.caller.search(recipient)
+            player = self.caller.search(recipient, global_search=True)
             if player:
                 valid_recipients.append(player)
             else:
@@ -67,7 +67,7 @@ class CmdMail(Command):
                     recipient.msg(f"You have received a new mail from {self.caller.key} with subject: {subject}")
             self.caller.msg(f"Mail sent to {', '.join(r.key for r in valid_recipients)}.")
         except Exception as e:
-            self.caller.msg("Error sending mail.")
+            self.caller.msg(f"Error sending mail: {str(e)}")
 
 class CmdMailbox(Command):
     """

@@ -1,6 +1,8 @@
-from evennia import DefaultScript, create_script
-from evennia.utils import gametime
+from evennia import DefaultScript
+from evennia.utils import gametime, create
 from evennia.scripts.models import ScriptDB
+from evennia.utils import logger
+from evennia import create_script
 from datetime import datetime
 
 class Event(DefaultScript):
@@ -93,6 +95,7 @@ class EventScheduler(DefaultScript):
         if event not in self.db.events:
             self.db.events.append(event)
         self.save()
+        logger.log_info(f"Created new event: {title}, Total events: {len(self.db.events)}")
         return event
 
     def get_upcoming_events(self):
@@ -100,10 +103,18 @@ class EventScheduler(DefaultScript):
         Get all upcoming events.
         """
         current_time = datetime.fromtimestamp(gametime.gametime(absolute=True))
-        return [
-            e for e in (self.db.events or [])
-            if e.db.status == "scheduled" and e.db.date_time > current_time
-        ]
+        logger.log_info(f"Current time: {current_time}")
+        
+        upcoming = []
+        for e in self.db.events:
+            logger.log_info(f"Event: {e.db.title}, Status: {e.db.status}, Date: {e.db.date_time}")
+            if e.db.status == "scheduled" and e.db.date_time > current_time:
+                upcoming.append(e)
+            else:
+                logger.log_info(f"Event not included: {e.db.title}, Reason: {'Status not scheduled' if e.db.status != 'scheduled' else 'Date not in future'}")
+        
+        logger.log_info(f"Retrieved {len(upcoming)} upcoming events out of {len(self.db.events)} total events")
+        return upcoming
     
     def get_event_by_id(self, event_id):
         """
@@ -127,22 +138,30 @@ class EventScheduler(DefaultScript):
 def init_event_system():
     try:
         scheduler = ScriptDB.objects.get(db_key="EventScheduler")
+        logger.log_info("Retrieved existing EventScheduler.")
     except ScriptDB.DoesNotExist:
         scheduler = create_script(EventScheduler, key="EventScheduler")
+        logger.log_info("Created new EventScheduler.")
     except ScriptDB.MultipleObjectsReturned:
         schedulers = ScriptDB.objects.filter(db_key="EventScheduler")
         scheduler = schedulers.first()
         for extra in schedulers[1:]:
             extra.delete()
-
+        logger.log_info(f"Multiple EventSchedulers found. Kept one and deleted {len(schedulers) - 1} extra(s).")
+    
     if scheduler and isinstance(scheduler, EventScheduler):
         if not scheduler.is_active:
             scheduler.start()
+            logger.log_info("Started inactive EventScheduler.")
     else:
+        logger.log_warn("Retrieved object is not a proper EventScheduler instance.")
         return None
-
+    
     return scheduler
 
-
+# Function to get or create the event scheduler
 def get_or_create_event_scheduler():
-    return init_event_system()
+    scheduler = init_event_system()
+    if not scheduler:
+        logger.log_err("Failed to initialize or retrieve EventScheduler.")
+    return scheduler

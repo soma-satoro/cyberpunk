@@ -1,10 +1,15 @@
 from evennia import CmdSet
 from evennia import create_object
 from typeclasses.rental import RentableRoom
+
 from evennia.utils import search, delay
 from evennia.utils.search import search_object
 from evennia import Command
-from world.utils.formatting import divider, footer, format_stat, header 
+from world.utils.formatting import divider, footer, format_stat, header
+from world.cyberpunk_constants import (
+    resource_level_to_descriptor,
+    descriptor_to_resource_level,
+) 
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils.evtable import EvTable
 
@@ -100,7 +105,7 @@ class CmdAreaManage(MuxCommand):
             caller.msg(f"Next Room Number: {code}{info['next_room']:02d}")
             caller.msg(f"Total Rooms: {len(info['rooms'])}")
             if info['rooms']:
-                caller.msg(f"\nRoom Numbers: {', '.join([f'{code}{num:02d}' for num in sorted(info['rooms'].keys())])}")
+                caller.msg(f"\nRoom Numbers: {', '.join([f'{code}{int(num):02d}' for num in sorted(info['rooms'].keys(), key=int)])}")
 
         elif switch == "rooms":
             if not self.args:
@@ -116,10 +121,10 @@ class CmdAreaManage(MuxCommand):
                 caller.msg(f"No rooms found in area {code}.")
                 return
             table = EvTable("Room Code", "Room Name", "DB#", border="cells")
-            for room_num in sorted(rooms.keys()):
+            for room_num in sorted(rooms.keys(), key=int):
                 room_id = rooms[room_num]
                 room_obj = search_object(f"#{room_id}")
-                room_code = f"{code}{room_num:02d}"
+                room_code = f"{code}{int(room_num):02d}"
                 room_name = room_obj[0].name if room_obj else "|rDeleted Room|n"
                 table.add_row(room_code, room_name, f"#{room_id}")
             caller.msg(f"Rooms in Area {code} ({info['name']}):\n{table}")
@@ -142,7 +147,7 @@ class CmdRoom(MuxCommand):
 
     Usage:
       +room                          - Show current room settings
-      +room/res <target>=<value>     - Set room resources
+      +room/res <target>=<value>     - Set room resources (0-6 or: Cheap, Everyday, Costly, Premium, Expensive, Very Expensive, Luxury)
       +room/type <target>=<type>     - Set room type
       +room/unfindable <target>=<on/off> - Set room findability
       +room/area <target>=<code>     - Set area and auto-assign room code (e.g. NC)
@@ -210,7 +215,8 @@ class CmdRoom(MuxCommand):
             table.add_row("Hierarchy", " - ".join(hierarchy))
         else:
             table.add_row("Hierarchy", "Not set")
-        table.add_row("Resources", str(room.db.resources) if room.db.resources is not None else "Not set")
+        res_display = resource_level_to_descriptor(room.db.resources)
+        table.add_row("Resources", res_display)
         table.add_row("Room Type", room.db.roomtype or "Not set")
         table.add_row("Unfindable", "Yes" if room.db.unfindable else "No")
         tags = getattr(room.db, 'tags', []) or []
@@ -259,12 +265,20 @@ class CmdRoom(MuxCommand):
         room_info = f"#{room.id}" if room != self.caller.location else "here"
 
         if switch == "res":
-            try:
-                val = int(value)
-                room.db.resources = val
-                self.caller.msg(f"Set resources to {val} for {room.get_display_name(self.caller)}.")
-            except ValueError:
-                self.caller.msg("The resources value must be an integer.")
+            # Accept descriptor name or 0-6
+            val = descriptor_to_resource_level(value)
+            if val is None:
+                try:
+                    val = int(value)
+                    if val < 0 or val > 6:
+                        self.caller.msg("Resource level must be 0-6, or use: Cheap, Everyday, Costly, Premium, Expensive, Very Expensive, Luxury.")
+                        return
+                except ValueError:
+                    self.caller.msg("Use 0-6 or a descriptor: Cheap, Everyday, Costly, Premium, Expensive, Very Expensive, Luxury.")
+                    return
+            room.db.resources = val
+            desc = resource_level_to_descriptor(val)
+            self.caller.msg(f"Set resources to {desc} for {room.get_display_name(self.caller)}.")
 
         elif switch == "type":
             room.db.roomtype = value
@@ -686,7 +700,10 @@ class CmdManageBuilding(MuxCommand):
     
     Usage:
         +manage/setlobby          - Sets current room as building lobby
-        +manage/addroom           - Adds current room to building zone
+        +manage/addroom           - Adds current room to building zone (alias: addfloor)
+        +manage/floor <num> [max] - Set floor number and max units for rental floor
+        +manage/setcost <room>=<rent_mod>,<purchase_mod> - Modify apartment costs
+        +manage/createapt [type] [=rent,purchase,rooms] - Create apartment (staff)
         +manage/removeroom        - Removes current room from building zone
         +manage/info              - Shows building zone information
         +manage/clear             - Clears all building zone data
@@ -735,6 +752,25 @@ class CmdManageBuilding(MuxCommand):
                 'allowed_splats': set()  # Added for splat restrictions
             }
         return location.db.housing_data
+
+    def get_lobby_for_location(self, location):
+        """
+        Get the correct lobby for this location.
+        When on a floor, use building_zone to get THIS building's lobby (isolates from other buildings).
+        """
+        if not location or not hasattr(location, 'db'):
+            return None
+        hd = getattr(location.db, 'housing_data', None) or {}
+        if hd.get('is_lobby'):
+            return location
+        building_zone = hd.get('building_zone')
+        if building_zone:
+            lobby = self.caller.search(f"#{building_zone}")
+            if lobby and hasattr(lobby, 'db'):
+                lobby_hd = getattr(lobby.db, 'housing_data', None)
+                if lobby_hd and lobby_hd.get('is_lobby'):
+                    return lobby
+        return self.find_lobby(location)
 
     def find_lobby(self, location):
         """Helper method to find the connected lobby"""
@@ -806,9 +842,13 @@ class CmdManageBuilding(MuxCommand):
             self.caller.msg("Usage: +manage/<switch>")
             return
             
-        switch = self.switches[0]
+        switch = self.switches[0].lower()
         location = self.caller.location
-        
+
+        # Alias: addfloor -> addroom (add current room as rental floor)
+        if switch == "addfloor":
+            switch = "addroom"
+
         # Initialize housing data for all commands
         self.initialize_housing_data(location)
 
@@ -818,77 +858,71 @@ class CmdManageBuilding(MuxCommand):
 
         if switch == "types":
             try:
-                # Show available apartment types from CmdRent
-                from commands.economy import CmdRent
+                from world.rental_data import RENTAL_TYPES
                 from evennia.utils.evtable import EvTable
                 table = EvTable(
                     "|wType|n",
                     "|wRooms|n",
-                    "|wModifier|n",
-                    "|wDescription|n",
+                    "|wRent|n",
+                    "|wPurchase|n",
                     border="table",
                     table_width=78
                 )
-                
-                # Configure column widths
-                table.reformat_column(0, width=12)  # Type
-                table.reformat_column(1, width=7)   # Rooms
-                table.reformat_column(2, width=10)  # Modifier
-                table.reformat_column(3, width=45)  # Description
-                
-                # Show apartment types
-                for apt_type, data in CmdRent.APARTMENT_TYPES.items():
-                    table.add_row(
-                        apt_type,
-                        str(data['rooms']),
-                        str(data['resource_modifier']),
-                        data['desc']
-                    )
-                
-                # Show residential types
-                for res_type, data in CmdRent.RESIDENTIAL_TYPES.items():
-                    table.add_row(
-                        res_type,
-                        str(data['rooms']),
-                        str(data['resource_modifier']),
-                        data['desc']
-                    )
-                
+                for apt_type, data in RENTAL_TYPES.items():
+                    if data.get("rent") is None and data.get("purchase") is None:
+                        continue
+                    rent = data.get("rent")
+                    purchase = data.get("purchase")
+                    rent_str = f"{rent}eb" if rent is not None else "Corp"
+                    purchase_str = f"{purchase}eb" if purchase is not None else "-"
+                    table.add_row(apt_type, str(data.get("rooms", 1)), rent_str, purchase_str)
+                table.add_row("Custom (bespoke)", "varies", "varies", "varies")
                 self.caller.msg(table)
-                
                 if location.db.housing_data.get('available_types', []):
                     self.caller.msg("\nTypes available in this building:")
-                    available = location.db.housing_data['available_types']
-                    # Wrap the available types list
                     from textwrap import wrap
-                    wrapped = wrap(", ".join(available), width=76)  # 76 to account for margins
+                    wrapped = wrap(", ".join(location.db.housing_data['available_types']), width=76)
                     for line in wrapped:
                         self.caller.msg(line)
             except Exception as e:
-                self.caller.msg("Error displaying housing types. Please contact an admin.")
-                
+                import logging
+                logging.getLogger("cyberpunk.building").exception("Error displaying housing types")
+                self.caller.msg(f"Error displaying housing types: {e}")
+
         elif switch == "addtype":
             if not self.args:
                 self.caller.msg("Usage: +manage/addtype <type>")
                 return
-                
-            try:
-                from commands.economy import CmdRent
-                apt_type = self.args.strip()
-                if apt_type not in CmdRent.APARTMENT_TYPES and apt_type not in CmdRent.RESIDENTIAL_TYPES:
-                    self.caller.msg(f"Invalid type. Use +manage/types to see available types.")
+            from world.rental_data import RENTAL_TYPES
+            apt_type_input = self.args.strip()
+            if apt_type_input and apt_type_input[0] == apt_type_input[-1] and apt_type_input[0] in '"\'':
+                apt_type_input = apt_type_input[1:-1].strip()
+            if not apt_type_input:
+                self.caller.msg("Please specify a type name.")
+                return
+            apt_type_lower = apt_type_input.lower()
+            if apt_type_lower == "custom":
+                canonical = "Custom"
+            else:
+                canonical = None
+                for key in RENTAL_TYPES:
+                    if key.lower() == apt_type_lower:
+                        canonical = key
+                        break
+                if not canonical:
+                    valid = ", ".join(sorted(RENTAL_TYPES.keys()))
+                    self.caller.msg(f"Invalid type '{apt_type_input}'. Valid types: {valid}")
                     return
-                    
-                if 'available_types' not in location.db.housing_data:
-                    location.db.housing_data['available_types'] = []
-                    
-                if apt_type not in location.db.housing_data['available_types']:
-                    location.db.housing_data['available_types'].append(apt_type)
-                    self.caller.msg(f"Added {apt_type} to available types.")
-                else:
-                    self.caller.msg(f"{apt_type} is already available in this building.")
-            except Exception as e:
-                self.caller.msg("Error adding housing type. Please contact an admin.")
+            hd = location.db.housing_data
+            if 'available_types' not in hd:
+                hd['available_types'] = []
+            available = list(hd.get('available_types', []) or [])
+            if canonical in available:
+                self.caller.msg(f"{canonical} is already available in this building.")
+                return
+            available.append(canonical)
+            location.db.housing_data['available_types'] = available
+            self.caller.msg(f"Added {canonical} to available types.")
 
         elif switch == "setlobby":
             # Set this room as the lobby
@@ -907,6 +941,7 @@ class CmdManageBuilding(MuxCommand):
             if 'max_apartments' not in location.db.housing_data:
                 location.db.housing_data['max_apartments'] = 20  # Default value
             
+            location.tags.add("rental_lobby")  # For +rent/search global lookup
             self.caller.msg(f"Set {location.get_display_name(self.caller)} as building lobby.")
             
         elif switch == "addroom":
@@ -932,30 +967,93 @@ class CmdManageBuilding(MuxCommand):
                 'available_types': lobby.db.housing_data.get('available_types', [])
             })
             
-            # Update lobby's connected rooms
-            if 'connected_rooms' not in lobby.db.housing_data:
-                lobby.db.housing_data['connected_rooms'] = set()
-            lobby.db.housing_data['connected_rooms'].add(location.dbref)
+            # Update lobby's connected rooms (reassign to ensure persistence)
+            lhd = dict(lobby.db.housing_data or {})
+            cr = set(lhd.get('connected_rooms') or set())
+            cr.add(location.dbref)
+            lhd['connected_rooms'] = cr
+            lobby.db.housing_data = lhd
             
-            self.caller.msg(f"Added {location.get_display_name(self.caller)} to building zone.")
+            # Initialize floor rental data
+            location.db.housing_data['floor_number'] = location.db.housing_data.get('floor_number', 1)
+            location.db.housing_data['max_units_per_floor'] = location.db.housing_data.get('max_units_per_floor', 6)
+            location.db.housing_data['apartment_numbers'] = set()
+
+            # Tag for +rent/search: rental_floor links floor to lobby via building_zone
+            if not location.tags.has("rental_floor"):
+                location.tags.add("rental_floor")
+
+            self.caller.msg(f"Added {location.get_display_name(self.caller)} to building zone. Use +manage/floor <number> [max_units] to set floor number.")
             
+        elif switch == "floor":
+            # Set floor number for rental floor: +manage/floor <number> [max_units]
+            if not self.args:
+                self.caller.msg("Usage: +manage/floor <floor_number> [max_units_per_floor]")
+                return
+            parts = self.args.split()
+            try:
+                floor_num = int(parts[0])
+                max_units = int(parts[1]) if len(parts) > 1 else 6
+            except ValueError:
+                self.caller.msg("Floor number and max_units must be integers.")
+                return
+            self.initialize_housing_data(location)
+            location.db.housing_data['floor_number'] = floor_num
+            location.db.housing_data['max_units_per_floor'] = max_units
+            if 'apartment_numbers' not in location.db.housing_data:
+                location.db.housing_data['apartment_numbers'] = set()
+            self.caller.msg(f"Set floor number to {floor_num}, max {max_units} units per floor.")
+            
+        elif switch == "setcost":
+            # Modify rent/purchase cost: +manage/setcost <room>=<rent_mod>,<purchase_mod>
+            if not self.rhs or "," not in self.rhs:
+                self.caller.msg("Usage: +manage/setcost <room>=<rent_modifier>,<purchase_modifier>")
+                return
+            room = self.caller.search(self.lhs)
+            if not room:
+                return
+            if not isinstance(room, RentableRoom):
+                self.caller.msg("Target must be a RentableRoom (apartment).")
+                return
+            try:
+                rent_mod, purchase_mod = [int(x.strip()) for x in self.rhs.split(",", 1)]
+            except ValueError:
+                self.caller.msg("Modifiers must be integers.")
+                return
+            main = room.get_main_room()
+            main.db.rent_cost_modifier = rent_mod
+            main.db.purchase_cost_modifier = purchase_mod
+            for child in (main.db.child_rooms or []):
+                if child:
+                    child.db.rent_cost_modifier = rent_mod
+                    child.db.purchase_cost_modifier = purchase_mod
+            self.caller.msg(f"Set cost modifiers: rent +{rent_mod}eb, purchase +{purchase_mod}eb.")
+
+        elif switch == "createapt":
+            # Create apartment: +manage/createapt [type] [=rent,purchase,rooms]
+            self._do_createapt(location)
+
         elif switch == "removeroom":
             if not location.db.housing_data.get('building_zone'):
                 self.caller.msg("This room is not part of a building zone.")
                 return
-                
+
+            # Remove rental_floor tag (for +rent/search)
+            if location.tags.has("rental_floor"):
+                location.tags.remove("rental_floor")
+
             # Get the lobby
             lobby = self.caller.search(location.db.housing_data['building_zone'])
-            
+
             if lobby and 'connected_rooms' in lobby.db.housing_data and location.dbref in lobby.db.housing_data['connected_rooms']:
                 lobby.db.housing_data['connected_rooms'].remove(location.dbref)
-                
+
             # Reset room data
             location.db.housing_data['building_zone'] = None
             location.db.housing_data['is_housing'] = False
             location.db.roomtype = "Room"
             location.db.resources = 0
-            
+
             self.caller.msg(f"Removed {location.get_display_name(self.caller)} from building zone.")
             
         elif switch == "info":
@@ -986,9 +1084,12 @@ class CmdManageBuilding(MuxCommand):
                     output.append(divider("Connected Rooms"))
                     output.append("None")
                 
-                # Building Stats
+                # Building Stats (use rental service for consistent unit counts)
+                from world.rental_service import get_building_rental_info
+                info = get_building_rental_info(location)
                 output.append(divider("Building Stats"))
-                output.append(format_stat("Max Units", location.db.housing_data.get('max_apartments', 0), width=78))
+                output.append(format_stat("Max Units", info.get('total_units', 0), width=78))
+                output.append(format_stat("Available Units", info.get('available_count', 0), width=78))
                 output.append(format_stat("Resources", location.db.resources, width=78))
                 
                 # Available Types
@@ -1028,6 +1129,8 @@ class CmdManageBuilding(MuxCommand):
             self.initialize_housing_data(location)
             location.db.roomtype = "Room"
             location.db.resources = 0
+            if location.tags.has("rental_lobby"):
+                location.tags.remove("rental_lobby")
             self.caller.msg("Cleared building zone data.")
 
         elif switch == "updateapts":
@@ -1191,9 +1294,14 @@ class CmdManageBuilding(MuxCommand):
                 
                 # Force room appearance update
                 location.at_object_creation()
-                
+                if location.tags.has("rental_lobby"):
+                    location.tags.remove("rental_lobby")
                 self.caller.msg("Cleared housing settings for this room.")
+                return
 
+            # Splat housing (no resources/max_units)
+            if sub_switch == "splat":
+                max_units = 20  # Default for splat
                 # Set up basic room configuration first
                 location.db.roomtype = "Splat Housing"
                 location.db.resources = 0  # Splat housing is free
@@ -1216,7 +1324,7 @@ class CmdManageBuilding(MuxCommand):
                 
                 # Force a save by accessing the attribute again
                 _ = location.db.housing_data
-                
+                location.tags.add("rental_lobby")
                 self.caller.msg(f"Set up room as free splat-specific housing with {max_units} maximum units. Room is automatically set as a lobby.")
                 return
 
@@ -1258,7 +1366,7 @@ class CmdManageBuilding(MuxCommand):
                     'is_lobby': True,
                     'available_types': []
                 })
-                
+                location.tags.add("rental_lobby")
                 self.caller.msg(f"Set up room as apartment building with {resources} resources and {max_units} maximum units.")
                 
             elif sub_switch == "motel":
@@ -1277,7 +1385,7 @@ class CmdManageBuilding(MuxCommand):
                     'is_lobby': True,
                     'available_types': []
                 })
-                
+                location.tags.add("rental_lobby")
                 self.caller.msg(f"Set up room as motel with {resources} resources and {max_units} maximum units.")
                 
             elif sub_switch == "residential":
@@ -1296,7 +1404,7 @@ class CmdManageBuilding(MuxCommand):
                     'is_lobby': True,
                     'available_types': []
                 })
-                
+                location.tags.add("rental_lobby")
                 self.caller.msg(f"Set up room as residential area with {resources} resources and {max_units} maximum units.")
 
             elif sub_switch == "encampment":
@@ -1315,11 +1423,174 @@ class CmdManageBuilding(MuxCommand):
                     'is_lobby': True,
                     'available_types': ["Encampment"]
                 })
-                
+                location.tags.add("rental_lobby")
                 self.caller.msg(f"Set up room as encampment with {resources} resources and {max_units} maximum tents.")
                 
             else:
                 self.caller.msg("Invalid housing type. Use /apartment, /motel, /residential, /encampment, /splat, or /clear")
+
+    def _do_createapt(self, location):
+        """Create an apartment (staff). +manage/createapt [type] [=rent,purchase,rooms]"""
+        import random
+        from evennia.utils import create
+        from evennia.utils.search import search_object
+        from world.rental_data import RENTAL_TYPES, get_custom_room_layout
+        from world.rental_service import create_apartment_rooms, get_apartment_hierarchy
+
+        from world.rental_service import get_lobby_for_rent, normalize_housing_data
+        lobby = get_lobby_for_rent(location) or self.get_lobby_for_location(location)
+        if not lobby:
+            self.caller.msg("You must be in a building lobby or on a rental floor.")
+            return
+
+        hd = getattr(lobby.db, 'housing_data', None) or {}
+        available = hd.get('available_types', [])
+
+        # Parse args: [type] [=rent,purchase,rooms]
+        apt_type = None
+        rent_override = None
+        purchase_override = None
+        rooms_override = None
+        if self.args:
+            if "=" in self.args:
+                lhs, rhs = self.args.split("=", 1)
+                apt_type = lhs.strip() or None
+                parts = [p.strip() for p in rhs.split(",")]
+                if len(parts) >= 1 and parts[0]:
+                    try:
+                        rent_override = int(parts[0])
+                    except ValueError:
+                        self.caller.msg("Rent must be a number.")
+                        return
+                if len(parts) >= 2 and parts[1]:
+                    try:
+                        purchase_override = int(parts[1])
+                    except ValueError:
+                        self.caller.msg("Purchase cost must be a number.")
+                        return
+                if len(parts) >= 3 and parts[2]:
+                    try:
+                        rooms_override = int(parts[2])
+                    except ValueError:
+                        self.caller.msg("Rooms must be a number.")
+                        return
+            else:
+                apt_type = self.args.strip()
+
+        is_custom = apt_type and apt_type.lower() == "custom"
+        if is_custom:
+            if rent_override is None or purchase_override is None or rooms_override is None:
+                self.caller.msg("Usage: +manage/createapt Custom=<rent>,<purchase>,<rooms>")
+                return
+            rental_type = "Custom"
+            rent_cost = rent_override
+            purchase_cost = purchase_override
+            num_rooms = max(1, rooms_override)
+            custom_layout = get_custom_room_layout(num_rooms)
+        else:
+            if not apt_type and available:
+                apt_type = available[0]
+            elif not apt_type:
+                self.caller.msg("Usage: +manage/createapt [type] [=rent,purchase,rooms] or +manage/createapt Custom=rent,purchase,rooms")
+                return
+            apt_type_lower = apt_type.lower()
+            canonical = None
+            for key in RENTAL_TYPES:
+                if key.lower() == apt_type_lower:
+                    canonical = key
+                    break
+            if not canonical:
+                self.caller.msg(f"Unknown type '{apt_type}'. Use +manage/types to see valid types.")
+                return
+            rental_type = canonical
+            data = RENTAL_TYPES[canonical]
+            rent_cost = rent_override if rent_override is not None else (data.get("rent") or 0)
+            purchase_cost = purchase_override if purchase_override is not None else (data.get("purchase") or 0)
+            num_rooms = rooms_override if rooms_override is not None else data.get("rooms", 1)
+            custom_layout = None
+            if rooms_override is not None and rooms_override != data.get("rooms", 1):
+                custom_layout = get_custom_room_layout(rooms_override)
+
+        # Determine floor (use normalize for legacy housing_data)
+        from world.rental_service import get_floor_rooms, get_available_apartment_number, get_used_apartment_numbers
+        hd = normalize_housing_data(hd) or {}
+        floor_room = None
+        if location.id == lobby.id:
+            floors = get_floor_rooms(lobby)
+            if not floors:
+                self.caller.msg("No floors set up. Use +manage/addroom on each floor, or ensure lobby has exits to floors (e.g. Up).")
+                return
+            floor_room = random.choice(floors)
+        else:
+            floors = get_floor_rooms(lobby)
+            for f in floors:
+                if f.id == location.id:
+                    floor_room = location
+                    break
+
+        if not floor_room:
+            self.caller.msg("You must be in the lobby or on a rental floor.")
+            return
+
+        apt_num = get_available_apartment_number(floor_room)
+        if not apt_num:
+            self.caller.msg("No apartment slots available on this floor.")
+            return
+
+        main_hierarchy = get_apartment_hierarchy(lobby, floor_room=floor_room)
+        building_name = main_hierarchy[0] if (main_hierarchy and main_hierarchy[0]) else lobby.key
+        district = main_hierarchy[1] if len(main_hierarchy) >= 2 else "Unknown"
+
+        # Apartment must be sibling of floor (location=floor's parent), not child.
+        # Otherwise it appears as Object in floor instead of traversable via exit.
+        main = create.create_object(
+            RentableRoom,
+            key=f"{apt_num} Main Room",
+            location=floor_room.location,
+        )
+        main.db.rental_type = rental_type
+        main.db.apartment_number = apt_num
+        main.db.building_name = building_name
+        main.db.location_hierarchy = main_hierarchy
+        main.db.area_name = main_hierarchy[0] if main_hierarchy else building_name
+        main.db.area_code = apt_num
+        main.db.rent_cost = rent_cost
+        main.db.purchase_cost = purchase_cost
+        main.db.owner = None
+        main.db.residents = []
+        main.db.co_residents = {}
+        main.db.partners = []
+        main.db.room_owners = {}
+        main.db.purchased = False
+
+        create.create_object(
+            typeclass="typeclasses.exits.Exit",
+            key=apt_num,
+            location=floor_room,
+            destination=main,
+            aliases=[apt_num],
+        )
+        create.create_object(
+            typeclass="typeclasses.exits.Exit",
+            key="Out",
+            location=main,
+            destination=floor_room,
+            aliases=["O"],
+        )
+
+        floor_hd = normalize_housing_data(getattr(floor_room.db, 'housing_data', None)) or {}
+        used = get_used_apartment_numbers(floor_room)
+        used.add(str(apt_num))
+        floor_hd['apartment_numbers'] = used
+        floor_room.db.housing_data = floor_hd
+
+        if num_rooms > 1:
+            if custom_layout:
+                create_apartment_rooms(main, rental_type, apt_num, building_name, district, custom_layout=custom_layout)
+            else:
+                create_apartment_rooms(main, rental_type, apt_num, building_name, district)
+
+        self.caller.msg(f"Created apartment {apt_num} ({rental_type}): {num_rooms} rooms, {rent_cost}eb rent, {purchase_cost}eb purchase. Vacant and ready for +rent <type>.")
 
     def is_owner(self, room, player):
         """
