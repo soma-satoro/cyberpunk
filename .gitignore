@@ -77,3 +77,4 @@ nosetests.xml
 .vscode
 evennia.db3
 *.db3
+"evennia.db3" 
