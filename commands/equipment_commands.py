@@ -387,17 +387,58 @@ class CmdPopulateCyberware(Command):
         except Exception as e:
             self.caller.msg(f"An error occurred while populating cyberware: {str(e)}")
 
+def _get_equipdb_subcategories():
+    """Return dict of main_category -> sorted list of subcategories from DB."""
+    result = {
+        "weapons": [],
+        "armor": [],
+        "gear": [],
+        "ammo": [],
+        "cyberdecks": [],
+        "vehicles": [],
+        "attachments": [],
+    }
+    for cat in Weapon.objects.values_list("category", flat=True).distinct():
+        if cat:
+            result["weapons"].append(cat)
+    for a in Armor.objects.only("locations"):
+        for loc in (a.locations or "").split(","):
+            loc = loc.strip()
+            if loc and loc not in result["armor"]:
+                result["armor"].append(loc)
+    for cat in Gear.objects.values_list("category", flat=True).distinct():
+        if cat and cat != "Cyberware":
+            result["gear"].append(cat)
+    if Cyberdeck.objects.exists():
+        result["gear"].append("Cyberdeck")
+    result["gear"] = sorted(set(result["gear"]))
+    for at in Ammunition.objects.values_list("ammo_type", flat=True).distinct():
+        if at:
+            result["ammo"].append(at)
+    for cat in VehicleModel.objects.values_list("category", flat=True).distinct():
+        if cat:
+            result["vehicles"].append(cat)
+    result["weapons"] = sorted(set(result["weapons"]))
+    result["armor"] = sorted(set(result["armor"]))
+    result["ammo"] = sorted(set(result["ammo"]))
+    result["vehicles"] = sorted(set(result["vehicles"]))
+    return result
+
+
 class CmdViewEquipment(MuxCommand):
     """
     View all equipment in the database.
 
     Usage:
+      equipdb                    - Show category menu (like list chargen)
       equipdb [type [category]]
       equipdb weapons [handgun|shoulder_arms|archery|heavy_weapons|melee|brawling]
       equipdb gear [Electronics|Tools|Medical|Drugs|Clothing|...]
       equipdb vehicles [land|sea|air]
+      equipdb medical            - Gear in Medical category (subcategory shorthand)
 
     Types: weapons, armor, gear, ammo, cyberdecks, vehicles, attachments
+    Use |wequipdb|n alone to see available categories and subcategories.
     """
 
     key = "equipdb"
@@ -407,9 +448,29 @@ class CmdViewEquipment(MuxCommand):
 
     def func(self):
         valid_types = ['weapons', 'armor', 'gear', 'ammo', 'cyberdecks', 'vehicles', 'attachments']
-        parts = self.args.strip().lower().split(None, 1) if self.args.strip() else []
+        subcats = _get_equipdb_subcategories()
+
+        # Parse args: support "equipdb", "equipdb weapons", "equipdb weapons handgun",
+        # "equipdb gear medical", "equipdb medical" (subcategory shorthand)
+        # Also support "equipdb/weapons" or "equipdb/gear medical" via MuxCommand switch
+        switch_part = (self.switch or "").strip()
+        args_part = (self.args or "").strip()
+        raw = (switch_part + " " + args_part).strip() if switch_part else args_part
+        raw = raw.lower()
+        parts = raw.split(None, 1) if raw else []
         equip_type = parts[0] if parts else None
         subcategory = parts[1] if len(parts) > 1 else None
+
+        # Resolve subcategory-only: "equipdb medical" -> gear medical
+        if equip_type and equip_type not in valid_types and not subcategory:
+            resolved = self._resolve_subcategory(equip_type, subcats)
+            if resolved:
+                equip_type, subcategory = resolved
+            else:
+                self.caller.msg(
+                    f"Unknown category '{equip_type}'. Use |wequipdb|n to see available categories."
+                )
+                return
 
         if equip_type and equip_type not in valid_types:
             self.caller.msg(f"Invalid type. Use one of: {', '.join(valid_types)}.")
@@ -417,16 +478,45 @@ class CmdViewEquipment(MuxCommand):
 
         output = []
         if not equip_type:
-            output.append(header("Equipment Database"))
-            for t in valid_types:
-                output.append(getattr(self, f"display_{t}")(None))
-            output.append(footer())
-        else:
-            output.append(header(f"Equipment: {equip_type.title()}"))
-            output.append(getattr(self, f"display_{equip_type}")(subcategory))
-            output.append(footer())
+            self._display_menu(valid_types, subcats)
+            return
+
+        output.append(header(f"Equipment: {equip_type.title()}" + (f" ({subcategory})" if subcategory else "")))
+        output.append(getattr(self, f"display_{equip_type}")(subcategory))
+        output.append(footer())
 
         self.caller.msg("\n".join(filter(None, output)))
+
+    def _resolve_subcategory(self, subcat, subcats):
+        """If subcat is a subcategory (not main type), return (main_type, subcategory)."""
+        subcat_norm = subcat.replace(" ", "_")
+        for main_cat, subs in subcats.items():
+            if not subs:
+                continue
+            for s in subs:
+                if s.lower().replace(" ", "_") == subcat_norm:
+                    return (main_cat, s)
+        return None
+
+    def _display_menu(self, valid_types, subcats):
+        """Show equipdb category menu like list chargen."""
+        output = []
+        output.append(header("Equipment Database"))
+        output.append("Browse equipment by type and category. Use |wequipdb <type>|n or |wequipdb/<type>|n")
+        output.append("to list all items of that type. Add a category to filter (e.g. |wequipdb gear medical|n).")
+        output.append("|b-----------------------------------------------------------------------------|n")
+        for t in valid_types:
+            subs = subcats.get(t, [])
+            if subs:
+                sub_links = " | ".join(f"|w{s.lower().replace(' ', '_')}|n" for s in subs)
+                output.append(f"  |y{t.title()}|n: {sub_links}")
+                output.append(f"      Or |w{t}|n for all")
+            else:
+                output.append(f"  |y{t.title()}|n: |w{t}|n")
+        output.append("")
+        output.append("Examples: |wequipdb gear|n  |wequipdb medical|n  |wequipdb weapons handgun|n")
+        output.append(footer())
+        self.caller.msg("\n".join(output))
 
     def display_weapons(self, subcategory=None):
         qs = Weapon.objects.all().order_by('category', 'name')
@@ -444,6 +534,9 @@ class CmdViewEquipment(MuxCommand):
 
     def display_armor(self, subcategory=None):
         armors = list(Armor.objects.all().order_by('name'))
+        if subcategory:
+            sub_lower = subcategory.lower()
+            armors = [a for a in armors if sub_lower in [loc.strip().lower() for loc in (a.locations or "").split(",")]]
         if not armors:
             return section_header("Armor", width=78) + "\nNo armor found.\n"
         out = [section_header("Armor", width=78)]
@@ -468,7 +561,10 @@ class CmdViewEquipment(MuxCommand):
         return "\n".join(out) + "\n"
 
     def display_ammo(self, subcategory=None):
-        ammos = list(Ammunition.objects.all().order_by('ammo_type', 'name'))
+        qs = Ammunition.objects.all().order_by('ammo_type', 'name')
+        if subcategory:
+            qs = qs.filter(ammo_type__iexact=subcategory)
+        ammos = list(qs)
         if not ammos:
             return section_header("Ammunition", width=78) + "\nNo ammunition found.\n"
         out = [section_header("Ammunition", width=78)]
