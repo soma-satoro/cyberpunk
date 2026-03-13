@@ -1,0 +1,5 @@
+evennia.db3
+server/conf/settings.py
+server/logs/http_requests.log
+server/logs/portal.log
+server/logs/server.log
