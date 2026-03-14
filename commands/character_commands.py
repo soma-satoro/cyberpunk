@@ -1,6 +1,7 @@
 import random
 import re
 from evennia import Command, logger, search_object, default_cmds
+from typeclasses.rental import CharacterSheetMoneyService
 from world.utils.character_utils import get_full_attribute_name, ALL_ATTRIBUTES, TOPSHEET_MAPPING
 from world.utils.calculation_utils import get_remaining_points, STAT_MAPPING, SKILL_MAPPING
 from typeclasses.chargen import ChargenRoom
@@ -341,16 +342,28 @@ class CmdSheet(MuxCommand):
                 armor = list(inv.armor.all()) if hasattr(inv, 'armor') else []
                 output += f"|yArmor:|n {'|w' + ', '.join(p.name for p in armor) + '|n' if armor else '|wNone|n'}\n"
 
-                gear = list(inv.gear.all()) if hasattr(inv, 'gear') else []
-                output += f"|yGear:|n {'|w' + ', '.join(g.name for g in gear) + '|n' if gear else '|wNone|n'}\n"
+                # Use get_gear_with_quantities (same as +inventory) - avoids M2M-through issues
+                try:
+                    gear_items = inv.get_gear_with_quantities() if hasattr(inv, 'get_gear_with_quantities') else [(g, 1) for g in inv.gear.all()]
+                    gear_names = [f"{g.name} (x{qty})" if qty > 1 else g.name for g, qty in gear_items]
+                    output += f"|yGear:|n {'|w' + ', '.join(gear_names) + '|n' if gear_names else '|wNone|n'}\n"
+                except Exception as gear_err:
+                    logger.log_err(f"Error retrieving gear for {target}: {gear_err}", exc_info=True)
+                    output += "|yGear:|n |wError retrieving gear|n\n"
 
-                cyberware = list(inv.cyberware.filter(installed=True)) if hasattr(inv, 'cyberware') else []
-                cw_names = [c.cyberware.name for c in cyberware]
-                output += f"|yCyberware:|n {'|w' + ', '.join(cw_names) + '|n' if cw_names else '|wNone|n'}\n"
+                try:
+                    cyberware = list(inv.cyberware.filter(installed=True)) if hasattr(inv, 'cyberware') else []
+                    cw_names = [c.cyberware.name for c in cyberware]
+                    output += f"|yCyberware:|n {'|w' + ', '.join(cw_names) + '|n' if cw_names else '|wNone|n'}\n"
+                except Exception as cw_err:
+                    logger.log_err(f"Error retrieving cyberware for {target}: {cw_err}", exc_info=True)
+                    output += "|yCyberware:|n |wError retrieving cyberware|n\n"
+                eurodollars = CharacterSheetMoneyService.get_balance(sheet)
+                output += f"|yBalance:|n |w{eurodollars} Eurodollars|n\n"
             else:
                 output += "|yWeapons:|n |wNone|n\n|yArmor:|n |wNone|n\n|yGear:|n |wNone|n\n|yCyberware:|n |wNone|n\n"
         except Exception as e:
-            logger.log_err(f"Error retrieving inventory for {target}: {str(e)}")
+            logger.log_err(f"Error retrieving inventory for {target}: {str(e)}", exc_info=True)
             output += "|wError retrieving inventory|n\n"
         output += "\n"
 
