@@ -5,11 +5,19 @@ Uses character.db.notes as a list of dicts (title, category, text, approved, etc
 rather than the legacy model-based system.
 """
 from evennia.commands.default.muxcommand import MuxCommand
-from evennia.utils import evtable
 from datetime import datetime
 from utils.text import process_special_characters
-from world.utils.formatting import footer
+from world.utils.formatting import (
+    header,
+    footer,
+    divider,
+    sheet_header,
+    sheet_section,
+    format_key_value,
+)
 from utils.search_helpers import search_character
+
+WIDTH = 80
 
 
 def _get_notes(character):
@@ -18,11 +26,12 @@ def _get_notes(character):
     Old format: attributes['notes'] as dict keyed by id.
     New format: db.notes as list of dicts with title, category, text, approved, etc.
     """
+    if not character:
+        return []
+    # Use attributes.get explicitly - same storage as db.notes (category=None)
     raw = character.attributes.get("notes", default=None)
     if raw is None:
         return []
-    if isinstance(raw, list):
-        return raw
     # Migrate from old dict format
     if isinstance(raw, dict):
         migrated = []
@@ -65,14 +74,20 @@ def _get_notes(character):
                 **({"approved_by": approved_by} if approved_by else {}),
                 **({"approved_date": approved_date} if approved_date else {}),
             })
-        character.db.notes = migrated
+        _save_notes(character, migrated)
         return migrated
-    return []
+    # Handle list and _SaverList (Evennia's mutable list wrapper)
+    try:
+        return list(raw)
+    except (TypeError, ValueError):
+        return []
 
 
 def _save_notes(character, notes):
     """Persist notes in the new list format."""
-    character.db.notes = notes
+    if not character:
+        return
+    character.db.notes = list(notes)
 
 
 class CmdNote(MuxCommand):
@@ -196,25 +211,15 @@ class CmdNote(MuxCommand):
             self.caller.msg("You have no notes.")
             return
 
-        table = evtable.EvTable(
-            "|wTitle|n",
-            "|wCategory|n",
-            "|wStatus|n",
-            "|wCreated|n",
-            border="cells",
-            width=78,
-        )
+        output = sheet_header("Your Notes", width=WIDTH)
+        output += sheet_section("Notes", width=WIDTH)
+        output += f"|y{'Title':<25}{'Category':<20}{'Status':<12}{'Created':<20}|n\n"
         for note in notes:
-            status = "|gApproved|n" if note.get("approved") else "|yDraft|n"
-            table.add_row(
-                note["title"],
-                note["category"],
-                status,
-                note.get("created", ""),
-            )
-        output = ["|wYour Notes|n", str(table)]
-        output.append("\nUse '+note <title>' to view the full text of a note.")
-        self.caller.msg("\n".join(output))
+            status = "Approved" if note.get("approved") else "Draft"
+            output += f"|w{note['title']:<25}{note['category']:<20}{status:<12}{note.get('created', ''):<20}|n\n"
+        output += footer(width=WIDTH, fillchar="-")
+        output += "\nUse '+note <title>' to view the full text of a note."
+        self.caller.msg(output)
 
     def view_note_or_player(self):
         """View a specific note on self, or view all notes on a player (staff)."""
@@ -237,27 +242,25 @@ class CmdNote(MuxCommand):
 
     def display_single_note(self, note, character):
         """Display a single note."""
-        output = []
-        output.append(footer(78, fillchar="="))
-        output.append(f"|wNote:|n {note['title']}")
-        output.append(f"|wCategory:|n {note['category']}")
-        output.append(f"|wCharacter:|n {character.name}")
-        output.append(f"|wCreated:|n {note.get('created', '')}")
-        output.append(f"|wLast Modified:|n {note.get('modified', '')}")
-
+        output = header(note["title"], width=WIDTH, fillchar="-") + "\n"
+        output += format_key_value("Category", note["category"], width=40) + "\n"
+        output += format_key_value("Character", character.name, width=40) + "\n"
+        output += format_key_value("Created", note.get("created", ""), width=40) + "\n"
+        output += format_key_value("Last Modified", note.get("modified", ""), width=40) + "\n"
         if note.get("approved"):
-            output.append(f"|wStatus:|n |gApproved|n")
+            output += format_key_value("Status", "|gApproved|n", width=40) + "\n"
             if "approved_by" in note:
-                output.append(f"|wApproved by:|n {note['approved_by']} on {note.get('approved_date', 'Unknown')}")
+                output += format_key_value(
+                    "Approved by",
+                    f"{note['approved_by']} on {note.get('approved_date', 'Unknown')}",
+                    width=40,
+                ) + "\n"
         else:
-            output.append(f"|wStatus:|n |yDraft|n")
-
-        output.append(footer(78, fillchar="="))
-        processed_text = process_special_characters(note.get("text", ""))
-        output.append(processed_text)
-        output.append(footer(78, fillchar="="))
-
-        self.caller.msg("\n".join(output))
+            output += format_key_value("Status", "|yDraft|n", width=40) + "\n"
+        output += divider("Content", width=WIDTH, fillchar="-", color="|b", text_color="|c") + "\n"
+        output += process_special_characters(note.get("text", "")) + "\n"
+        output += footer(width=WIDTH, fillchar="-")
+        self.caller.msg(output)
 
     def staff_view_all_notes(self, player_name):
         """Staff: View all notes on a player."""
@@ -277,25 +280,16 @@ class CmdNote(MuxCommand):
             self.caller.msg(f"{character.name} has no notes.")
             return
 
-        table = evtable.EvTable(
-            "|wTitle|n",
-            "|wCategory|n",
-            "|wStatus|n",
-            "|wCreated|n",
-            border="cells",
-            width=78,
-        )
+        display_name = getattr(character.db, "full_name", None) or character.name
+        output = sheet_header(f"Notes for {display_name}", width=WIDTH)
+        output += sheet_section("Notes", width=WIDTH)
+        output += f"|y{'Title':<25}{'Category':<20}{'Status':<12}{'Created':<20}|n\n"
         for note in notes:
-            status = "|gApproved|n" if note.get("approved") else "|yDraft|n"
-            table.add_row(
-                note["title"],
-                note["category"],
-                status,
-                note.get("created", ""),
-            )
-        output = [f"|w{character.name}'s Notes|n", str(table)]
-        output.append(f"\nUse '+note {character.name}=<title>' to view the full text of a note.")
-        self.caller.msg("\n".join(output))
+            status = "Approved" if note.get("approved") else "Draft"
+            output += f"|w{note['title']:<25}{note['category']:<20}{status:<12}{note.get('created', ''):<20}|n\n"
+        output += footer(width=WIDTH, fillchar="-")
+        output += f"\nUse '+note {character.name}=<title>' to view the full text of a note."
+        self.caller.msg(output)
 
     def staff_view_specific_note(self):
         """Staff: View a specific note on a player: +note [player]=[title]"""
@@ -595,25 +589,24 @@ class CmdNote(MuxCommand):
             self.caller.msg(f"You don't have a note titled '{title}'.")
             return
 
-        output = []
-        output.append(footer(78, fillchar="="))
-        output.append(f"|wNote:|n {found_note['title']}")
-        output.append(f"|wCategory:|n {found_note['category']}")
-        output.append(f"|wAuthor:|n {self.caller.name}")
-
+        output = header(found_note["title"], width=WIDTH, fillchar="-") + "\n"
+        output += format_key_value("Category", found_note["category"], width=40) + "\n"
+        output += format_key_value("Author", self.caller.name, width=40) + "\n"
         if found_note.get("approved"):
-            output.append(f"|wStatus:|n |gApproved|n")
+            output += format_key_value("Status", "|gApproved|n", width=40) + "\n"
             if "approved_by" in found_note:
-                output.append(f"|wApproved by:|n {found_note['approved_by']} on {found_note.get('approved_date', 'Unknown')}")
+                output += format_key_value(
+                    "Approved by",
+                    f"{found_note['approved_by']} on {found_note.get('approved_date', 'Unknown')}",
+                    width=40,
+                ) + "\n"
         else:
-            output.append(f"|wStatus:|n |yDraft|n")
+            output += format_key_value("Status", "|yDraft|n", width=40) + "\n"
+        output += divider("Content", width=WIDTH, fillchar="-", color="|b", text_color="|c") + "\n"
+        output += process_special_characters(found_note.get("text", "")) + "\n"
+        output += footer(width=WIDTH, fillchar="|m-|n")
 
-        output.append(footer(78, fillchar="="))
-        processed_text = process_special_characters(found_note.get("text", ""))
-        output.append(processed_text)
-        output.append(footer(78, fillchar="="))
-
-        note_display = "\n".join(output)
+        note_display = output
 
         if show_to_room:
             location = self.caller.location
