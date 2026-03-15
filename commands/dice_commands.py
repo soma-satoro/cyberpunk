@@ -69,7 +69,7 @@ class CmdDice(Command):
         if vs_info is not None:
             dv, diff_name, _ = vs_info
             if count == 1:
-                success = total >= dv  # Success = meet or exceed DV
+                success = total > dv  # Success = exceed DV (hitting exactly is failure)
                 result = "Success" if success else "Failure"
                 color = "g" if success else "r"
                 out += f" vs {dv}"
@@ -77,7 +77,7 @@ class CmdDice(Command):
                     out += f" ({diff_name})"
                 out += f" - |{color}{result}|n"
             else:
-                successes = sum(1 for r in rolls if r >= dv)
+                successes = sum(1 for r in rolls if r > dv)
                 failures = count - successes
                 out += f" vs {dv}"
                 if diff_name:

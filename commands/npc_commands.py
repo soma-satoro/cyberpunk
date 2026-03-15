@@ -824,7 +824,7 @@ class CmdNpc(MuxCommand):
         skill = npc.get_skill(sk)
         roll = random.randint(1, 10)
         total = ref + skill + roll
-        success = total >= dv
+        success = total > dv
         loc = npc.location or self.caller.location
         poser_name = getattr(npc.db, 'full_name', None) or npc.key
         out = f"{poser_name} attacks with {wep.name}: {ref} + {format_skill_display(sk)} + {roll} = {total} vs {dv}"

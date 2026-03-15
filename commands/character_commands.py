@@ -535,7 +535,7 @@ class CmdRoll(MuxCommand):
 
     Rolls 1d10 + attribute + skill + modifier (or raw values). Supports critical success
     (natural 10: add another d10) and critical failure (natural 1: subtract another d10).
-    With 'vs', shows success (total meets or exceeds DV) or failure.
+    With 'vs', shows success (total exceeds DV) or failure. Hitting the DV exactly fails.
 
     Use roll/luck <N>= to spend N luck points before rolling (+1 per point).
 

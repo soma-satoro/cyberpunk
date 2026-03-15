@@ -1383,7 +1383,7 @@ class CmdHaggle(Command):
         elif first_roll == 10:  # Critical success (natural 10)
             price_multiplier = 1.75
             self.caller.msg("Critical success! The merchant is impressed by your negotiation skills.")
-        elif check_success(total, 14):  # Success = total meets or exceeds DV 14 (i.e. total > 13)
+        elif check_success(total, 13):  # Success = total exceeds 13 (i.e. total >= 14)
             price_multiplier = 1.25
             self.caller.msg("Success! You've negotiated a better price.")
         else:  # Failure

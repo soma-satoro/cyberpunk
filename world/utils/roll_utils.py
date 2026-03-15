@@ -102,9 +102,9 @@ def roll_skill_check(
 def check_success(total: int, dv: int) -> bool:
     """
     Determine if a roll succeeds against a DV.
-    Success = total meets or exceeds DV (total >= dv).
+    Success = total exceeds DV (total > dv). Hitting the DV exactly is failure.
     """
-    return total >= dv
+    return total > dv
 
 
 def format_roll_details(details: dict, stat_val: int, skill_val: int, modifier: int = 0) -> str:

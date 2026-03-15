@@ -1057,7 +1057,7 @@ Your Focus pool is based on your |wIntelligence|n and |wWillpower|n. Check your 
 
 # How It Works
 
-Each clue has a Difficulty Value (DV). You roll |wSkill + Stat + 1d10|n against the DV. Success = your total meets or exceeds the DV.
+Each clue has a Difficulty Value (DV). You roll |wSkill + Stat + 1d10|n against the DV. Success = your total exceeds the DV (hitting it exactly is failure).
   |gSuccess:|n The clue deals damage to the mystery's complexity. When complexity reaches 0, the mystery is solved.
   |rFailure:|n You lose Focus. Critical Failure (natural 1) may add complications.
 

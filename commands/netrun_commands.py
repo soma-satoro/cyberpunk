@@ -493,7 +493,7 @@ class CmdNet(MuxCommand):
         total, rank, die, details = interface_check(self.caller, bonus=bonus)
         dice_str = _format_interface_dice(details, bonus)
         self.caller.msg(f"|cBackdoor|n Interface {rank} + {dice_str} = {total} vs DV {dv}")
-        if total >= dv:
+        if total > dv:
             cleared = state.get("cleared_passwords", [])
             floor_num = int(floor["floor"])
             if floor_num not in cleared:
@@ -517,7 +517,7 @@ class CmdNet(MuxCommand):
         total, rank, die, details = interface_check(self.caller)
         dice_str = _format_interface_dice(details, 0)
         self.caller.msg(f"|cEye-Dee|n Interface {rank} + {dice_str} = {total} vs DV {dv}")
-        if total < dv:
+        if total <= dv:
             self.caller.msg("|rYou cannot decode this payload yet.|n")
             return
         paydata = floor.get("paydata")
@@ -542,7 +542,7 @@ class CmdNet(MuxCommand):
         total, rank, die, details = interface_check(self.caller)
         dice_str = _format_interface_dice(details, 0)
         self.caller.msg(f"|cControl|n Interface {rank} + {dice_str} = {total} vs DV {dv}")
-        if total >= dv:
+        if total > dv:
             controlled = state.get("controlled_nodes", [])
             fnum = int(floor["floor"])
             if fnum not in controlled:
@@ -579,7 +579,7 @@ class CmdNet(MuxCommand):
         total, rank, die, details = interface_check(self.caller)
         dice_str = _format_interface_dice(details, 0)
         self.caller.msg(f"|cExfiltrate|n Interface {rank} + {dice_str} = {total} vs DV {dv}")
-        if total < dv:
+        if total <= dv:
             self.caller.msg("|rTransfer failed. ICE chatter spikes as your access is denied.|n")
             return
 
