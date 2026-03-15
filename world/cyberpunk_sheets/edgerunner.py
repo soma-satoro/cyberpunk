@@ -1131,7 +1131,7 @@ class EdgerunnerChargen:
     @classmethod
     def clean_duplicate_gear(cls):
         from django.db.models import Count
-        from world.inventory.models import Inventory, InventoryGear
+        from world.inventory.models import Inventory
 
         duplicate_gear = Gear.objects.values('name').annotate(name_count=Count('name')).filter(name_count__gt=1)
         for item in duplicate_gear:
@@ -1139,9 +1139,8 @@ class EdgerunnerChargen:
             primary_item = gear_items.first()
             for duplicate_item in gear_items[1:]:
                 # Update all inventories that use the duplicate item
-                for ig in InventoryGear.objects.filter(gear=duplicate_item).select_related('inventory'):
-                    inv, qty = ig.inventory, ig.quantity
-                    ig.delete()
-                    inv.add_gear(primary_item, quantity=qty)
+                for inv in Inventory.objects.filter(gear=duplicate_item).distinct():
+                    inv.gear.remove(duplicate_item)
+                    inv.gear.add(primary_item)
                 duplicate_item.delete()
         logger.info("Cleaned up duplicate gear entries")
