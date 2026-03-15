@@ -929,10 +929,19 @@ class CmdNpc(MuxCommand):
             msg = msg_understand if understands else msg_not_understand
             obj.msg(msg)
 
+    def _parse_roll_modifier(self, s):
+        """Extract trailing modifier (+1, -3) from string. Returns (stripped_string, modifier)."""
+        mod_match = re.search(r'\s*([+-])\s*(\d+)\s*$', s)
+        if mod_match:
+            sign, num = mod_match.group(1), int(mod_match.group(2))
+            mod = num if sign == '+' else -num
+            return s[:mod_match.start()].strip(), mod
+        return s.strip(), 0
+
     def cmd_roll(self):
-        """+npc/roll <name>=<attribute> + <skill> [vs <DV>]"""
+        """+npc/roll <name>=<attribute> + <skill> [<+/- modifier>] [vs <DV>]"""
         if not self.args or "=" not in self.args:
-            self.caller.msg("Usage: +npc/roll <name>=<attribute> + <skill> [vs <DV>]")
+            self.caller.msg("Usage: +npc/roll <name>=<attribute> + <skill> [<+/- modifier>] [vs <DV>]")
             return
         name, rest = self.args.split("=", 1)
         npc = _search_npc(self.caller, name.strip())
@@ -946,9 +955,10 @@ class CmdNpc(MuxCommand):
             rest = rest[:vs_m.start()].strip()
             vs_info = parse_dv(vs_str)
         if " + " not in rest:
-            self.caller.msg("Usage: +npc/roll <name>=<attribute> + <skill> [vs <DV>]")
+            self.caller.msg("Usage: +npc/roll <name>=<attribute> + <skill> [<+/- modifier>] [vs <DV>]")
             return
         attr_in, skill_in = rest.split(" + ", 1)
+        skill_in, modifier = self._parse_roll_modifier(skill_in)
         full_attr = get_full_attribute_name(attr_in.strip())
         full_skill = get_full_attribute_name(skill_in.strip())
         if not full_attr or full_attr not in STAT_MAPPING.values():
@@ -959,13 +969,20 @@ class CmdNpc(MuxCommand):
             return
         attr_val = npc.get_attribute(full_attr)
         skill_val = npc.get_skill(full_skill)
-        roll = random.randint(1, 10)
-        total = attr_val + skill_val + roll
+
+        from world.utils.roll_utils import roll_skill_check, check_success, format_roll_details
+
+        total, details = roll_skill_check(attr_val, skill_val, modifier=modifier)
+        breakdown = format_roll_details(details, attr_val, skill_val, modifier)
         poser_name = getattr(npc.db, 'full_name', None) or npc.key
-        out = f"{poser_name} rolls {format_skill_display(full_attr)} + {format_skill_display(full_skill)} + 1d10: {attr_val} + {skill_val} + {roll} = |w{total}|n"
+        out = f"{poser_name} rolls {format_skill_display(full_attr)} + {format_skill_display(full_skill)} + 1d10: {breakdown} = |w{total}|n"
+        if details.get("is_crit_success"):
+            out += " |g(Critical Success!)|n"
+        elif details.get("is_crit_failure"):
+            out += " |r(Critical Failure!)|n"
         if vs_info:
             dv, diff_name, _ = vs_info
-            success = total >= dv
+            success = check_success(total, dv)
             out += f" vs {dv}"
             if diff_name:
                 out += f" ({diff_name})"

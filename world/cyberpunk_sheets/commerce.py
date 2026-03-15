@@ -1368,21 +1368,22 @@ class CmdHaggle(Command):
         # Get character's cool and trading skill values
         cool = merchant.get_character_cool(self.caller)
         trading = merchant.get_character_trading_skill(self.caller)
-        
-        # Perform the haggle check
-        roll = random.randint(1, 10)
-        total = cool + trading + roll
 
-        # Determine the result
+        from world.utils.roll_utils import roll_skill_check, check_success
+
+        total, details = roll_skill_check(cool, trading)
+        first_roll = details.get("first_roll", 0)
+
+        # Determine the result (DV 14 for success = total > 13)
         base_price = merchant.get_sell_price(item.__dict__)
-        if roll == 1:  # Critical failure
+        if first_roll == 1:  # Critical failure (natural 1)
             price_multiplier = 0.50
             self.caller.msg("Critical failure! The merchant is offended by your low offer.")
             merchant.db.haggle_attempts[self.caller.id] = gametime.time() + 7 * 24 * 60 * 60  # 1 week cooldown
-        elif roll == 10:  # Critical success
+        elif first_roll == 10:  # Critical success (natural 10)
             price_multiplier = 1.75
             self.caller.msg("Critical success! The merchant is impressed by your negotiation skills.")
-        elif total > 13:  # Success
+        elif check_success(total, 14):  # Success = total meets or exceeds DV 14 (i.e. total > 13)
             price_multiplier = 1.25
             self.caller.msg("Success! You've negotiated a better price.")
         else:  # Failure

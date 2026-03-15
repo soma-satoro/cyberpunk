@@ -203,13 +203,13 @@ class CmdInvestigate(MuxCommand):
         skill_val = getattr(char.db, skill_name, 0) or 0
         stat_name = _skill_to_stat(skill_name)
         stat_val = getattr(char.db, stat_name, 5) or 5
-        total = skill_val + stat_val
 
-        # Roll 1d10
-        roll = random.randint(1, 10)
-        fumble = roll == 1
+        from world.utils.roll_utils import roll_skill_check, check_success
+
+        total, details = roll_skill_check(stat_val, skill_val)
         target = clue.dv
-        success = (total + roll) >= target
+        success = check_success(total, target)
+        fumble = details.get("is_crit_failure", False)
 
         if success:
             damage = max(0, _roll_dice(clue.damage_dice) - clue.obfuscation)
@@ -246,7 +246,7 @@ class CmdInvestigate(MuxCommand):
             )
             msg = f"|rFailed.|n You lose {focus_damage} Focus. ({focus_obj.current_focus} remaining)"
             if fumble:
-                msg += " |rFumble!|n Additional complications may apply."
+                msg += " |rCritical Failure!|n Additional complications may apply."
             self.caller.msg(msg)
 
     def do_hint(self):
@@ -263,8 +263,9 @@ class CmdInvestigate(MuxCommand):
         # DV15 Deduction
         skill_val = getattr(char.db, "deduction", 0) or 0
         stat_val = getattr(char.db, "intelligence", 5) or 5
-        roll = random.randint(1, 10)
-        success = (skill_val + stat_val + roll) >= 15
+        from world.utils.roll_utils import roll_skill_check, check_success
+        total, _ = roll_skill_check(stat_val, skill_val)
+        success = check_success(total, 15)
         focus_damage = _roll_dice("1d6")
         focus_obj.current_focus -= focus_damage
         focus_obj.save()

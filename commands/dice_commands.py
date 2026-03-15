@@ -69,8 +69,9 @@ class CmdDice(Command):
         if vs_info is not None:
             dv, diff_name, _ = vs_info
             if count == 1:
-                result = "Success" if total >= dv else "Failure"
-                color = "g" if total >= dv else "r"
+                success = total >= dv  # Success = meet or exceed DV
+                result = "Success" if success else "Failure"
+                color = "g" if success else "r"
                 out += f" vs {dv}"
                 if diff_name:
                     out += f" ({diff_name})"

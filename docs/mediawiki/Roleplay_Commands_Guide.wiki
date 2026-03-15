@@ -1,0 +1,262 @@
+= Roleplay Commands Guide =
+
+Basic roleplaying commands: skill checks, dice, languages, pose/say/emit, hustle, factions, and improvement points.
+
+----
+
+== Skill Checks ==
+
+<pre>
+roll &lt;attribute&gt; + &lt;skill&gt; [&lt;+/- modifier&gt;]
+roll &lt;attribute&gt; + &lt;skill&gt; [&lt;+/- modifier&gt;] vs &lt;DV or difficulty name&gt;
+roll/luck &lt;amount&gt;=&lt;attribute&gt; + &lt;skill&gt; [&lt;+/- modifier&gt;] [vs &lt;DV&gt;]
+</pre>
+
+'''Examples:'''
+* <code>roll Reflexes + Handgun</code> – Roll only (no success/fail)
+* <code>roll Intelligence + Interface +1 vs 13</code> – Roll vs DV 13
+* <code>roll Reflexes + Shoulder Arms -3 vs Legendary</code> – Roll vs Legendary (DV 29)
+* <code>roll/luck 3=intelligence + interface + 2 vs 20</code> – Spend 3 Luck (+1 per point) before rolling
+
+'''Mechanics:''' 1d10 + attribute + skill + modifier. Critical success (natural 10): add another d10. Critical failure (natural 1): subtract another d10.
+
+'''Difficulty names:''' Simple (9), Everyday (13), Difficult (15), Professional (17), Heroic (21), Incredible (24), Legendary (29)
+
+'''Luck:''' Spend Luck points before rolling; each point adds +1 to the roll. Luck pool refills at the start of the next session.
+
+'''Aliases:''' <code>check</code>
+
+----
+
+== Dice Rolling ==
+
+<pre>
+dice [NdX] [+/- modifier] [vs N or difficulty name]
+</pre>
+
+'''Examples:'''
+* <code>dice 3d10</code>
+* <code>dice 2d6 + 2 vs 13</code>
+* <code>dice 1d20 vs Difficult</code>
+
+'''Supported dice:''' d4, d6, d8, d10, d12, d20, d100
+
+'''Aliases:''' <code>d</code>
+
+'''Note:''' For skill checks, use <code>roll</code> instead of <code>dice</code>.
+
+----
+
+== Languages ==
+
+<pre>
+language [&lt;language_name&gt;]   - Set or view speaking language
+language list                 - List your known languages
+language all                  - List all available languages
+language none                 - Clear speaking language
+</pre>
+
+'''Examples:'''
+* <code>language Spanish</code> – Set Spanish as your speaking language
+* <code>language</code> – Show current language
+
+'''Language tagging in speech:''' Use <code>~</code> to mark text as being in your set language. Those who know the language see the actual text; others see it masked. Examples: <code>say ~Hola, amigo!</code> or <code>pose waves and says "~Bonjour!"</code> – Set language with <code>language Spanish</code> first.
+
+'''Aliases:''' <code>lang</code>, <code>+language</code>, <code>+lang</code>, <code>+languages</code>
+
+----
+
+== Pose, Say, and Emit ==
+
+<pre>
+pose &lt;text&gt;     or  : &lt;text&gt;     - Pose action to room (third person)
+say &lt;message&gt;    or  " &lt;message&gt;  - Speak to room
+@emit &lt;message&gt;  or  \\ &lt;message&gt;  - Emit without name (narrator style)
+</pre>
+
+'''Examples:'''
+* <code>pose nods and checks his weapon.</code>
+* <code>: waves at the group.</code>
+* <code>say Hello, choombas!</code>
+* <code>"Watch your back.</code>
+* <code>@emit A distant explosion echoes through the street.</code>
+
+'''Pose breaks:''' In non-OOC rooms, a pose break (your name) is sent before pose/say/emit so others know who is acting.
+
+'''Language tagging:''' Use <code>~</code> for speech in your set language: <code>say ~Bonjour!</code> or <code>pose waves and says "~Hola!"</code>
+
+'''Reality layers:''' (If used) Messages are filtered by umbra, material, or dreaming so only characters in the same layer see them.
+
+----
+
+== Hustle System ==
+
+<pre>
+hustle   - Open hustle menu (weekly side job)
+</pre>
+
+'''How it works:'''
+* Spend a full seven days working a side job
+* Roll 1d6 to determine outcome
+* Payout depends on your '''Role''', '''Role Ability Rank''', and the roll
+* Tier by Role Ability Rank: 1–4, 5–7, 8–10 (higher ranks = better pay)
+* '''One attempt per week''' (7 days)
+
+'''Requirements:'''
+* Character must be '''approved''' by staff
+* Character must have a role with a hustle table
+
+'''Staff commands:'''
+* <code>clearhustle &lt;character&gt;</code> – [Admin] Clear hustle attempt (allow re-roll)
+* <code>resethustles</code> – [Admin] Reset all hustle attempts
+* <code>debughustle &lt;character&gt;</code> – [Admin] Debug hustle status
+
+----
+
+== Factions ==
+
+Factions are staff-managed world entities (corps, gangs, organizations). Players can view factions, check reputation, and request to join.
+
+=== Player Commands ===
+
+<pre>
+faction                    - List factions
+faction &lt;n&gt;               - Faction info (by number or name)
+faction/info &lt;n&gt;          - Faction details
+faction/list              - List factions
+faction/rep &lt;n&gt;           - Your reputation with faction
+faction/influence         - Influence of all factions
+faction/join &lt;faction&gt;    - Request to join (creates job)
+</pre>
+
+=== Faction Join Workflow ===
+
+# Player: <code>faction/join &lt;faction name&gt;</code>
+# System creates a '''Job''' in the FACTION queue
+# Job is assigned to the faction's '''staff sponsor'''
+# Staff sponsor (and optionally faction head) receives mail
+# Staff: <code>faction/add &lt;faction&gt;=&lt;character&gt;</code> to approve
+# Player is added to the faction
+
+'''Requirements:''' Faction must have a staff sponsor. Faction head is optional but can be notified.
+
+=== Staff Commands ===
+
+<pre>
+faction/add &lt;faction&gt;=&lt;character&gt;      - Add member
+faction/remove &lt;faction&gt;=&lt;character&gt;   - Remove member
+faction/head &lt;faction&gt;=&lt;character&gt;     - Set faction head
+faction/sponsor &lt;faction&gt;=&lt;staff&gt;      - Set staff sponsor
+faction/modify &lt;character&gt;/&lt;faction&gt;=&lt;amount&gt;  - Modify reputation
+faction/missionposter &lt;faction&gt;=add|remove|list [character]  - Designate mission posters
+</pre>
+
+=== Admin Commands ===
+
+<pre>
+faction/create &lt;n&gt;              - Create faction
+faction/create/type &lt;n&gt;=&lt;type&gt;  - Create with type
+faction/type &lt;n&gt;=&lt;type&gt;         - Change type
+faction/desc &lt;n&gt;=&lt;description&gt; - Set description
+faction/init                    - Initialize default factions
+</pre>
+
+=== Groups (Player-Created) ===
+
+'''Groups''' are player-created crews/teams, separate from staff-managed factions.
+
+<pre>
+group create &lt;name&gt;       - Create a group
+group/join &lt;name&gt;          - Request to join
+group/approve &lt;group&gt; &lt;character&gt;  - [Leader] Approve join request
+group/leave                - Leave your group
+</pre>
+
+----
+
+== Improvement Points (IP) ==
+
+IP are earned through play and spent to raise skills, attributes, and role abilities.
+
+=== Viewing IP ===
+
+<pre>
++ip              - Your IP status
++ip &lt;name&gt;       - [Staff] View another player's IP
++ip/log          - Your IP history
++ip/log &lt;name&gt;   - [Staff] Another player's IP log
+</pre>
+
+=== Spending IP ===
+
+<pre>
++ip/buy &lt;stat&gt;   - Spend IP to raise skill, attribute, or role ability
++ip/refund       - Refund your last purchase
+</pre>
+
+'''Examples:'''
+* <code>+ip/buy handgun</code> – Raise Handgun skill
+* <code>+ip/buy athletics</code> – Raise Athletics
+* <code>+ip/buy reflexes</code> – Raise Reflexes (attribute)
+* <code>+ip/buy combat_awareness</code> – Raise Role Ability
+
+=== IP Costs (Cyberpunk RED) ===
+
+{| class="wikitable" border="1"
+|-
+! Type !! Cost per level/rank
+|-
+| Typical skills || 20 IP per level (1→2 = 40, 2→3 = 60, etc.)
+|-
+| Difficult skills (×2) || 40 IP per level (Autofire, Martial Arts, Pilot Air, Heavy Weapons, Demolitions, Electronics, Paramedic)
+|-
+| Role abilities || 60 IP per rank
+|-
+| Attributes || 20 IP per point
+|}
+
+=== Staff Commands ===
+
+<pre>
++ip/award &lt;name&gt;=&lt;amount&gt;   - Award IP to a player
++ip/remove &lt;name&gt;=&lt;amount&gt;   - Remove IP from a player
+</pre>
+
+=== Earning IP ===
+
+Approved characters receive '''weekly IP''' automatically (via the IP weekly script). Staff can also award IP for good roleplay, mission completion, or other contributions.
+
+'''Aliases:''' <code>ip</code>
+
+----
+
+== Quick Reference ==
+
+{| class="wikitable" border="1"
+|-
+! Action !! Command
+|-
+| Skill check || <code>roll &lt;attr&gt; + &lt;skill&gt; [vs &lt;DV&gt;]</code>
+|-
+| Roll with Luck || <code>roll/luck &lt;N&gt;=&lt;attr&gt; + &lt;skill&gt; [vs &lt;DV&gt;]</code>
+|-
+| Dice || <code>dice NdX [vs N]</code>
+|-
+| Set language || <code>language &lt;name&gt;</code>
+|-
+| Pose || <code>pose &lt;text&gt;</code> or <code>: &lt;text&gt;</code>
+|-
+| Say || <code>say &lt;msg&gt;</code> or <code>" &lt;msg&gt;</code>
+|-
+| Emit || <code>@emit &lt;msg&gt;</code>
+|-
+| Hustle || <code>hustle</code>
+|-
+| Faction info || <code>faction &lt;n&gt;</code>
+|-
+| Join faction || <code>faction/join &lt;faction&gt;</code>
+|-
+| IP status || <code>+ip</code>
+|-
+| Spend IP || <code>+ip/buy &lt;stat&gt;</code>
+|}

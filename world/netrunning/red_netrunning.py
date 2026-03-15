@@ -271,10 +271,38 @@ def roll_d10() -> int:
     return random.randint(1, 10)
 
 
-def interface_check(character, bonus: int = 0) -> Tuple[int, int, int]:
+def _format_interface_dice(details: dict, bonus: int = 0) -> str:
+    """Format dice part for interface check display."""
+    parts = [str(details["first_roll"])]
+    for roll_val, added in details.get("extra_rolls", []):
+        if added:
+            parts.append(f"+ {roll_val} (crit)")
+        else:
+            parts.append(f"- {roll_val} (fumble)")
+    if bonus != 0:
+        parts.append(f"+ {bonus}" if bonus > 0 else f"- {-bonus}")
+    return " + ".join(parts)
+
+
+def interface_check(character, bonus: int = 0) -> Tuple[int, int, int, dict]:
+    """
+    Interface check: rank + 1d10 + bonus, with critical success/failure rules.
+    Returns (total, rank, first_roll, details).
+    details has: first_roll, is_crit_success, is_crit_failure, extra_rolls, dice_total.
+    """
+    from world.utils.roll_utils import roll_d10_with_crits
+
     rank = get_interface_rank(character)
-    die = roll_d10()
-    return rank + die + bonus, rank, die
+    dice_total, first_roll, is_crit_success, is_crit_failure, extra_rolls = roll_d10_with_crits()
+    total = rank + dice_total + bonus
+    details = {
+        "first_roll": first_roll,
+        "dice_total": dice_total,
+        "is_crit_success": is_crit_success,
+        "is_crit_failure": is_crit_failure,
+        "extra_rolls": extra_rolls,
+    }
+    return total, rank, first_roll, details
 
 
 def _floor_from_token(token: str, floor_num: int, default_dv: int) -> dict:

@@ -1,0 +1,165 @@
+= Mysteries Guide =
+
+Investigation system based on Cyberpunk RED Interface Volume 5 ("Did Someone Say Murder?"). Players use a Focus pool to run Evidence Checks on clues, reducing a mystery's complexity until it is solved.
+
+----
+
+== Overview ==
+
+'''Mysteries''' are investigations with a goal and a complexity value. '''Clues''' are attached to rooms, NPCs, or objects. Players make '''Evidence Checks''' (skill rolls) to decipher clues; success reduces the mystery's complexity; failure costs Focus. When complexity reaches 0, the mystery is solved.
+
+'''Key concepts:'''
+* '''Focus''' – Pool based on INT + WILL; depletes on failed checks; recovers every 24 hours (half max)
+* '''Evidence Check''' – Stat + Skill + 1d10 vs clue DV; success = damage to complexity; failure = lose Focus
+* '''Clue order''' – Some clues require others to be deciphered first
+
+----
+
+== Player Guide ==
+
+=== Requirements ===
+
+* Character must be '''approved''' by staff
+* Focus &gt; 0 to make Evidence Checks
+
+=== Viewing Focus ===
+
+<pre>
++mystery              - Your Focus and active mysteries
++mystery/focus        - Detailed Focus info
+</pre>
+
+Focus recovers every 24 hours (half your max). If Focus is 0, you cannot make Evidence Checks until it recovers.
+
+=== Investigating ===
+
+<pre>
++investigate &lt;target&gt;     - Investigate a room, NPC, or object
++investigate &lt;clue id&gt;     - Investigate a clue by ID (abstract clues)
++investigate/hint          - DV15 Deduction for a hint (costs 1d6 Focus)
+</pre>
+
+'''Targets:'''
+* <code>here</code>, <code>room</code>, <code>location</code> – Current room
+* NPC or object name – Something in the room
+* Clue ID – Direct clue reference (e.g. <code>+investigate 5</code>)
+
+'''Flow:'''
+# Find a location with a clue (staff attach clues via <code>+addclue</code>)
+# Run <code>+investigate here</code> (or the NPC/object name)
+# Success: Clue damage reduces mystery complexity; you see remaining complexity
+# Failure: Lose Focus (1d6 or 2d6 depending on clue type)
+# If required clues exist, you must decipher them first
+
+'''Hint:''' <code>+investigate/hint</code> – Roll DV15 Deduction; success = GM provides a nudge; always costs 1d6 Focus.
+
+=== Clue Attempt Limits ===
+
+One attempt per clue per character per day. If you fail, you can try again tomorrow.
+
+----
+
+== Staff Guide ==
+
+=== Creating a Mystery ===
+
+<pre>
++createmystery &lt;name&gt;=&lt;goal&gt;,&lt;complexity&gt;
+</pre>
+
+'''Example:''' <code>+createmystery "Warehouse Murder"=Find who killed the guard,50</code>
+
+* '''Complexity''' – Typically 50 or 100; when reduced to 0, mystery is solved
+* '''Goal''' – Short description of what solving means
+
+=== Creating Clues ===
+
+<pre>
++createclue &lt;mystery id&gt;=&lt;type&gt;,&lt;skills&gt;,&lt;dv&gt;,&lt;obfuscation&gt;
+</pre>
+
+'''Example:''' <code>+createclue 1=forensics,criminology;deduction,13,2</code>
+
+* '''type''' – forensics, deduction, etc. (affects damage dice)
+* '''skills''' – Semicolon-separated (e.g. criminology;deduction)
+* '''dv''' – Difficulty value for the Evidence Check (e.g. 13)
+* '''obfuscation''' – Reduces damage dealt on success (e.g. 2)
+
+=== Placing Clues ===
+
+<pre>
++addclue &lt;target&gt;=&lt;clue id&gt;           - Attach clue to room/NPC/object
++addclue/remove &lt;target&gt;=&lt;clue id&gt;    - Remove clue from target
++addclue/list &lt;target&gt;                 - List clues on target
+</pre>
+
+'''Target:''' Room name, NPC name, or object name. You must be in the room or able to search it.
+
+=== Clue Order (Required Clues) ===
+
+<pre>
++linkclue/requires &lt;clue&gt;=&lt;clue id&gt;   - Clue requires another to be deciphered first
++linkclue &lt;clue&gt;=&lt;clue id&gt;             - Link clues (for reference)
+</pre>
+
+Players must decipher the required clue before they can attempt the dependent clue.
+
+=== Linking to Missions ===
+
+<pre>
++mysterylink &lt;mystery id&gt;=&lt;mission id&gt;   - Link mystery to mission
++mysterylink/unlink &lt;mystery id&gt;         - Unlink from mission
+</pre>
+
+When a mystery is solved, linked missions and jobs are updated automatically.
+
+=== Listing and Deleting ===
+
+<pre>
++clues                    - List all clues
++clues &lt;mystery&gt;         - List clues for one mystery
++destroyclue &lt;clue id&gt;   - Delete clue from system (removes from all locations)
++destroyclue &lt;target&gt;=&lt;clue id&gt;  - Remove clue from target only
+</pre>
+
+----
+
+== Workflow Summary ==
+
+'''Staff:'''
+# <code>+createmystery "Name"="Goal",complexity</code>
+# <code>+createclue &lt;mystery id&gt;=type,skills,dv,obfuscation</code> for each clue
+# <code>+addclue &lt;room/NPC/object&gt;=&lt;clue id&gt;</code> to place clues
+# <code>+linkclue/requires &lt;clue&gt;=&lt;required clue id&gt;</code> for clue order
+# <code>+mysterylink &lt;mystery id&gt;=&lt;mission id&gt;</code> if tied to a mission
+
+'''Player:'''
+# <code>+mystery</code> to check Focus
+# <code>+investigate here</code> (or room/NPC/object/clue ID) to run Evidence Check
+# Success: complexity decreases; at 0, mystery solved
+# Failure: lose Focus; try again tomorrow
+
+----
+
+== Quick Reference ==
+
+{| class="wikitable" border="1"
+|-
+! Action !! Command
+|-
+| View Focus || <code>+mystery</code>
+|-
+| Investigate || <code>+investigate &lt;target&gt;</code>
+|-
+| Get hint || <code>+investigate/hint</code>
+|-
+| Create mystery (Staff) || <code>+createmystery &lt;name&gt;=&lt;goal&gt;,&lt;complexity&gt;</code>
+|-
+| Create clue (Staff) || <code>+createclue &lt;mystery id&gt;=&lt;type&gt;,&lt;skills&gt;,&lt;dv&gt;,&lt;obfuscation&gt;</code>
+|-
+| Place clue (Staff) || <code>+addclue &lt;target&gt;=&lt;clue id&gt;</code>
+|-
+| Set clue order (Staff) || <code>+linkclue/requires &lt;clue&gt;=&lt;clue id&gt;</code>
+|-
+| List clues (Staff) || <code>+clues</code> or <code>+clues &lt;mystery&gt;</code>
+|}

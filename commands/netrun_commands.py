@@ -12,6 +12,7 @@ from evennia.commands.default.muxcommand import MuxCommand
 from world.netrunning.red_netrunning import (
     ALL_PROGRAMS,
     DIFFICULTY_DV,
+    _format_interface_dice,
     generate_architecture,
     generate_paydata_entry,
     get_black_ice,
@@ -243,7 +244,7 @@ class CmdNet(MuxCommand):
             ice = get_black_ice(normalize_name(ice_instance["name"]))
             if not ice:
                 continue
-            net_total, _, _ = interface_check(self.caller, bonus=speed_bonus)
+            net_total, _, _, _ = interface_check(self.caller, bonus=speed_bonus)
             ice_total = int(ice["spd"]) + random.randint(1, 10)
             if ice_total > net_total:
                 self.caller.msg(
@@ -464,7 +465,7 @@ class CmdNet(MuxCommand):
         arch = self._current_architecture()
         state = self._get_state()
         bonus = self._interface_bonus(state, "pathfinder")
-        total, rank, die = interface_check(self.caller, bonus=bonus)
+        total, rank, die, details = interface_check(self.caller, bonus=bonus)
         floors = arch.db.floors or []
         visible = []
         for floor in floors:
@@ -473,7 +474,8 @@ class CmdNet(MuxCommand):
                 break
             if len(visible) >= total:
                 break
-        self.caller.msg(f"|cPathfinder|n Interface {rank} + {die} + {bonus} = |w{total}|n")
+        dice_str = _format_interface_dice(details, bonus)
+        self.caller.msg(f"|cPathfinder|n Interface {rank} + {dice_str} = |w{total}|n")
         for floor in visible:
             self.caller.msg(f"  F{floor['floor']}: {floor.get('name', '?')} ({floor.get('type')})")
 
@@ -488,8 +490,9 @@ class CmdNet(MuxCommand):
             return
         dv = int(floor.get("dv", 8))
         bonus = self._interface_bonus(state, "backdoor")
-        total, rank, die = interface_check(self.caller, bonus=bonus)
-        self.caller.msg(f"|cBackdoor|n Interface {rank} + {die} + {bonus} = {total} vs DV {dv}")
+        total, rank, die, details = interface_check(self.caller, bonus=bonus)
+        dice_str = _format_interface_dice(details, bonus)
+        self.caller.msg(f"|cBackdoor|n Interface {rank} + {dice_str} = {total} vs DV {dv}")
         if total >= dv:
             cleared = state.get("cleared_passwords", [])
             floor_num = int(floor["floor"])
@@ -511,8 +514,9 @@ class CmdNet(MuxCommand):
             self.caller.msg("There is no file/paydata target on this floor.")
             return
         dv = int(floor.get("dv", DIFFICULTY_DV.get(arch.db.difficulty, 8)))
-        total, rank, die = interface_check(self.caller)
-        self.caller.msg(f"|cEye-Dee|n Interface {rank} + {die} = {total} vs DV {dv}")
+        total, rank, die, details = interface_check(self.caller)
+        dice_str = _format_interface_dice(details, 0)
+        self.caller.msg(f"|cEye-Dee|n Interface {rank} + {dice_str} = {total} vs DV {dv}")
         if total < dv:
             self.caller.msg("|rYou cannot decode this payload yet.|n")
             return
@@ -535,8 +539,9 @@ class CmdNet(MuxCommand):
             self.caller.msg("No control node on this floor.")
             return
         dv = int(floor.get("dv", DIFFICULTY_DV.get(arch.db.difficulty, 8)))
-        total, rank, die = interface_check(self.caller)
-        self.caller.msg(f"|cControl|n Interface {rank} + {die} = {total} vs DV {dv}")
+        total, rank, die, details = interface_check(self.caller)
+        dice_str = _format_interface_dice(details, 0)
+        self.caller.msg(f"|cControl|n Interface {rank} + {dice_str} = {total} vs DV {dv}")
         if total >= dv:
             controlled = state.get("controlled_nodes", [])
             fnum = int(floor["floor"])
@@ -571,8 +576,9 @@ class CmdNet(MuxCommand):
             return
 
         dv = int(paydata.get("dv", floor.get("dv", DIFFICULTY_DV.get(arch.db.difficulty, 8))))
-        total, rank, die = interface_check(self.caller)
-        self.caller.msg(f"|cExfiltrate|n Interface {rank} + {die} = {total} vs DV {dv}")
+        total, rank, die, details = interface_check(self.caller)
+        dice_str = _format_interface_dice(details, 0)
+        self.caller.msg(f"|cExfiltrate|n Interface {rank} + {dice_str} = {total} vs DV {dv}")
         if total < dv:
             self.caller.msg("|rTransfer failed. ICE chatter spikes as your access is denied.|n")
             return
@@ -674,10 +680,11 @@ class CmdNet(MuxCommand):
             self.caller.msg("ICE target not found. Use a name or 1-based index.")
             return
         ice = get_black_ice(normalize_name(target["name"]))
-        atk_total, rank, die = interface_check(self.caller)
+        atk_total, rank, die, details = interface_check(self.caller)
         def_total = int(ice["def"]) + random.randint(1, 10)
+        dice_str = _format_interface_dice(details, 0)
         self.caller.msg(
-            f"|cZap|n Interface {rank}+{die} = {atk_total} vs "
+            f"|cZap|n Interface {rank}+{dice_str} = {atk_total} vs "
             f"{ice['name']} DEF {ice['def']}+d10 = {def_total}"
         )
         if atk_total < def_total:
@@ -781,10 +788,11 @@ class CmdNet(MuxCommand):
             self.caller.msg("ICE target not found. Use a name or 1-based index.")
             return
         ice = get_black_ice(normalize_name(target["name"]))
-        runner_total, rank, die = interface_check(self.caller)
+        runner_total, rank, die, details = interface_check(self.caller)
         ice_total = int(ice["per"]) + random.randint(1, 10)
+        dice_str = _format_interface_dice(details, 0)
         self.caller.msg(
-            f"|cSlide|n Interface {rank}+{die} = {runner_total} vs "
+            f"|cSlide|n Interface {rank}+{dice_str} = {runner_total} vs "
             f"{ice['name']} PER {ice['per']}+d10 = {ice_total}"
         )
         if runner_total > ice_total:

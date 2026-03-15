@@ -524,25 +524,29 @@ class CmdShortDesc(Command):
             caller.msg("Short description set to '|w%s|n'." % self.shortdesc)
 
 
-class CmdRoll(Command):
+class CmdRoll(MuxCommand):
     """
     Roll a skill check.
 
     Usage:
-      roll <attribute> + <skill>
-      roll <attribute> + <skill> vs <DV or difficulty name>
-      roll <value> + <value> [vs <DV or difficulty name>]
+      roll <attribute> + <skill> [<+/- modifier>]
+      roll <attribute> + <skill> [<+/- modifier>] vs <DV or difficulty name>
+      roll/luck <amount>=<attribute> + <skill> [<+/- modifier>] [vs <DV>]
 
-    Rolls 1d10 + attribute + skill (or raw values). With 'vs', shows success (total >= DV) or failure.
-    Use attribute/skill names for your character, or raw numbers (0-10) for NPCs or ad-hoc rolls.
+    Rolls 1d10 + attribute + skill + modifier (or raw values). Supports critical success
+    (natural 10: add another d10) and critical failure (natural 1: subtract another d10).
+    With 'vs', shows success (total meets or exceeds DV) or failure.
+
+    Use roll/luck <N>= to spend N luck points before rolling (+1 per point).
 
     Difficulty names: Simple (9), Everyday (13), Difficult (15), Professional (17),
     Heroic (21), Incredible (24), Legendary (29).
 
     Examples:
       roll Reflexes + Handgun
-      roll Reflexes + Handgun vs Simple
-      roll 5 + 4 vs Everyday
+      roll Intelligence + Interface +1 vs 13
+      roll Reflexes + Shoulder Arms -3 vs Legendary
+      roll/luck 3=intelligence + interface + 2 vs 20
     """
     key = "roll"
     aliases = ["check"]
@@ -559,10 +563,38 @@ class CmdRoll(Command):
         skill_key = field_name.lower().replace(' ', '_')
         return char.db.skills.get(skill_key, 0) if char.db.skills else 0
 
+    def _parse_modifier(self, s):
+        """Extract trailing modifier (+1, -3, + 1, - 3) from string. Returns (stripped_string, modifier)."""
+        mod_match = re.search(r'\s*([+-])\s*(\d+)\s*$', s)
+        if mod_match:
+            sign, num = mod_match.group(1), int(mod_match.group(2))
+            mod = num if sign == '+' else -num
+            return s[:mod_match.start()].strip(), mod
+        return s.strip(), 0
+
     def func(self):
         args = (self.args or "").strip()
+
+        # Parse roll/luck N=... syntax
+        luck_spend = 0
+        if "luck" in self.switches:
+            if "=" not in args:
+                self.caller.msg("Usage: roll/luck <amount>=<attribute> + <skill> [<+/- modifier>] [vs <DV>]")
+                return
+            luck_part, args = args.split("=", 1)
+            luck_part = luck_part.strip()
+            try:
+                luck_spend = int(luck_part)
+                if luck_spend < 1:
+                    self.caller.msg("Luck amount must be at least 1.")
+                    return
+            except ValueError:
+                self.caller.msg("Usage: roll/luck <amount>=<attribute> + <skill> [vs <DV>]")
+                return
+            args = args.strip()
+
         if not args:
-            self.caller.msg("Usage: roll <attribute> + <skill> | <value> + <value> [vs <DV or difficulty>]")
+            self.caller.msg("Usage: roll <attribute> + <skill> [<+/- modifier>] [vs <DV or difficulty>]")
             return
 
         # Parse "vs" part (case-insensitive)
@@ -576,18 +608,17 @@ class CmdRoll(Command):
                 self.caller.msg("Invalid difficulty. Use a number (e.g. 9) or a name (Simple, Everyday, Difficult, Professional, Heroic, Incredible, Legendary).")
                 return
 
-        # Parse "Stat + Skill" part
+        # Parse "Stat + Skill" part (with optional modifier on skill)
         if " + " not in args:
-            # Check if they used dice syntax (e.g., 3d10) - suggest +dice instead
             if re.match(r'^\s*\d*d\d+', args, re.IGNORECASE):
-                self.caller.msg("Syntax: +roll <stat> + <skill> vs <difficulty>. To roll a number of dice and not perform a skill check, use the +dice command.")
+                self.caller.msg("Syntax: roll <stat> + <skill> vs <difficulty>. To roll dice without a skill check, use the +dice command.")
                 return
-            self.caller.msg("Usage: roll <attribute> + <skill> | <value> + <value> [vs <DV or difficulty>]")
+            self.caller.msg("Usage: roll <attribute> + <skill> [<+/- modifier>] [vs <DV or difficulty>]")
             return
 
         parts = args.split(" + ", 1)
         attr_input = parts[0].strip()
-        skill_input = parts[1].strip()
+        skill_input, modifier = self._parse_modifier(parts[1])
 
         attr_value = None
         skill_value = None
@@ -622,14 +653,34 @@ class CmdRoll(Command):
             attr_display = full_attr_name.replace('_', ' ').title()
             skill_display = full_skill_name.replace('_', ' ').title()
 
-        dice_roll = random.randint(1, 10)
-        total = attr_value + skill_value + dice_roll
+        # Luck check
+        if luck_spend > 0:
+            char = self.caller
+            current = getattr(char.db, "current_luck", 0) or 0
+            if current < luck_spend:
+                self.caller.msg(f"You only have {current} luck point(s) remaining. Cannot spend {luck_spend}.")
+                return
 
-        out = f"Rolling {attr_display} + {skill_display} + 1d10: {attr_value} + {skill_value} + {dice_roll} = |w{total}|n"
+        from world.utils.roll_utils import roll_skill_check, check_success, format_roll_details
+
+        total, details = roll_skill_check(
+            attr_value, skill_value,
+            modifier=modifier,
+            luck_spend=luck_spend,
+            character=self.caller if luck_spend else None,
+        )
+
+        breakdown = format_roll_details(details, attr_value, skill_value, modifier)
+        out = f"Rolling {attr_display} + {skill_display} + 1d10: {breakdown} = |w{total}|n"
+
+        if details.get("is_crit_success"):
+            out += " |g(Critical Success!)|n"
+        elif details.get("is_crit_failure"):
+            out += " |r(Critical Failure!)|n"
 
         if vs_info is not None:
             dv, diff_name, _ = vs_info
-            success = total >= dv
+            success = check_success(total, dv)
             color = "g" if success else "r"
             result = "Success" if success else "Failure"
             out += f" vs {dv}"
