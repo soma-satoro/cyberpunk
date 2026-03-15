@@ -198,7 +198,7 @@ class CmdNote(MuxCommand):
     def display_single_note(self, note, character):
         """Display a single note."""
         output = []
-        output.append(footer(78, char="="))
+        output.append(footer(78, fillchar="="))
         output.append(f"|wNote:|n {note['title']}")
         output.append(f"|wCategory:|n {note['category']}")
         output.append(f"|wCharacter:|n {character.name}")
@@ -212,10 +212,10 @@ class CmdNote(MuxCommand):
         else:
             output.append(f"|wStatus:|n |yDraft|n")
         
-        output.append(footer(78, char="="))
+        output.append(footer(78, fillchar="="))
         processed_text = process_special_characters(note["text"])
         output.append(processed_text)
-        output.append(footer(78, char="="))
+        output.append(footer(78, fillchar="="))
         
         self.caller.msg("\n".join(output))
     
@@ -614,7 +614,7 @@ class CmdNote(MuxCommand):
         
         # Format the note for display
         output = []
-        output.append(footer(78, char="="))
+        output.append(footer(78, fillchar="="))
         output.append(f"|wNote:|n {found_note['title']}")
         output.append(f"|wCategory:|n {found_note['category']}")
         output.append(f"|wAuthor:|n {self.caller.name}")
@@ -626,10 +626,10 @@ class CmdNote(MuxCommand):
         else:
             output.append(f"|wStatus:|n |yDraft|n")
         
-        output.append(footer(78, char="="))
+        output.append(footer(78, fillchar="="))
         processed_text = process_special_characters(found_note["text"])
         output.append(processed_text)
-        output.append(footer(78, char="="))
+        output.append(footer(78, fillchar="="))
         
         note_display = "\n".join(output)
         

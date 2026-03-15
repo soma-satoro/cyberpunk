@@ -55,7 +55,7 @@ from .netrun_admin_commands import CmdArchitecture
 from .combat_system import CmdCombat
 from .language_commands import CmdLanguage
 from .building import CmdManageBuilding, CmdRoom, CmdAreaManage
-from .notes import CmdNotes
+from .notes import CmdNote
 from evennia.contrib.base_systems.mux_comms_cmds import CmdSetLegacyComms
 
 from .CmdAlts import CmdAlts
@@ -70,7 +70,7 @@ from .CmdMultidesc import CmdMultidesc
 from .CmdFinger import CmdFinger
 from .CmdGradient import CmdGradientName
 from .where import CmdWhere
-from .CmdWho import CmdWho
+from .CmdWho import CmdWho, CmdLfrp
 from .coords_commands import CmdCoords, CmdGo
 from .commonmux.CmdPage import CmdPage
 #from .vehicle_commands import CmdEnterVehicle, CmdExitVehicle
@@ -132,6 +132,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdSay())
         self.add(CmdHangout())
         self.add(CmdWho())
+        self.add(CmdLfrp())
         self.add(CmdWhere())
         self.add(CmdCoords())
         self.add(CmdGo())
@@ -181,7 +182,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdPlusOoc())
         self.add(CmdPlusIc())
         self.add(CmdMeet())
-        self.add(CmdNotes())
+        self.add(CmdNote())
         self.add(CmdIP())
         self.add(CmdVote())
         self.add(CmdBBS())

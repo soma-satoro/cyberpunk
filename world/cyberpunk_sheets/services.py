@@ -91,6 +91,17 @@ class CharacterMoneyService:
             return True
         return False
 
+    @staticmethod
+    def add_fashion_budget(character, amount):
+        """Add back to fashion budget (e.g. for refunds)."""
+        char = character.character_sheet if hasattr(character, 'character_sheet') and character.character_sheet else character
+        if not hasattr(char, 'fashion_budget_remaining'):
+            return
+        char.fashion_budget_remaining = getattr(char, 'fashion_budget_remaining', 0) + amount
+        char.save(skip_recalculation=True)
+        if hasattr(character, 'db') and character.character_sheet == char:
+            character.db.fashion_budget_remaining = char.fashion_budget_remaining
+
 # Keep old service for backward compatibility
 class CharacterSheetMoneyService:
     @staticmethod

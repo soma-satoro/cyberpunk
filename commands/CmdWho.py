@@ -168,6 +168,37 @@ class CmdWho(COMMAND_DEFAULT_CLASS):
         
         self.msg(string)
 
+
+class CmdLfrp(COMMAND_DEFAULT_CLASS):
+    """
+    Toggle your Looking for RP status on the WHO list.
+
+    Usage:
+      lfrp on   - Show $ indicator on WHO (looking for RP)
+      lfrp off  - Hide $ indicator on WHO (not looking for RP)
+
+    When on, your name will appear with a $ prefix on the WHO list,
+    indicating you're looking for roleplay.
+    """
+
+    key = "lfrp"
+    locks = "cmd:all()"
+    help_category = "Game Info"
+
+    def func(self):
+        caller = self.caller
+        if not self.args or self.args.strip().lower() not in ("on", "off"):
+            caller.msg("Usage: lfrp on | lfrp off")
+            return
+
+        if self.args.strip().lower() == "on":
+            caller.db.lfrp = True
+            caller.msg("You are now marked as |wLooking for RP|n on the WHO list ($).")
+        else:
+            caller.db.lfrp = False
+            caller.msg("You are no longer marked as Looking for RP on the WHO list.")
+
+
 class CmdCensus(COMMAND_DEFAULT_CLASS):
     """
     Show a census of the current population in the game.

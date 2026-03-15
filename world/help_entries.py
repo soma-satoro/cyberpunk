@@ -1390,4 +1390,62 @@ Exits use aliases (B1, B2, SR, O, etc.) that players cannot change.
 See also: +help rental workflow, +help room creation
         """,
     },
+    {
+        "key": "policies",
+        "aliases": ["policy", "policies"],
+        "category": "General",
+        "text": """
+|wPolicies|n
+|yAll characters and character art is 18+. No exceptions.|n
+
+|yDont be a dick, choom|n, In fact if the opportunity presents itself you
+should be excellent.
+
+|yCheating|n
+In the unlikely event that you find a way to hack around the code and
+cheat, DO report it to staff. DON'T use it to cheat.
+We rely on your logs as a means to verify things that happened. Please
+don't falsify them. See the section below on logs.
+
+|yLogs|n
+We rely on your logs as a means to verify things that happened. Please
+don't falsify them. See the section below on logs.
+
+|yHarassment|n
+Harassment is bad, m'kay?
+
+|yLying|n
+Lying to other players (including admins) OOCly about IC events is not
+acceptable. This especially applies to situations where your OOC words can
+have an IC effect. Lying about intentions within a scene can also result in major problems due to consent issues.
+Please don't randomly pick up objects that don't belong to you. This is
+not a MUD, and items lying around are not free gifts from the game to pick up
+as your own. Instead, please notify a staff member.
+
+|yThe Admins are not always right.|n
+The Admins are not always right. We are human beings and fallible. If you
+believe something is wrong, whether with a plot, a queue request, or
+whatever, then please feel free to let us know. However, continuing to argue
+a point with a given admin once they've said they are no longer willing to
+debate the point is not allowed. If you still feel there are grounds for a
+complaint, contact Mnemosyne. 
+
+|ySpoofing|n
+Spoofing of other players (i.e. using @emit to cause poses, messages, OOC
+comments/bbposts/channel chat, etc. to be displayed as if they had typed them
+is not allowed.
+
+|yPrivacy|n
+Do not enter private areas of the grid without either the approval of an
+admin or the permission of the player who owns the private area, even if those areas are unlocked via code.
+Private areas include apartments or any other area that is clearly set up as
+not intended for general public access. If you inadvertently enter a private
+area, leave immediately.
+
+|yOuting|n
+Do not OOCly 'out' someone's alts, IC secrets or in any other way betray 
+another players trust or damage their story. This applies to staff plots and
+staff files as well.
+        """,
+    },
 ]

@@ -320,11 +320,9 @@ class CmdChargen(MuxCommand):
         EdgerunnerChargen.assign_gear(sheet, role, gear_choices=gear_choices or {})
         EdgerunnerChargen.assign_cyberware(sheet, role)  # Still using sheet for now
 
-        # Allot leftover eurodollars (2550 - non_fashion cost); fashion comes from separate 800 eb pool
-        total_cost, fashion_cost = EdgerunnerChargen.calculate_edgerunner_package_cost_split(role)
-        non_fashion_cost = total_cost - fashion_cost
-        remaining_eurodollars = max(0, 2550 - non_fashion_cost)
-        CharacterMoneyService.add_money(char, remaining_eurodollars)
+        # Edgerunners get 500 eb extra to spend or keep (per rulebook p. 98)
+        _, fashion_cost = EdgerunnerChargen.calculate_edgerunner_package_cost_split(role)
+        CharacterMoneyService.add_money(char, 500)
 
         # Fashion budget: 800 eb use-it-or-lose-it, reduced by clothing/fashionware in package
         if hasattr(sheet, 'fashion_budget_remaining'):
@@ -361,7 +359,7 @@ class CmdChargen(MuxCommand):
         return (
             f"Character created using the Edgerunner method for role: {role}.\n"
             f"Your stats have been assigned as follows:\n{stat_display}\n{detailed_info}\n"
-            f"{remaining_eurodollars} Eurodollars have been added to your account (2550 - {non_fashion_cost} spent on gear and cyberware).\n"
+            f"500 Eurodollars have been added to your account (extra spending money per the rulebook).\n"
             f"{fashion_info}"
             f"Use 'sheet' to view your full character details, 'inv' to view inventory, and 'inv/balance' to check your money."
         )

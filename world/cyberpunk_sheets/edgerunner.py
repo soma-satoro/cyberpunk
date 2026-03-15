@@ -58,11 +58,9 @@ class EdgerunnerChargen:
             
             logger.info(f"Edgerunner chargen completed for {full_name}")
 
-            # Add leftover eurodollars (2550 - non_fashion package cost); fashion comes from separate 800 eb pool
-            total_cost, fashion_cost = cls.calculate_edgerunner_package_cost_split(role)
-            non_fashion_cost = total_cost - fashion_cost
-            remaining_eurodollars = max(0, 2550 - non_fashion_cost)
-            CharacterMoneyService.add_money(character, remaining_eurodollars)
+            # Edgerunners get 500 eb extra to spend or keep (per rulebook p. 98)
+            _, fashion_cost = cls.calculate_edgerunner_package_cost_split(role)
+            CharacterMoneyService.add_money(character, 500)
 
             # Fashion budget: 800 eb use-it-or-lose-it (reduced by fashion items in package)
             sheet = character.character_sheet if hasattr(character, 'character_sheet') and character.character_sheet else character
@@ -77,14 +75,14 @@ class EdgerunnerChargen:
                 remaining_stat_points = cls.calculate_remaining_stat_points(character)
                 remaining_skill_points = cls.calculate_remaining_skill_points(character, role)
 
-            logger.info(f"Added {remaining_eurodollars} Eurodollars, {sheet.fashion_budget_remaining} fashion budget to character {full_name}")
+            logger.info(f"Added 500 Eurodollars, {sheet.fashion_budget_remaining} fashion budget to character {full_name}")
 
             # Prepare the final message
             fashion_info = f"You have {sheet.fashion_budget_remaining} eb fashion budget (use for clothing/fashionware, or lose it). " if getattr(sheet, 'fashion_budget_remaining', 0) > 0 else ""
             final_message = (
                 f"Character created using the Edgerunner method for role: {role}.\n"
                 f"You have {remaining_stat_points} stat points and {remaining_skill_points} skill points left to allocate.\n"
-                f"{remaining_eurodollars} Eurodollars have been added to your account (2550 - {non_fashion_cost} spent on gear and cyberware).\n"
+                f"500 Eurodollars have been added to your account (extra spending money per the rulebook).\n"
                 f"{fashion_info}"
                 f"Use 'sheet' to view your full character details, 'inv' to view your inventory "
                 f"and 'inv/balance' to check your money."

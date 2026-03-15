@@ -271,21 +271,33 @@ class CmdBuy(Command):
             self.caller.msg(f"You already own {item['name']}.")
             return
 
-        # Fashion items (clothing): use fashion budget in chargen
+        # Fashion items (clothing): use fashion budget first, overflow to eurodollars
         is_fashion = (
             gear_category == "Clothing"
             or (item.get("name") or "").strip() in FASHION_ITEM_NAMES
         )
+        fashion_to_spend = 0
+        cash_to_spend = 0
         if is_fashion:
             fashion_budget = CharacterMoneyService.get_fashion_budget(self.caller)
-            if fashion_budget >= price:
-                if not CharacterMoneyService.spend_fashion_money(self.caller, price):
-                    self.caller.msg(f"You don't have enough fashion budget. You have {fashion_budget} eb for clothing/fashionware.")
-                    return
-            else:
+            cash_balance = CharacterMoneyService.get_balance(self.caller)
+            fashion_to_spend = min(fashion_budget, price)
+            cash_to_spend = price - fashion_to_spend
+            if fashion_budget + cash_balance < price:
                 self.caller.msg(
-                    f"You don't have enough fashion budget for {item['name']}. "
-                    f"It costs {price} eb, you have {fashion_budget} eb fashion budget."
+                    f"You don't have enough for {item['name']}. "
+                    f"It costs {price} eb. You have {fashion_budget} eb fashion budget and {cash_balance} eb."
+                )
+                return
+            if fashion_to_spend > 0 and not CharacterMoneyService.spend_fashion_money(self.caller, fashion_to_spend):
+                self.caller.msg(f"You don't have enough fashion budget. You have {fashion_budget} eb for clothing/fashionware.")
+                return
+            if cash_to_spend > 0 and not CharacterMoneyService.spend_money(self.caller, cash_to_spend):
+                if fashion_to_spend > 0:
+                    CharacterMoneyService.add_fashion_budget(self.caller, fashion_to_spend)
+                self.caller.msg(
+                    f"You don't have enough Eurodollars to buy {item['name']}. "
+                    f"It costs {price} eb (after {fashion_to_spend} eb from fashion budget)."
                 )
                 return
         elif not CharacterMoneyService.spend_money(self.caller, price):
@@ -300,6 +312,11 @@ class CmdBuy(Command):
             self.caller.msg(
                 f"You have purchased {item['name']} for {price} eb "
                 f"(base {base_price} eb, {discount}% role discount applied)."
+            )
+        elif is_fashion and fashion_to_spend > 0 and cash_to_spend > 0:
+            self.caller.msg(
+                f"You have purchased {item['name']} for {price} eb "
+                f"({fashion_to_spend} eb from fashion budget, {cash_to_spend} eb from cash)."
             )
         else:
             self.caller.msg(f"You have purchased {item['name']} for {price} eb.")
@@ -345,18 +362,30 @@ class CmdBuy(Command):
                 self.caller.msg(f"Not enough slots available for {cyberware.type}.")
                 return
 
-        # Fashionware: use fashion budget in chargen
+        # Fashionware: use fashion budget first, overflow to eurodollars
         is_fashionware = getattr(cyberware, "type", "") == "Fashionware"
+        fashion_to_spend = 0
+        cash_to_spend = 0
         if is_fashionware:
             fashion_budget = CharacterMoneyService.get_fashion_budget(self.caller)
-            if fashion_budget >= final_cost:
-                if not CharacterMoneyService.spend_fashion_money(self.caller, final_cost):
-                    self.caller.msg(f"You don't have enough fashion budget. You have {fashion_budget} eb for fashionware.")
-                    return
-            else:
+            cash_balance = CharacterMoneyService.get_balance(self.caller)
+            fashion_to_spend = min(fashion_budget, final_cost)
+            cash_to_spend = final_cost - fashion_to_spend
+            if fashion_budget + cash_balance < final_cost:
                 self.caller.msg(
-                    f"Not enough fashion budget for {cyberware.name}. "
-                    f"It costs {final_cost} eb, you have {fashion_budget} eb fashion budget."
+                    f"Not enough for {cyberware.name}. "
+                    f"It costs {final_cost} eb. You have {fashion_budget} eb fashion budget and {cash_balance} eb."
+                )
+                return
+            if fashion_to_spend > 0 and not CharacterMoneyService.spend_fashion_money(self.caller, fashion_to_spend):
+                self.caller.msg(f"You don't have enough fashion budget. You have {fashion_budget} eb for fashionware.")
+                return
+            if cash_to_spend > 0 and not CharacterMoneyService.spend_money(self.caller, cash_to_spend):
+                if fashion_to_spend > 0:
+                    CharacterMoneyService.add_fashion_budget(self.caller, fashion_to_spend)
+                self.caller.msg(
+                    f"Not enough Eurodollars for {cyberware.name}. "
+                    f"It costs {final_cost} eb (after {fashion_to_spend} eb from fashion budget)."
                 )
                 return
         elif not CharacterMoneyService.spend_money(self.caller, final_cost):
@@ -374,12 +403,10 @@ class CmdBuy(Command):
             inventory.cyberware.add(instance)
         except Exception as e:
             if is_fashionware:
-                CharacterMoneyService.spend_fashion_money.__self__ = None  # no-op, refund fashion
-                char = character_sheet.character if hasattr(character_sheet, 'character') and character_sheet.character else self.caller
-                sheet = getattr(char, 'character_sheet', character_sheet)
-                if hasattr(sheet, 'fashion_budget_remaining'):
-                    sheet.fashion_budget_remaining += final_cost
-                    sheet.save(skip_recalculation=True)
+                if fashion_to_spend > 0:
+                    CharacterMoneyService.add_fashion_budget(self.caller, fashion_to_spend)
+                if cash_to_spend > 0:
+                    CharacterMoneyService.add_money(self.caller, cash_to_spend)
             else:
                 CharacterMoneyService.add_money(self.caller, final_cost)
             self.caller.msg(f"Error installing cyberware: {str(e)}")
@@ -400,6 +427,11 @@ class CmdBuy(Command):
                     f"You have purchased {cyberware.name} (not installed) for {final_cost} eb "
                     f"(base {base_cost} eb, {discount}% Medtech discount applied)."
                 )
+            elif is_fashionware and fashion_to_spend > 0 and cash_to_spend > 0:
+                self.caller.msg(
+                    f"You have purchased {cyberware.name} (not installed) for {final_cost} eb "
+                    f"({fashion_to_spend} eb from fashion budget, {cash_to_spend} eb from cash)."
+                )
             else:
                 self.caller.msg(f"You have purchased {cyberware.name} (not installed) for {final_cost} eb.")
         elif discount > 0:
@@ -407,8 +439,14 @@ class CmdBuy(Command):
                 f"You have purchased and installed {cyberware.name} for {final_cost} eb "
                 f"(base {base_cost} eb, {discount}% Medtech discount applied)."
             )
+        elif is_fashionware and fashion_to_spend > 0 and cash_to_spend > 0:
+            self.caller.msg(
+                f"You have purchased and installed {cyberware.name} for {final_cost} eb "
+                f"({fashion_to_spend} eb from fashion budget, {cash_to_spend} eb from cash)."
+            )
         else:
             self.caller.msg(f"You have purchased and installed {cyberware.name} for {final_cost} eb.")
+        if not stash:
             self.caller.msg(f"Your new humanity is {character_sheet.humanity}.")
 
     def _buy_from_vendor(self):
