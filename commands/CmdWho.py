@@ -9,6 +9,8 @@ from evennia import SESSION_HANDLER as evennia
 from evennia.utils import utils
 from world.utils.formatting import header, footer, divider
 from evennia.utils.utils import class_from_module
+
+STAFF_PERMS = ("builders", "admin", "staff", "developer")
 from evennia.utils.ansi import strip_ansi
 from django.conf import settings
 COMMAND_DEFAULT_CLASS = class_from_module(settings.COMMAND_DEFAULT_CLASS)
@@ -59,11 +61,11 @@ class CmdWho(COMMAND_DEFAULT_CLASS):
             return "None"
             
         # Check if character is unfindable
-        if hasattr(puppet, 'db') and puppet.db.unfindable and not account.check_permstring("builders", "admin", "staff", "developer"):
+        if hasattr(puppet, 'db') and puppet.db.unfindable and not any(account.check_permstring(perm) for perm in STAFF_PERMS):
             return "(Hidden)"
             
         # Staff can always see room names
-        if account.check_permstring("builders", "admin", "staff", "developer"):
+        if any(account.check_permstring(perm) for perm in STAFF_PERMS):
             return puppet.location.key
             
         # Check if room is unfindable
@@ -78,7 +80,7 @@ class CmdWho(COMMAND_DEFAULT_CLASS):
         """
         account = self.account
         session_list = evennia.get_sessions()
-        is_staff = account.check_permstring("builders", "admin", "staff", "developer")  # Check if viewer is staff
+        is_staff = any(account.check_permstring(perm) for perm in STAFF_PERMS)  # Check if viewer is staff
 
         session_list = sorted(session_list, key=lambda o: o.get_puppet().key if o.get_puppet() else o.account.key)
 
@@ -94,7 +96,7 @@ class CmdWho(COMMAND_DEFAULT_CLASS):
             # privileged info
             string = header("Online Characters", width=78) + "\n"
             string += "|wName              On       Idle     Account     Room            Cmds  Host|n\n"
-            string += "|r" + "-" * 78 + "|n\n"
+            string += "|b" + "-" * 78 + "|n\n"
             
             for session in session_list:
                 if not session.logged_in:
@@ -128,7 +130,7 @@ class CmdWho(COMMAND_DEFAULT_CLASS):
             # unprivileged
             string = header("Online Characters", width=78) + "\n"
             string += "|wName              On       Idle     Room|n\n"
-            string += "|r" + "-" * 78 + "|n\n"
+            string += "|b" + "-" * 78 + "|n\n"
             
             for session in session_list:
                 if not session.logged_in:
@@ -157,11 +159,11 @@ class CmdWho(COMMAND_DEFAULT_CLASS):
                 )
 
         is_one = naccounts == 1
-        string += "|r" + "-" * 78 + "|n\n"
+        string += "|b" + "-" * 78 + "|n\n"
         string += f"{naccounts} unique account{'s' if not is_one else ''} logged in.\n"
-        string += "|r" + "-" * 78 + "|n\n"
-        string += "|yLegend: * = Staff, $ = Looking for RP, @ = In Umbra|n\n"  # Fixed legend formatting
-        string += "|r" + "-" * 78 + "|n\n"
+        string += "|b" + "-" * 78 + "|n\n"
+        string += "|yLegend: * = Staff, $ = Looking for RP|n\n"
+        string += "|b" + "-" * 78 + "|n\n"
         string += footer(width=78)
         
         self.msg(string)
