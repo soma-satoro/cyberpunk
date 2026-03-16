@@ -491,24 +491,8 @@ class EdgerunnerChargen:
 
     @classmethod
     def assign_languages_to_typeclass(cls, character, role):
-        """Assign languages to character typeclass: English and Streetslang at 4, then a random language."""
-        # Use Character.add_language for compatibility with pose/emit/say and CharacterSheet sync
-        character.add_language("English", 4)
+        """Assign Streetslang 4 only at start. Other languages come from lifepath (Cultural Origin)."""
         character.add_language("Streetslang", 4)
-
-        # Get current language list (exclude English and Streetslang for random pick)
-        known_languages = [lang.lower() for lang in character.get_languages()]
-        available_languages = [
-            lang for lang in CYBERPUNK_LANGUAGES
-            if lang.lower() not in known_languages
-        ]
-
-        # Add a random language
-        if available_languages:
-            random_lang = random.choice(available_languages)
-            random_level = random.randint(1, 3)
-            character.add_language(random_lang, random_level)
-            logger.info(f"Added language {random_lang} (level {random_level}) to character")
 
     @classmethod
     def assign_gear_to_typeclass(cls, character, role, gear_choices=None):
@@ -898,17 +882,8 @@ class EdgerunnerChargen:
 
     @classmethod
     def assign_languages(cls, sheet, role):
-        """Assign English and Streetslang at 4, then a random language."""
-        sheet.add_language("English", 4)
+        """Assign Streetslang 4 only at start. Other languages come from lifepath (Cultural Origin)."""
         sheet.add_language("Streetslang", 4)
-        logger.info(f"Language list: {sheet.language_list}")
-        known_languages = [lang['name'].lower() if isinstance(lang, dict) else lang.lower() for lang in sheet.language_list]
-        available_languages = [lang for lang in CYBERPUNK_LANGUAGES if lang.lower() not in known_languages]
-        logger.info(f"Known languages: {known_languages}")
-        if available_languages:
-            random_lang = random.choice(available_languages)
-            random_level = random.randint(1, 3)
-            sheet.add_language(random_lang, random_level)
 
     @staticmethod
     def assign_gear(sheet, role, gear_choices=None):

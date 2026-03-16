@@ -1,10 +1,8 @@
 from evennia.commands.default.muxcommand import MuxCommand
-from evennia.utils.search import search_object
 from evennia.utils import utils
 from evennia import SESSION_HANDLER
 from world.utils.search_helpers import search_character
-from world.utils.formatting import header, footer, divider
-from evennia.utils.ansi import strip_ansi, ANSIString
+from evennia.utils.ansi import ANSIString
 import time
 
 
@@ -206,33 +204,37 @@ class CmdFinger(MuxCommand):
         alts = target.db.public_alts or []
         alts_display = ", ".join(alts) if alts else "None listed"
         
-        # Build the display
+        # Build the display (blue/yellow/white color scheme)
         output = []
         
-        # Header with character name (escape ANSI)
-        header_line = f"<---======##======================[ {self.escape_ansi(target.name)} ]======================##======--->"
-        output.append(header_line[:78])  # Truncate if too long
+        # Header with character name (escape ANSI) - blue borders, yellow name
+        name_clean = self.escape_ansi(target.name)
+        if len(name_clean) > 40:
+            name_clean = name_clean[:37] + "..."
+        name_part = f"[ {name_clean} ]"
+        header_line = f"|b<---======##======================|n|y{name_part}|n|b======================##======--->|n"
+        output.append(header_line)
         
         # First info section
         left_col = []
         right_col = []
         
-        # Left column
-        left_col.append(f"Alias: {self.escape_ansi(alias) if alias else 'None'}")
-        left_col.append(f"Sex: {self.escape_ansi(sex)}")
+        # Left column - labels in yellow, values in white
+        left_col.append(f"|yAlias:|n {self.escape_ansi(alias) if alias else 'None'}")
+        left_col.append(f"|ySex:|n {self.escape_ansi(sex)}")
         
         email = self.escape_ansi(finger_data.get("email", "(unlisted)"))
-        left_col.append(f"E-Mail: {email}")
+        left_col.append(f"|yE-Mail:|n {email}")
         
         # Right column
         if is_online:
-            right_col.append(f"On for: {on_time}          Idle: {idle_time}")
+            right_col.append(f"|yOn for:|n {on_time}          |yIdle:|n {idle_time}")
         else:
-            right_col.append("Not currently online")
+            right_col.append("|wNot currently online|n")
         
-        right_col.append(f"Mail: {mail_info}")
+        right_col.append(f"|yMail:|n {mail_info}")
         
-        # Combine columns
+        # Combine columns (use || for literal pipe - single | triggers ANSI when followed by M, O, etc.)
         max_lines = max(len(left_col), len(right_col))
         for i in range(max_lines):
             left = left_col[i] if i < len(left_col) else ""
@@ -246,20 +248,20 @@ class CmdFinger(MuxCommand):
             left_padded = left + " " * (38 - left_visible_len)
             right_padded = right + " " * (39 - right_visible_len)
             
-            # Combine with separator
-            line = f"{left_padded}|{right_padded}"
+            # Combine with separator (|| = literal pipe to avoid |M, |O etc. being interpreted as ANSI)
+            line = f"{left_padded}||{right_padded}"
             output.append(line)
         
-        # Divider
-        output.append("<-------------=============++++++++++++++++++++++++=============------------>")
+        # Divider - blue
+        output.append("|b<-------------=============++++++++++++++++++++++++=============------------>|n")
         
         # Location and RP-Prefs
         if target.location:
-            output.append(f"Location:       {location}")
+            output.append(f"|yLocation:|n       {location}")
         
         rp_prefs = finger_data.get("rp-prefs", None)
         if rp_prefs:
-            output.append(f"RP-Prefs:       {self.escape_ansi(rp_prefs)}")
+            output.append(f"|yRP-Prefs:|n       {self.escape_ansi(rp_prefs)}")
         
         # Other finger attributes
         display_attrs = [
@@ -279,14 +281,14 @@ class CmdFinger(MuxCommand):
         for attr_key, attr_label in display_attrs:
             value = finger_data.get(attr_key, None)
             if value:
-                output.append(f"{attr_label + ':':<16}{self.escape_ansi(value)}")
+                output.append(f"|y{attr_label + ':':<16}|n{self.escape_ansi(value)}")
         
         # Alts section
         if alts:
-            output.append(f"Alts:           {self.escape_ansi(alts_display)}")
+            output.append(f"|yAlts:|n           {self.escape_ansi(alts_display)}")
         
-        # Bottom divider
-        output.append("<-------------=============++++++++++++++++++++++++=============------------>")
+        # Bottom divider - blue
+        output.append("|b<-------------=============++++++++++++++++++++++++=============------------>|n")
         
         # Send the output
         self.caller.msg("\n".join(output))

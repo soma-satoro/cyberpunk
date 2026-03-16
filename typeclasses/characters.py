@@ -514,14 +514,21 @@ class Character(DefaultCharacter):
         return super().get_display_name(looker, **kwargs)
 
     def get_attribute(self, attr_name):
-        """Get a character attribute value."""
-        if attr_name in self.db.skills:
+        """Get a character attribute value. Stats always come from attributes, never skills."""
+        from world.cyberpunk_constants import STATS
+        if attr_name in STATS:
+            return self.attributes.get(attr_name)
+        if attr_name in (self.db.skills or {}):
             return self.db.skills.get(attr_name, 0)
         return self.attributes.get(attr_name)
     
     def set_attribute(self, attr_name, value):
-        """Set a character attribute value."""
-        if attr_name in self.db.skills:
+        """Set a character attribute value. Stats always go to attributes, never skills."""
+        from world.cyberpunk_constants import STATS
+        if attr_name in STATS:
+            self.attributes.add(attr_name, value)
+            return
+        if attr_name in (self.db.skills or {}):
             skills = self.db.skills
             skills[attr_name] = value
             self.db.skills = skills
@@ -928,7 +935,11 @@ class Character(DefaultCharacter):
                 field_name not in ['id', 'eurodollars', 'reputation_points', 'rep', 
                                   'intelligence', 'reflexes', 'dexterity', 'technology',
                                   'cool', 'willpower', 'luck', 'current_luck', 'move', 
-                                  'body', 'empathy', 'age', 'height', 'weight']):
+                                  'body', 'empathy', 'age', 'height', 'weight',
+                                  'humanity', 'humanity_loss', 'total_cyberware_humanity_loss',
+                                  'trauma_humanity_loss', 'death_save', 'serious_wounds',
+                                  'notoriety_points', 'notoriety', 'is_complete',
+                                  'unarmed_damage_dice', 'unarmed_damage_die_type', 'has_cyberarm']):
                 skills[field_name] = getattr(sheet, field_name)
         
         self.db.skills = skills
@@ -1209,17 +1220,20 @@ class Character(DefaultCharacter):
             self.db.luck or 0, self.db.move or 0, self.db.body or 0, self.db.empathy or 0
         ])
 
-        # Skills - get from skills dictionary
+        # Skills - get from skills dictionary; only count known skills (exclude junk from migration)
         from world.chargen_constants import ROLE_ABILITY_FREE_POINTS, ROLE_ABILITY_SKILLS
         from world.cyberpunk_constants import STATS
-        core_stats = frozenset(STATS)  # Don't count stats that erroneously ended up in skills
+        from world.utils.calculation_utils import SKILL_MAPPING
+        core_stats = frozenset(STATS)
+        known_skills = frozenset(SKILL_MAPPING.values())
         skills = dict(self.db.skills or {})
-        # Remove any stats that erroneously ended up in skills (e.g. technology); prevents double-counting
-        stats_to_remove = [k for k in skills if k in core_stats]
-        if stats_to_remove:
-            for k in stats_to_remove:
+        # Remove stats and non-skill keys that erroneously ended up in skills
+        to_remove = [k for k in skills if k in core_stats or k not in known_skills]
+        if to_remove:
+            for k in to_remove:
                 del skills[k]
             self.db.skills = skills
+        skills = {k: v for k, v in skills.items() if k in known_skills and k not in core_stats}
         double_cost_skills = ['autofire', 'martial_arts', 'pilot_air',
                              'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
         # Base skills that have instances: don't count base (instance counts instead)
@@ -1258,11 +1272,21 @@ class Character(DefaultCharacter):
                 multiplier = 2 if base_skill in double_cost_skills else 1
                 skill_points += val * multiplier
 
-        # Languages
-        language_points = sum(
-            int(level) if level is not None else 0
-            for _, level in self.languages.items()
-        )
+        # Languages: Streetslang 4 (automatic) and lifepath language are free
+        from world.utils.calculation_utils import calculate_language_skill_points
+        lifepath_lang = ""
+        lp = getattr(self.db, "lifepath", None) or {}
+        if isinstance(lp, dict):
+            lifepath_lang = lp.get("cultural_language_picked", "") or ""
+        # Fallback: lifepath may be on character_sheet (synced from account) or account when lifepath ran pre-puppet
+        if not lifepath_lang and hasattr(self, "character_sheet") and self.character_sheet:
+            lifepath_lang = (getattr(self.character_sheet, "lifepath_language", None) or "").strip()
+        if not lifepath_lang and hasattr(self, "account") and self.account:
+            acc_lp = getattr(self.account.db, "lifepath", None) or {}
+            if isinstance(acc_lp, dict):
+                lifepath_lang = acc_lp.get("cultural_language_picked", "") or ""
+        lang_items = list(self.languages.items())
+        language_points = calculate_language_skill_points(lang_items, lifepath_language=lifepath_lang)
 
         total_skill_points = skill_points + language_points
         return stat_points, total_skill_points
@@ -1579,17 +1603,16 @@ class Character(DefaultCharacter):
     def get_remaining_points(self):
         """Get remaining character points.
         Edgerunner: stats pre-assigned from table (0 remaining), skills use 86 pool.
-        Complete Package: 62 stat points, 52 skill points.
+        Complete Package: 62 stat points, 86 skill points (per book).
         """
+        from world.chargen_constants import COMPLETE_PACKAGE_SKILL_POOL, EDGERUNNER_SKILL_POOL
         stat_points_spent, skill_points_spent = self.calculate_spent_points()
         method = (self.db.chargen_method or "").strip().lower()
         if method == "edgerunner":
-            # Stats are pre-assigned; no allocation. Skills: 86 pool.
             remaining_stat_points = 0
-            remaining_skill_points = max(0, 86 - skill_points_spent)
+            remaining_skill_points = max(0, EDGERUNNER_SKILL_POOL - skill_points_spent)
         else:
-            # Complete Package: 62 stat, 52 skill
             remaining_stat_points = max(0, 62 - stat_points_spent)
-            remaining_skill_points = max(0, 52 - skill_points_spent)
+            remaining_skill_points = max(0, COMPLETE_PACKAGE_SKILL_POOL - skill_points_spent)
         return remaining_stat_points, remaining_skill_points
 

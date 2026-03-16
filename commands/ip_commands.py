@@ -22,6 +22,8 @@ from world.improvement_points import (
     get_recent_ip_changes,
     format_log_entry,
     normalize_stat_name,
+    parse_skill_instance,
+    SKILLS_REQUIRING_INSTANCE,
     IP_ATTRIBUTES,
     IP_ROLE_ABILITIES,
 )
@@ -252,6 +254,21 @@ class CmdIP(MuxCommand):
         stat_name = self.args.strip()
         first_word = (stat_name.split() or [""])[0]
         stat_key = normalize_stat_name(first_word)
+        base_skill, instance = parse_skill_instance(first_word)
+
+        # Local Expert, Play Instrument, and Martial Arts require an instance (e.g. local_expert(Night City))
+        if base_skill in SKILLS_REQUIRING_INSTANCE and not instance:
+            examples = {
+                "local_expert": "+ip/buy local_expert(Night City)",
+                "play_instrument": "+ip/buy play_instrument(guitar)",
+                "martial_arts": "+ip/buy martial_arts(Krav Maga)",
+            }
+            example = examples.get(base_skill, f"+ip/buy {base_skill}(instance)")
+            self.caller.msg(
+                f"{base_skill.replace('_', ' ').title()} requires an instance. "
+                f"Use '+ip/buy {base_skill}(instance)', e.g. {example}"
+            )
+            return
 
         # Medicine requires specialty: +ip/buy medicine <surgery|pharma|cryo>
         medicine_specialty = None
@@ -325,9 +342,13 @@ class CmdIP(MuxCommand):
             details += f" (+1 {medicine_specialty})"
         add_ip_log_entry(char, -cost, get_stat_display_name(stat_name), details)
 
-        # Store for refund
+        # Store for refund (use first_word for skill instances to preserve instance key)
+        refund_stat = (
+            "medicine" if stat_key == "medicine"
+            else (first_word if base_skill in SKILLS_REQUIRING_INSTANCE and instance else stat_key)
+        )
         refund_data = {
-            "stat": "medicine" if stat_key == "medicine" else stat_key,
+            "stat": refund_stat,
             "from_level": current_val,
             "to_level": next_level,
             "cost": cost,

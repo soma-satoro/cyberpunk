@@ -74,6 +74,14 @@ class CmdSheet(MuxCommand):
         caller = self.caller
         
         if not self.target_name:
+            # Resolve account -> character when viewing own sheet (caller may be account in some session modes)
+            if not inherits_from(caller, "typeclasses.characters.Character"):
+                if hasattr(caller, "character") and caller.character:
+                    return caller.character
+                if hasattr(caller, "characters") and caller.characters:
+                    chars = list(caller.characters) if not callable(caller.characters) else list(caller.characters())
+                    if chars:
+                        return chars[0]
             return caller
         
         # Check if the caller has staff permissions
@@ -263,7 +271,15 @@ class CmdSheet(MuxCommand):
             return
 
         # New players without a character sheet should be directed to chargen
-        if not hasattr(target, 'character_sheet') or not target.character_sheet:
+        sheet = getattr(target, 'character_sheet', None) if hasattr(target, 'character_sheet') else None
+        if not sheet:
+            # Fallback: find sheet by character relation (fixes chargen->sheet link if character_sheet_id wasn't set)
+            target_pk = getattr(target, 'pk', None) or getattr(target, 'id', None)
+            if target_pk:
+                sheet = CharacterSheet.objects.filter(character_id=target_pk).first()
+                if sheet:
+                    target.db.character_sheet_id = sheet.id
+        if not sheet:
             if target == self.caller:
                 self.caller.msg(
                     "You don't have a character sheet yet. Proceed to the chargen room to create your character."
@@ -273,8 +289,7 @@ class CmdSheet(MuxCommand):
             return
 
         # Recalculate humanity from cyberware before display (CharacterSheet is source of truth)
-        if hasattr(target, 'character_sheet') and target.character_sheet:
-            sheet = target.character_sheet
+        if sheet:
             sheet.calculate_humanity_loss(quiet=True)
             target.db.humanity = sheet.humanity
             target.db.total_cyberware_humanity_loss = sheet.total_cyberware_humanity_loss

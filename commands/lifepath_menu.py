@@ -746,6 +746,7 @@ def _sync_lifepath_to_sheet(caller):
         sheet.environment = lp["childhood_environment"]
     if lp.get("family_crisis"):
         sheet.family_crisis = lp["family_crisis"]
+    sheet.lifepath_language = lp.get("cultural_language_picked", "") or ""
     try:
         sheet.save()
     except Exception:

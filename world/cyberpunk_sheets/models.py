@@ -59,47 +59,20 @@ class CharacterSheet(SharedMemoryModel):
             pass  # Language not found, nothing to remove
 
     def calculate_spent_points(self):
+        """Delegate to shared calculation. Role ability first 4 free, Streetslang 4 free, lifepath language free."""
         try:
-            stat_points = sum([
-                self.intelligence, self.reflexes, self.dexterity, self.technology,
-                self.cool, self.willpower, self.luck, self.move, self.body, self.empathy
-            ])
-            logger.log_info(f"Stat points: {stat_points}")
-
-            double_cost_skills = ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
-            skill_points = sum([
-                getattr(self, skill) * (2 if skill in double_cost_skills else 1)
-                for skill in [
-                    'concentration', 'conceal_object', 'lip_reading', 'perception', 'tracking', 'athletics', 
-                    'contortionist', 'dance', 'endurance', 'resist_torture_drugs', 'stealth', 'drive_land', 
-                    'pilot_air', 'pilot_sea', 'riding', 'accounting', 'animal_handling', 'bureaucracy', 'business', 
-                    'composition', 'criminology', 'cryptography', 'deduction', 'education', 'gamble', 'languages', 
-                    'library_search', 'local_expert', 'tactics', 'wilderness_survival', 'brawling', 'evasion', 'martial_arts', 
-                    'melee', 'acting', 'archery', 'autofire', 'handgun', 'heavy_weapons', 'shoulder_arms', 'bribery', 'conversation', 
-                    'human_perception', 'interrogation', 'persuasion', 'streetwise', 'trading', 'style', 'air_vehicle_tech', 
-                    'basic_tech', 'cybertech', 'demolitions', 'electronics', 'first_aid', 'forgery', 'land_vehicle_tech', 'artistry', 
-                    'paramedic', 'photography', 'pick_lock', 'pick_pocket', 'sea_vehicle_tech', 'weaponstech', 'charismatic_impact', 
-                    'combat_awareness', 'interface', 'maker', 'medicine', 'credibility', 'teamwork', 'backup', 'operator', 'moto',
-                    'zoology', 'stock_market', 'physics', 'biology', 'chemistry', 'neuroscience', 'data_science', 'economics', 'sociology',
-                    'political_science', 'genetics', 'anatomy', 'robotics', 'nanotechnology'
-                ]
-            ])
-
-            # Add points from languages
-            language_points = sum(lang.level for lang in self.sheet_language_proficiencies.all())
-            
-            total_skill_points = skill_points + language_points
-            logger.log_info(f"Total skill points (including languages): {total_skill_points}")
-
-            return stat_points, total_skill_points
+            return calculate_points_spent(self)
         except Exception as e:
             logger.log_err(f"Error in calculate_spent_points: {str(e)}")
-            return 0, 0  # Return default values in case of error
+            return 0, 0
 
     def get_remaining_points(self):
         stat_points_spent, skill_points_spent = calculate_points_spent(self)
         remaining_stat_points = max(0, 62 - stat_points_spent)
-        remaining_skill_points = max(0, 86 - skill_points_spent)
+        method = (getattr(self, 'chargen_method', '') or '').strip().lower()
+        from world.chargen_constants import COMPLETE_PACKAGE_SKILL_POOL, EDGERUNNER_SKILL_POOL
+        skill_pool = EDGERUNNER_SKILL_POOL if method == 'edgerunner' else COMPLETE_PACKAGE_SKILL_POOL
+        remaining_skill_points = max(0, skill_pool - skill_points_spent)
         return remaining_stat_points, remaining_skill_points
 
     @classmethod
@@ -170,6 +143,12 @@ class CharacterSheet(SharedMemoryModel):
     family_background = models.CharField(max_length=255, blank=True)
     environment = models.CharField(max_length=255, blank=True)
     family_crisis = models.CharField(max_length=255, blank=True)
+    lifepath_language = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Language added by lifepath (cultural_language_picked); free for skill point calculation.",
+    )
 
     # Role-specific fields
     what_kind_of_rockerboy_are_you = models.CharField(max_length=100, blank=True)

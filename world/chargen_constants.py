@@ -3,6 +3,10 @@
 FASHION_BUDGET = 800
 
 # Chargen point limits (Complete Package / Edgerunner allocation)
+# Complete Package: 62 stat points, 86 skill points (per book p. 88-89)
+# Edgerunner: stats from table, 86 skill points
+COMPLETE_PACKAGE_SKILL_POOL = 86
+EDGERUNNER_SKILL_POOL = 86
 # Stats and (non-role-ability) skills: min 2, max 8
 CHARGEN_STAT_MIN = 2
 CHARGEN_STAT_MAX = 8

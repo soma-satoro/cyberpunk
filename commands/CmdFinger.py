@@ -1,379 +1,295 @@
 from evennia.commands.default.muxcommand import MuxCommand
-from evennia.utils.ansi import ANSIString
-from evennia.utils.utils import crop, time_format
-from world.utils.formatting import header, footer, divider
-from world.utils.time_utils import TIME_MANAGER
+from evennia.utils import utils
+from evennia import SESSION_HANDLER
 from world.utils.search_helpers import search_character
-from time import time
-import datetime
-import re
-from typeclasses.characters import Character
-import pytz
+from evennia.utils.ansi import ANSIString
+import time
+
 
 class CmdFinger(MuxCommand):
     """
-    View or set finger information about a character.
+    Display OOC information about a character.
     
     Usage:
-      +finger <character>
-      +finger/set <field>=<value>
+      +finger <name>
+      +finger me
+      +finger/set <attribute>=<value>
     
-    The +finger command displays public information about a character,
-    including their RP preferences, online times, and other IC/OOC details.
+    Examples:
+      +finger Melvin
+      +finger me
+      +finger/set fame=Princess Angelina Contessa Louisa Francesca Banana Fanna Bobesca the Third
+      +finger/set email=myemail@example.com
+      +finger/set rp-prefs=Whatever goes!
     
-    Standard information shown includes:
-    - Character's full name and current activity status
-    - Player status (approved/unapproved) and alias
-    - Online times and pronouns
-    - RP preferences
-    - Character page information (played by, apparent age, RP hooks, soundtrack)
-    - Wiki page URL
+    This command shows various OOC information about a character. +finger is
+    generally a command that displays OOC information and should not be 
+    considered IC unless game policy specifically says otherwise.
     
-    To set your own finger information, use +finger/set:
-      +finger/set rp_preferences=Anything goes, but prefer dark themes
-      +finger/set online_times=8:30 or 9pm PDT Sunday-Saturday
-      +finger/set pronouns=She/They
-      +finger/set alias=Nic
-      +finger/set rumors=Apparently has connections to a prince
-      +finger/set ic_job=Owner of The Lost and Found
-      
-    Timezone Settings:
-      You can set your timezone using common abbreviations or location codes:
-      +finger/set timezone=PST     (Pacific Standard Time)
-      +finger/set timezone=EST     (Eastern Standard Time)
-      +finger/set timezone=GMT     (Greenwich Mean Time)
-      +finger/set timezone=UTC     (Coordinated Universal Time)
-      
-      Or use location codes:
-      +finger/set timezone=US-East
-      +finger/set timezone=EU-Central
-      +finger/set timezone=Japan
-    
-    You can create any custom field by using +finger/set <fieldname>=<value>.
-    Set a field to @@ to hide it.
-    
-    Note: Some information like the wiki URL, played by, apparent age, RP hooks,
-    and soundtrack are automatically pulled from your character's page and cannot
-    be set using +finger/set.
+    Available attributes that can be set with /set:
+      EMAIL         - Your email address (optional)
+      POSITION      - Your Position
+      AGE           - Your real age
+      FAME          - What you are known for
+      APP-AGE       - Your apparent age
+      PLAN          - Any plans your character may have
+      RP-PREFS      - Any RP preferences that you may have as a person
+      ALTS          - Alternate characters (auto-populated, see +alts command)
+      THEMESONG     - Your Theme Song
+      QUOTE         - A typical quote from your character
+      OFF-HOURS     - When you are usually online
+      TEMPERAMENT   - Your character's temperament
+      VACATION      - The dates you expect to be gone
+      URL           - Your homepage, if any
     """
     
     key = "+finger"
-    aliases = ["finger", "&finger_*"]
+    aliases = ["finger"]
     locks = "cmd:all()"
     help_category = "Chargen & Character Info"
-
-    def format_soundtrack(self, text):
-        """
-        Format soundtrack entries to preserve links and text.
-        
-        Args:
-            text (str): Text containing HTML links
-            
-        Returns:
-            str: Formatted text with URLs and their descriptions
-        """
-        if not text:
-            return ""
-            
-        # Split into lines to handle multiple entries
-        lines = text.split('\n')
-        formatted_lines = []
-        
-        for line in lines:
-            # Extract URL and text from <a> tags
-            link_match = re.search(r'<a href="([^"]+)"[^>]*>(.*?)</a>', line)
-            if link_match:
-                url = link_match.group(1)
-                # Extract text and clean any remaining HTML tags
-                content = re.sub(r'<[^>]+>', '', link_match.group(2))
-                formatted_lines.append(f"{url} {content}")
-            else:
-                # If no link found, just clean the HTML
-                cleaned = re.sub(r'<[^>]+>', '', line)
-                if cleaned.strip():
-                    formatted_lines.append(cleaned)
-        
-        return '\n'.join(formatted_lines)
-
-    def strip_html(self, text):
-        """
-        Strip HTML tags from text while preserving line breaks and meaningful content.
-        
-        Args:
-            text (str): Text to clean
-            
-        Returns:
-            str: Cleaned text
-        """
-        if not text:
-            return ""
-            
-        # Convert <br> and </p> to newlines
-        text = re.sub(r'<br\s*/?>|</p>', '\n', text)
-        
-        # Remove all HTML tags but preserve their content
-        text = re.sub(r'<[^>]+>', '', text)
-        
-        # Fix any excessive newlines
-        text = re.sub(r'\n{3,}', '\n\n', text)
-        
-        # Strip leading/trailing whitespace
-        return text.strip()
-
-    def get_idle_time(self, target):
-        """
-        Calculate idle time in seconds. Returns None if offline.
-        """
-        # Check if account is connected
-        if not target.sessions.count():
-            return None
-            
-        session = target.sessions.all()[0]
-        if not session:
-            return None
-            
-        current_time = time()
-        last_cmd_time = session.cmd_last_visible
-        if last_cmd_time:
-            return int(current_time - last_cmd_time)
-        return None
-
-    def get_last_online(self, target):
-        """
-        Get the last time the character was online.
-        Returns None if the character is currently online or the
-        information is not available.
-        """
-        # If the character is online, return None
-        if target.sessions.count():
-            return None
-            
-        # Get the last_disconnect attribute
-        last_disconnect = target.attributes.get("last_disconnect", None)
-        return last_disconnect
-
-    def format_idle_time(self, seconds):
-        """Format idle time into a readable string."""
-        if seconds is None:
-            return "OFFLINE"
-            
-        hours = seconds // 3600
-        minutes = (seconds % 3600) // 60
-        
-        if hours > 0:
-            return f"{hours}h"
-        elif minutes > 0:
-            return f"{minutes}m"
-        else:
-            return f"{seconds}s"
-
-    def format_last_online(self, timestamp, target):
-        """Format last online time into a readable string.
-        
-        Args:
-            timestamp (float): The timestamp to format
-            target (Character): The character being fingered (not used for timezone)
-        """
-        if timestamp is None:
-            return "OFFLINE"
-            
-        # Create datetime in UTC
-        utc_dt = datetime.datetime.fromtimestamp(timestamp, datetime.timezone.utc)
-        
-        # Get the caller's timezone
-        caller_tz_name = self.caller.attributes.get("timezone", "UTC")
-        try:
-            # Try to get the timezone from pytz
-            tz = pytz.timezone(TIME_MANAGER.normalize_timezone_name(caller_tz_name))
-            # Convert to the caller's timezone
-            local_dt = utc_dt.astimezone(tz)
-            # Format without timezone indicator
-            time_str = local_dt.strftime("%Y-%m-%d %H:%M")
-        except (pytz.exceptions.UnknownTimeZoneError, AttributeError, ValueError):
-            # Fallback to UTC if there's any error
-            time_str = utc_dt.strftime("%Y-%m-%d %H:%M")
-            
-        return f"OFFLINE (Last: {time_str})"
-
+    
+    # Valid finger attributes
+    VALID_ATTRIBUTES = [
+        "email", "position", "age", "fame", "app-age", "plan",
+        "rp-prefs", "themesong", "quote", "off-hours", 
+        "temperament", "vacation", "url"
+    ]
+    
+    # Attribute display names
+    ATTRIBUTE_LABELS = {
+        "email": "E-Mail",
+        "position": "Position",
+        "age": "Age",
+        "fame": "Fame",
+        "app-age": "App-Age",
+        "plan": "Plan",
+        "rp-prefs": "RP-Prefs",
+        "themesong": "Themesong",
+        "quote": "Quote",
+        "off-hours": "Off-Hours",
+        "temperament": "Temperament",
+        "vacation": "Vacation",
+        "url": "URL"
+    }
+    
     def func(self):
+        """Execute the finger command."""
+        
+        # Handle /set switch
+        if "set" in self.switches:
+            self.set_finger_attribute()
+            return
+        
+        # Handle display
         if not self.args:
-            self.caller.msg("Usage: +finger <character> or +finger/set <field>=<value>")
+            self.caller.msg("Usage: +finger <name> or +finger me")
             return
-
-        # Handle setting finger information
-        if self.switches and "set" in self.switches:
-            if "=" not in self.args:
-                self.caller.msg("Usage: +finger/set <field>=<value>")
-                return
-                
-            field, value = self.args.split("=", 1)
-            field = field.strip().lower()
-            value = value.strip()
-            
-            # Special handling for timezone setting
-            if field == "timezone":
-                # Try to validate the timezone
-                normalized_tz = TIME_MANAGER.normalize_timezone_name(value)
-                if not normalized_tz:
-                    self.caller.msg(f"Invalid timezone: {value}. Please use a valid timezone abbreviation (PST, EST, GMT, etc.) or location code (US-East, EU-Central, etc.)")
-                    return
-                try:
-                    # Test if it's a valid timezone
-                    pytz.timezone(normalized_tz)
-                    # Store both the user's input and the normalized version
-                    self.caller.attributes.add("timezone", value.upper())  # Store original input
-                    self.caller.msg(f"Set timezone to: {value.upper()}")
-                    return
-                except pytz.exceptions.UnknownTimeZoneError:
-                    self.caller.msg(f"Invalid timezone: {value}. Please use a valid timezone abbreviation (PST, EST, GMT, etc.) or location code (US-East, EU-Central, etc.)")
-                    return
-            
-            # If value is empty or @@, remove the attribute
-            if not value or value == "@@":
-                self.caller.attributes.remove(f"finger_{field}")
-                self.caller.msg(f"Removed finger_{field}")
-            else:
-                # Set the attribute
-                self.caller.attributes.add(f"finger_{field}", value)
-                self.caller.msg(f"Set finger_{field} to: {value}")
-            return
-
-        # Handle old &finger_ syntax for backward compatibility
-        if self.raw_string.startswith("&finger_"):
-            if "=" not in self.raw_string:
-                self.caller.msg("Usage: +finger/set <field>=<value>")
-                return
-                
-            field = self.raw_string[7:].split(" ")[0]
-            _, value = self.raw_string.split("=", 1)
-            value = value.strip()
-            
-            # If value is empty or @@, remove the attribute
-            if not value or value == "@@":
-                self.caller.attributes.remove(f"finger_{field.lower()}")
-                self.caller.msg(f"Removed finger_{field}")
-            else:
-                # Set the attribute
-                self.caller.attributes.add(f"finger_{field.lower()}", value)
-                self.caller.msg(f"Set finger_{field} to: {value}")
-            return
-
-        # Handle '+finger me'
-        if self.args.lower().strip() == "me":
+        
+        # Determine target
+        if self.args.strip().lower() == "me":
             target = self.caller
         else:
-            # Clean up the search term by removing quotes
-            search_term = self.args.strip("'\"").strip()
-
-            # search_character handles name, dbref, and alias (both Evennia's and custom finger alias)
-            target = search_character(self.caller, search_term, global_search=True, quiet=True)
-
+            target = search_character(self.caller, self.args.strip())
             if not target:
-                self.caller.msg(f"Could not find a character named '{search_term}'.")
                 return
-
-        # Get basic character info - modified to handle None case
+        
+        # Display finger information
+        self.display_finger(target)
+    
+    def set_finger_attribute(self):
+        """Set a finger attribute for the caller."""
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: +finger/set <attribute>=<value>")
+            self.caller.msg(f"Valid attributes: {', '.join(self.VALID_ATTRIBUTES)}")
+            return
+        
+        # Parse the attribute and value
+        attr_name, value = self.args.split("=", 1)
+        attr_name = attr_name.strip().lower()
+        value = value.strip()
+        
+        # Validate attribute name
+        if attr_name not in self.VALID_ATTRIBUTES:
+            self.caller.msg(f"Invalid attribute '{attr_name}'.")
+            self.caller.msg(f"Valid attributes: {', '.join(self.VALID_ATTRIBUTES)}")
+            return
+        
+        # Special handling for email - can be set to "unlisted"
+        if attr_name == "email" and value.lower() == "unlisted":
+            value = "(unlisted)"
+        
+        # Store the attribute
+        finger_data = self.caller.attributes.get("finger_data", default={})
+        finger_data[attr_name] = value
+        self.caller.attributes.add("finger_data", finger_data)
+        
+        display_name = self.ATTRIBUTE_LABELS.get(attr_name, attr_name.title())
+        self.caller.msg(f"Your {display_name} has been set to: {value}")
+    
+    def get_session_info(self, target):
+        """Get session information for a character."""
+        # Get all sessions and find the one for this character
+        all_sessions = SESSION_HANDLER.get_sessions()
+        
+        target_session = None
+        for session in all_sessions:
+            if session.logged_in and session.get_puppet() == target:
+                target_session = session
+                break
+        
+        if not target_session:
+            return None, None, False
+        
+        # Calculate connection time and idle time
+        delta_conn = time.time() - target_session.conn_time
+        delta_idle = time.time() - target_session.cmd_last_visible
+        
+        on_time = utils.time_format(delta_conn, 0)
+        idle_time = utils.time_format(delta_idle, 1)
+        
+        return on_time, idle_time, True
+    
+    def get_mail_info(self, target):
+        """Get mail information for a character."""
+        # Try to get unread mail count
         try:
-            full_name = target.db.stats.get('identity', {}).get('personal', {}).get('Full Name', {}).get('perm', target.key)
-            if full_name is None:
-                full_name = target.key
-        except AttributeError:
-            full_name = target.key
+            if hasattr(target, 'account') and target.account:
+                unread = 0
+                total = 0
+                
+                # Check if mail system is available
+                from evennia.contrib.game_systems.mail.mail import MailDB
+                
+                # Get all mail for this account
+                mails = MailDB.objects.get_all_mail(target.account)
+                total = len(mails)
+                unread = sum(1 for m in mails if not m.db_date_read)
+                
+                return f"{unread} unread / {total} total"
+        except:
+            pass
         
-        # Calculate idle time
-        idle_seconds = self.get_idle_time(target)
+        return "N/A"
+    
+    def escape_ansi(self, text):
+        """Escape ANSI codes by doubling pipe characters."""
+        if text:
+            return str(text).replace('|', '||')
+        return text
+    
+    def display_finger(self, target):
+        """Display finger information for a target."""
+        # Get finger data
+        finger_data = target.attributes.get("finger_data", default={})
         
-        # Get either idle time or last online time if offline
-        if idle_seconds is not None:
-            idle_str = self.format_idle_time(idle_seconds)
+        # Get session info
+        on_time, idle_time, is_online = self.get_session_info(target)
+        
+        # Get mail info
+        mail_info = self.get_mail_info(target)
+        
+        # Get alias
+        alias = target.attributes.get("alias", None)
+        
+        # Get sex/gender
+        sex = finger_data.get("sex", "None Set")
+        
+        # Get location
+        location = "Unknown"
+        if target.location:
+            # Escape ANSI codes in location name
+            location = self.escape_ansi(target.location.key)
+        
+        # Get alts (from the +alts system)
+        alts = target.db.public_alts or []
+        alts_display = ", ".join(alts) if alts else "None listed"
+        
+        # Build the display (blue/yellow/white color scheme)
+        output = []
+        
+        # Header with character name (escape ANSI) - blue borders, yellow name
+        name_clean = self.escape_ansi(target.name)
+        if len(name_clean) > 40:
+            name_clean = name_clean[:37] + "..."
+        name_part = f"[ {name_clean} ]"
+        header_line = f"|b<---======##======================|n|y{name_part}|n|b======================##======--->|n"
+        output.append(header_line)
+        
+        # First info section
+        left_col = []
+        right_col = []
+        
+        # Left column - labels in yellow, values in white
+        left_col.append(f"|yAlias:|n {self.escape_ansi(alias) if alias else 'None'}")
+        left_col.append(f"|ySex:|n {self.escape_ansi(sex)}")
+        
+        email = self.escape_ansi(finger_data.get("email", "(unlisted)"))
+        left_col.append(f"|yE-Mail:|n {email}")
+        
+        # Right column
+        if is_online:
+            right_col.append(f"|yOn for:|n {on_time}          |yIdle:|n {idle_time}")
         else:
-            last_online = self.get_last_online(target)
-            idle_str = self.format_last_online(last_online, target)
+            right_col.append("|wNot currently online|n")
         
-        # Start building the display with blue dashes
-        string = ANSIString("|b=|n" * 78 + "\n")
+        right_col.append(f"|yMail:|n {mail_info}")
         
-        # Header line with name and idle time
-        name_display = f"{target.get_display_name(self.caller)}'s +finger"
-        string += f"|y{name_display:^78}|n\n"
+        # Combine columns (use || for literal pipe - single | triggers ANSI when followed by M, O, etc.)
+        max_lines = max(len(left_col), len(right_col))
+        for i in range(max_lines):
+            left = left_col[i] if i < len(left_col) else ""
+            right = right_col[i] if i < len(right_col) else ""
+            
+            # Calculate visible length (without ANSI codes)
+            left_visible_len = len(ANSIString(left).clean())
+            right_visible_len = len(ANSIString(right).clean())
+            
+            # Add padding based on visible length
+            left_padded = left + " " * (38 - left_visible_len)
+            right_padded = right + " " * (39 - right_visible_len)
+            
+            # Combine with separator (|| = literal pipe to avoid |M, |O etc. being interpreted as ANSI)
+            line = f"{left_padded}||{right_padded}"
+            output.append(line)
         
-        # Full name and idle time line
-        string += f"|wFull Name|n: {full_name:<20} | |wActivity|n: {idle_str}\n"
+        # Divider - blue
+        output.append("|b<-------------=============++++++++++++++++++++++++=============------------>|n")
         
-        # Red divider line
-        string += ANSIString("|b=|n" * 78 + "\n")
+        # Location and RP-Prefs
+        if target.location:
+            output.append(f"|yLocation:|n       {location}")
         
-        # Status and Alias line
-        status = "Approved Player" if target.db.approved else "Unapproved Player"
-        alias = target.attributes.get("alias", "")
-        string += f"|wStatus|n: {status:<23} | |wAlias|n: {alias}\n"
+        rp_prefs = finger_data.get("rp-prefs", None)
+        if rp_prefs:
+            output.append(f"|yRP-Prefs:|n       {self.escape_ansi(rp_prefs)}")
         
-        string += ANSIString("|b=|n" * 78 + "\n")
-        
-        # Standard fields
-        fields = [
-            ('Online Times', target.attributes.get("finger_online_times", "")),
-            ('Pronouns', target.attributes.get("finger_pronouns", "")),
-            ('RP Preferences', target.attributes.get("finger_rp_preferences", "")),
-            # Character page attributes
-            ('Played By', target.attributes.get("appears_as", "")),
-            ('Apparent Age', target.attributes.get("apparent_age", "")),
-            ('RP Hooks', self.strip_html(target.attributes.get("rp_hooks", ""))),
-            ('Soundtrack', self.format_soundtrack(target.attributes.get("soundtrack", ""))),
-            # Wiki URL
-            ('Wiki', f"https://nightcitymux.com/characters/detail/{target.id}/{target.id}/"),
+        # Other finger attributes
+        display_attrs = [
+            ("position", "Position"),
+            ("age", "Age"),
+            ("app-age", "Apparent Age"),
+            ("fame", "Fame"),
+            ("plan", "Plan"),
+            ("themesong", "Themesong"),
+            ("quote", "Quote"),
+            ("off-hours", "Off-Hours"),
+            ("temperament", "Temperament"),
+            ("vacation", "Vacation"),
+            ("url", "URL")
         ]
         
-        for field, value in fields:
-            if value:  # Only display fields that have values
-                # Format multi-line fields appropriately
-                if isinstance(value, str) and '\n' in value:
-                    string += f"|w{field}|n:\n{value}\n"
-                else:
-                    string += f"|w{field}|n: {value}\n"
+        for attr_key, attr_label in display_attrs:
+            value = finger_data.get(attr_key, None)
+            if value:
+                output.append(f"|y{attr_label + ':':<16}|n{self.escape_ansi(value)}")
         
-        # Get remaining custom fields
-        custom_fields = {}
-        for attr in target.attributes.all():
-            if (attr.key.startswith("finger_") and 
-                attr.key[7:] not in ['alias', 'online_times', 'pronouns', 'rp_preferences'] and 
-                attr.value != "@@"):
-                custom_fields[attr.key[7:]] = self.strip_html(attr.value)
+        # Alts section
+        if alts:
+            output.append(f"|yAlts:|n           {self.escape_ansi(alts_display)}")
         
-        # Add custom fields if they exist
-        if custom_fields:
-            string += "\n"  # Add blank line before custom fields
-            for field, value in sorted(custom_fields.items()):
-                field_name = field.replace('_', ' ').title()
-                string += f"|w{field_name}|n: {value}\n"
+        # Bottom divider - blue
+        output.append("|b<-------------=============++++++++++++++++++++++++=============------------>|n")
         
-        # Bottom border
-        string += ANSIString("|b=|n" * 78 + "\n")
-        
-        self.caller.msg(string)
+        # Send the output
+        self.caller.msg("\n".join(output))
 
-    def at_pre_cmd(self):
-        """Handle the &finger_<field> me=<value> syntax"""
-        if self.raw_string.startswith("&finger_"):
-            try:
-                field = self.raw_string[7:].split(" ")[0]
-                if "=" not in self.raw_string:
-                    self.caller.msg("Usage: &finger_<field> me=<value>")
-                    return True
-                
-                target, value = self.raw_string.split("=", 1)
-                target = target.split(" ")[-1].strip()
-                
-                if target.lower() != "me":
-                    self.caller.msg("You can only set your own finger information.")
-                    return True
-                
-                self.caller.attributes.add(f"finger_{field.lower()}", value.strip())
-                self.caller.msg(f"Set finger_{field} to: {value.strip()}")
-                return True
-                
-            except Exception as e:
-                self.caller.msg(f"Error setting finger field: {str(e)}")
-                return True
-        
-        return False 

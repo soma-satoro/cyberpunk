@@ -64,6 +64,20 @@ IP_COST_ROLE_ABILITY = {i: i * 60 for i in range(1, 11)}
 # Attributes go 1-10, so raising INT from 1 to 2 costs 40 (cost for level 2). Yes.
 IP_COST_ATTRIBUTE = IP_COST_TYPICAL
 
+# Skills that require an instance (e.g. local_expert(Night City), play_instrument(Guitar), martial_arts(Krav Maga))
+SKILLS_REQUIRING_INSTANCE = frozenset(["local_expert", "play_instrument", "martial_arts"])
+
+
+def parse_skill_instance(stat_name):
+    """Parse 'skill(instance)' format. Returns (base_skill, instance) or (base_skill, None) if no instance."""
+    if not stat_name or "(" not in stat_name or ")" not in stat_name:
+        base = normalize_stat_name(stat_name) if stat_name else None
+        return (base, None)
+    idx = stat_name.index("(")
+    base = normalize_stat_name(stat_name[:idx])
+    instance = stat_name[idx + 1 : stat_name.rindex(")")].strip()
+    return (base, instance) if instance else (base, None)
+
 
 def normalize_stat_name(name):
     """Convert stat name to internal format (lowercase, underscores)."""
@@ -89,7 +103,8 @@ def get_ip_cost(stat_name, current_level, is_attribute=False, is_role_ability=Fa
     if next_level > 10:
         return None, None
 
-    stat_key = normalize_stat_name(stat_name)
+    base, _ = parse_skill_instance(stat_name)
+    stat_key = base or normalize_stat_name(stat_name)
     if not stat_key:
         return None, None
 
@@ -109,26 +124,37 @@ def get_ip_cost(stat_name, current_level, is_attribute=False, is_role_ability=Fa
 
 def is_valid_stat(stat_name):
     """Check if stat_name is a valid purchasable stat."""
-    key = normalize_stat_name(stat_name)
-    return key in IP_ATTRIBUTES or key in IP_SKILLS or key in IP_ROLE_ABILITIES
+    base, _ = parse_skill_instance(stat_name)
+    if not base:
+        return False
+    return base in IP_ATTRIBUTES or base in IP_SKILLS or base in IP_ROLE_ABILITIES
 
 
 def get_stat_display_name(stat_name):
-    """Get display name for a stat (e.g. handgun -> Handgun)."""
-    key = normalize_stat_name(stat_name)
-    if not key:
+    """Get display name for a stat (e.g. handgun -> Handgun, local_expert(Night City) -> Local Expert (Night City))."""
+    base, instance = parse_skill_instance(stat_name)
+    if not base:
         return stat_name
-    return key.replace("_", " ").title()
+    display = base.replace("_", " ").title()
+    if instance:
+        display += f" ({instance})"
+    return display
 
 
 def get_character_stat_value(character, stat_name):
     """Get current value of a stat from character (works with both typeclass and sheet).
     Missing skills are treated as level 0 (so buying them goes 0 -> 1).
+    For local_expert and play_instrument, use get_skill_instance when instance is provided.
     """
-    key = normalize_stat_name(stat_name)
-    if not key:
+    base, instance = parse_skill_instance(stat_name)
+    if not base:
         return None
 
+    # Skill instances (local_expert, play_instrument) - use character's get_skill_instance
+    if base in SKILLS_REQUIRING_INSTANCE and instance and hasattr(character, "get_skill_instance"):
+        return character.get_skill_instance(base, instance)
+
+    key = base
     # Try typeclass first (db.skills or db.attribute)
     if hasattr(character, "db"):
         if key in IP_ATTRIBUTES:
@@ -145,11 +171,19 @@ def get_character_stat_value(character, stat_name):
 
 
 def set_character_stat_value(character, stat_name, value):
-    """Set stat value on character. Mirrors to character_sheet if present."""
-    key = normalize_stat_name(stat_name)
-    if not key:
+    """Set stat value on character. Mirrors to character_sheet if present.
+    For local_expert and play_instrument, use set_skill_instance when instance is provided.
+    """
+    base, instance = parse_skill_instance(stat_name)
+    if not base:
         return False
 
+    # Skill instances (local_expert, play_instrument) - use character's set_skill_instance
+    if base in SKILLS_REQUIRING_INSTANCE and instance and hasattr(character, "set_skill_instance"):
+        character.set_skill_instance(base, instance, value)
+        return True
+
+    key = base
     if hasattr(character, "db"):
         if key in IP_ATTRIBUTES:
             setattr(character.db, key, value)
@@ -158,7 +192,7 @@ def set_character_stat_value(character, stat_name, value):
             skills[key] = value
             character.db.skills = skills
 
-        # Mirror to character sheet
+        # Mirror to character sheet (skip for skill instances - they don't have sheet columns)
         if hasattr(character, "character_sheet") and character.character_sheet:
             sheet = character.character_sheet
             if hasattr(sheet, key):

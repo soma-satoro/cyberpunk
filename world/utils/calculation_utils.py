@@ -109,10 +109,14 @@ def calculate_points_spent(character):
     stat_points = sum(getattr(character, attr, 0) for attr in STAT_MAPPING.values())
     double_cost_skills = ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
     from world.chargen_constants import ROLE_ABILITY_FREE_POINTS, ROLE_ABILITY_SKILLS
+    from world.cyberpunk_constants import STATS
+    core_stats = frozenset(STATS)
     role = (getattr(character, 'role', None) or "").strip()
     role_ability_skill = ROLE_ABILITY_SKILLS.get(role) if role else None
     skill_points = 0
     for skill in SKILL_MAPPING.values():
+        if skill in core_stats:
+            continue  # Never count stats as skills (e.g. technology)
         val = getattr(character, skill, 0) or 0
         mult = 2 if skill in double_cost_skills else 1
         if skill == role_ability_skill:
@@ -121,11 +125,52 @@ def calculate_points_spent(character):
         else:
             skill_points += int(val) * mult
 
-    # Add points from languages (CharacterSheet uses sheet_language_proficiencies)
+    # Add points from languages. Streetslang 4 (automatic) and lifepath language are free.
     if hasattr(character, 'sheet_language_proficiencies'):
-        skill_points += sum(lang.level for lang in character.sheet_language_proficiencies.all())
+        lifepath_lang = getattr(character, 'lifepath_language', None) or ""
+        # Sheet may link to character; character has db.lifepath
+        if not lifepath_lang and getattr(character, 'character', None):
+            try:
+                lp = getattr(character.character.db, 'lifepath', None) or {}
+                lifepath_lang = lp.get("cultural_language_picked", "") or ""
+            except Exception:
+                pass
+        skill_points += calculate_language_skill_points(
+            character.sheet_language_proficiencies.all(),
+            lifepath_language=lifepath_lang,
+        )
     
     return stat_points, skill_points
+
+
+def calculate_language_skill_points(language_items, lifepath_language=""):
+    """
+    Calculate skill points spent on languages during chargen.
+    Streetslang 4 (automatic from chargen) and the lifepath language are free.
+    All other languages cost 1 skill point per rank.
+    language_items: iterable of (name, level) or objects with .language.name and .level
+    lifepath_language: name of language added by lifepath (free)
+    """
+    lifepath_lang = (lifepath_language or "").strip().lower()
+    points = 0
+    for item in language_items:
+        if hasattr(item, "language") and hasattr(item, "level"):
+            name = (item.language.name or "").strip().lower()
+            level = int(item.level or 0)
+        else:
+            name, level = item[0], int(item[1] or 0)
+            name = (name or "").strip().lower()
+        if level <= 0:
+            continue
+        # Streetslang at 4 or less: free (automatic from chargen)
+        if name == "streetslang" and level <= 4:
+            continue
+        # Lifepath language: free
+        if lifepath_lang and name == lifepath_lang:
+            continue
+        points += level
+    return points
+
 
 def get_remaining_points(character, is_edgerunner=False):
     stat_points_spent, skill_points_spent = calculate_points_spent(character)

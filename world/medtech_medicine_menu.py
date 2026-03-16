@@ -15,24 +15,28 @@ from world.chargen_constants import (
 MEDICINE_RANK_EDGERUNNER = 4
 
 
+def _get_menu_params(caller, kwargs):
+    """Get method, role, full_name from kwargs or EvMenu (EvMenu does not pass constructor kwargs to startnode)."""
+    method = kwargs.get("method")
+    role = kwargs.get("role")
+    full_name = kwargs.get("full_name", "")
+    if method is None and hasattr(caller, "ndb") and getattr(caller.ndb, "_evmenu", None):
+        menu = caller.ndb._evmenu
+        method = getattr(menu, "method", "edgerunner")
+        role = role or getattr(menu, "role", "Medtech")
+        full_name = full_name or getattr(menu, "full_name", "")
+    return method or "edgerunner", role or "Medtech", full_name or ""
+
+
 def menunode_medicine_allocation(caller, raw_string, **kwargs):
     """
     Display Medicine specialty allocation. Add one point per choice (1: Surgery, 2: Pharma, 3: Cryo).
     """
-    method = kwargs.get("method", "edgerunner")
-    role = kwargs.get("role", "Medtech")
-    full_name = kwargs.get("full_name", "")
+    method, role, full_name = _get_menu_params(caller, kwargs)
     surgery = kwargs.get("surgery", 0)
     pharma = kwargs.get("pharma", 0)
     cryo = kwargs.get("cryo", 0)
     points_allocated = (surgery or 0) + (pharma or 0) + (cryo or 0)
-
-    # Get from menu if first call
-    if method is None and hasattr(caller, "ndb") and caller.ndb._evmenu:
-        menu = caller.ndb._evmenu
-        method = getattr(menu, "method", "edgerunner")
-        role = getattr(menu, "role", "Medtech")
-        full_name = getattr(menu, "full_name", "")
 
     medicine = MEDICINE_RANK_EDGERUNNER
     remaining = medicine - points_allocated
@@ -103,9 +107,7 @@ def menunode_done(caller, raw_string, **kwargs):
     surgery = kwargs.get("surgery", 0)
     pharma = kwargs.get("pharma", 0)
     cryo = kwargs.get("cryo", 0)
-    method = kwargs.get("method", "edgerunner")
-    role = kwargs.get("role", "Medtech")
-    full_name = kwargs.get("full_name", "")
+    method, role, full_name = _get_menu_params(caller, kwargs)
 
     caller.ndb._chargen_medicine_specialties = {"surgery": surgery, "pharma": pharma, "cryo": cryo}
     caller.ndb._chargen_params = (method, role, full_name)

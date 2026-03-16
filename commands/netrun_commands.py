@@ -312,6 +312,21 @@ class CmdNet(MuxCommand):
     def _do_jackout(self, unsafe=False):
         state = self._get_state()
         arch = self._current_architecture()
+        # Move character back to room and destroy body object
+        body_id = state.get("body_id")
+        entry_loc_id = state.get("entry_location_id")
+        if body_id:
+            body = evennia.search_object(f"#{body_id}")
+            if body:
+                body = body[0]
+                # Move character back to room (body's location) before destroying body
+                room = body.location
+                if not room and entry_loc_id:
+                    room_match = evennia.search_object(f"#{entry_loc_id}")
+                    room = room_match[0] if room_match else None
+                if room:
+                    self.caller.move_to(room, quiet=True)
+                body.delete()
         self._clear_state()
         if unsafe:
             self.caller.msg("|rUnsafe jack out! Neural backlash tears through your nervous system.|n")
@@ -366,10 +381,23 @@ class CmdNet(MuxCommand):
                 self.caller.msg("Missing required netrunning gear: " + ", ".join(missing))
                 return
 
+        # Create body object in room (physical body left behind while in the net)
+        room = self.caller.location
+        body_key = f"{self.caller.account.username}'s Body" if self.caller.account else "Body"
+        body = evennia.create_object(
+            "typeclasses.objects.Object",
+            key=body_key,
+            location=room,
+        )
+        body.db.desc = "Sits motionless, eyes glazed, chrome light flickering in their gaze as they're jacked into the NET."
+        # Move character into body so room shows body, not character
+        self.caller.move_to(body, quiet=True)
+
         state = {
             "active": True,
             "architecture_id": arch.id,
-            "entry_location_id": self.caller.location.id if self.caller.location else None,
+            "entry_location_id": room.id if room else None,
+            "body_id": body.id,
             "floor": 1,
             "active_programs": {},
             "cleared_passwords": [],
