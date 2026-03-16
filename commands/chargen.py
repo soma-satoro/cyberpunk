@@ -221,7 +221,13 @@ class CmdChargen(MuxCommand):
                 self.caller, method, role, full_name,
                 on_complete=self._on_complete_package_medicine_menu_complete
             ):
-                return  # Medicine menu running; on exit -> create_character
+                return  # Medicine menu running; on exit -> skill instances -> create_character
+        if method == "complete_package":
+            if start_edgerunner_skill_instances_menu(
+                self.caller, method, role, full_name,
+                on_complete=self._on_skill_instances_menu_complete
+            ):
+                return  # Skill instances menu; on exit -> create_character
         self.create_character(method, role, full_name)
 
     def _on_gear_menu_complete(self, caller, menu=None):
@@ -251,15 +257,15 @@ class CmdChargen(MuxCommand):
         # If no params (menu was aborted?), do nothing
 
     def _on_complete_package_medicine_menu_complete(self, caller, menu=None):
-        """Called when Complete Package Medtech medicine menu exits. Run create_character with specialties."""
+        """Called when Complete Package Medtech medicine menu exits. Chain to skill instances menu."""
         if not hasattr(caller.ndb, "_chargen_params") or not hasattr(caller.ndb, "_chargen_medicine_specialties"):
             return  # User aborted - don't create character
         method, role, full_name = caller.ndb._chargen_params
-        medicine_specialties = caller.ndb._chargen_medicine_specialties
-        for key in ("_chargen_params", "_chargen_medicine_specialties"):
-            if hasattr(caller.ndb, key):
-                delattr(caller.ndb, key)
-        self.create_character(method, role, full_name, medicine_specialties=medicine_specialties)
+        # Do NOT clear ndb - skill instances menu's on_complete will use both
+        start_edgerunner_skill_instances_menu(
+            caller, method, role, full_name,
+            on_complete=self._on_skill_instances_menu_complete
+        )
 
     def _on_skill_instances_menu_complete(self, caller, menu=None):
         """Called when skill instances menu exits. Run create_character with all gathered data."""
@@ -332,7 +338,11 @@ class CmdChargen(MuxCommand):
                     skill_instance_choices=skill_instance_choices,
                 )
             else:  # complete_package
-                result = self.complete_package_chargen(char, sheet, medicine_specialties=medicine_specialties)
+                result = self.complete_package_chargen(
+                    char, sheet,
+                    medicine_specialties=medicine_specialties,
+                    skill_instance_choices=skill_instance_choices,
+                )
             
             self.caller.msg(result)
             return True
@@ -448,25 +458,38 @@ class CmdChargen(MuxCommand):
             f"Use 'sheet' to view your full character details, 'inv' to view inventory, and 'inv/balance' to check your money."
         )
 
-    def complete_package_chargen(self, char, sheet, medicine_specialties=None):
+    def complete_package_chargen(self, char, sheet, medicine_specialties=None, skill_instance_choices=None):
         """Create character using complete package method."""
         # Set default stats (all 1's, already handled at character creation)
         
         # Set eurodollars
         char.db.eurodollars = 2550
         
-        # Set default skills to 2
+        # Set default skills to 2 (local_expert handled via skill_instance_choices)
         default_skills = [
             'athletics', 'brawling', 'concentration', 'conversation', 'education',
-            'evasion', 'first_aid', 'human_perception', 'local_expert', 'perception',
+            'evasion', 'first_aid', 'human_perception', 'perception',
             'persuasion', 'stealth'
         ]
         
         for skill in default_skills:
             char.set_skill(skill, 2)
         
-        # Set role ability to 4 (free points per rules)
+        # Local Expert, Play Instrument (Rockerboy), Science (Tech/Medtech) from skill instances menu
         role = getattr(char.db, 'role', None) or getattr(sheet, 'role', None)
+        skill_instance_choices = skill_instance_choices or {}
+        local_expert_area = skill_instance_choices.get("local_expert") or "Unknown"
+        char.set_skill_instance("local_expert", local_expert_area, 2)
+        if role == "Rockerboy":
+            play_inst = skill_instance_choices.get("play_instrument") or "guitar"
+            char.set_skill_instance("play_instrument", play_inst, 2)
+        if role in ("Tech", "Medtech"):
+            science_skill = skill_instance_choices.get("science") or "zoology"
+            char.set_skill(science_skill, 2)
+            if hasattr(sheet, science_skill):
+                setattr(sheet, science_skill, 2)
+        
+        # Set role ability to 4 (free points per rules)
         if role:
             role_ability_skill = ROLE_ABILITY_SKILLS.get(role)
             if role_ability_skill:

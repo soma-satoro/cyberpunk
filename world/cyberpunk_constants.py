@@ -257,7 +257,7 @@ ROLE_SKILLS = {
         'stealth': 2
     },
     "Medtech": {
-        'medicine': 4,  # Role ability: 4 free; specialties (surgery/pharma/cryo) allocated via selfstat
+        'medicine': 4,  # Role ability: 4 free; Surgery/Medical Tech derived from specialties (surgery/pharma/cryo)
         'athletics': 2,
         'basic_tech': 2,
         'brawling': 2,
@@ -268,7 +268,7 @@ ROLE_SKILLS = {
         'first_aid': 2,
         'human_perception': 2,
         'local_expert': 2,
-        'paramedic': 2,
+        # paramedic removed: Medtech uses Medicine + specialties (Surgery, Medical Tech) instead
         'perception': 2,
         'persuasion': 2,
         'pick_lock': 2,

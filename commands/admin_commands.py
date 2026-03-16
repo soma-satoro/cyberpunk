@@ -306,27 +306,46 @@ class CmdHeal(AdminCommand):
     Heal yourself or another character.
 
     Usage:
-      heal <character> <amount>
+      heal <name>=<amount>   (staff: any character; player: own characters only)
+      heal <amount>         (players: heal yourself)
 
-    This command allows you to heal a character of HP damage.
+    Players can heal only their own characters. Staff can heal any character.
     """
 
     key = "heal"
-    locks = "cmd:perm(Admin)"
+    locks = "cmd:all()"
     help_category = "Admin"
 
     def func(self):
-        if not self.args or len(self.args.split()) != 2:
-            self.caller.msg("Usage: heal <character> <amount>")
+        if not self.args:
+            self.caller.msg("Usage: heal <name>=<amount> or heal <amount>")
             return
 
-        target_name, heal_amount = self.args.split()
-        target = self.caller.search(target_name, global_search=True)
-        if not target:
-            return
+        if "=" in self.args:
+            target_name, amount_str = self.args.split("=", 1)
+            target_name = target_name.strip()
+            amount_str = amount_str.strip()
+            if not target_name:
+                self.caller.msg("Usage: heal <name>=<amount>")
+                return
+            target = self.caller.search(target_name, global_search=True)
+            if not target:
+                return
+        else:
+            # Player shorthand: heal <amount> targets self
+            amount_str = self.args.strip()
+            target = self.caller
+
+        # Non-staff can only heal their own characters
+        if not self.caller.check_perm("Admin"):
+            caller_account = getattr(self.caller, "account", self.caller)
+            target_account = getattr(target, "account", None)
+            if target_account != caller_account:
+                self.caller.msg("You can only heal your own characters.")
+                return
 
         try:
-            heal_amount = int(heal_amount)
+            heal_amount = int(amount_str)
         except ValueError:
             self.caller.msg("Heal amount must be a number.")
             return
@@ -352,38 +371,58 @@ class CmdHeal(AdminCommand):
         except Exception as e:
             self.caller.msg(f"Error healing {target.name}: {str(e)}")
 
-class CmdHurt(AdminCommand):
+class CmdHarm(AdminCommand):
     """
     Inflict damage on yourself or another character.
 
     Usage:
-      hurt <character> <amount>
+      harm <name>=<amount>   (staff: any character; player: own characters only)
+      harm <amount>         (players: harm yourself)
 
-    This command allows you to inflict damage on a character.
+    Players can harm only their own characters. Staff can harm any character.
     """
 
-    key = "hurt"
-    locks = "cmd:perm(Admin)"
+    key = "harm"
+    aliases = ["hurt"]
+    locks = "cmd:all()"
     help_category = "Admin"
 
     def func(self):
-        if not self.args or len(self.args.split()) != 2:
-            self.caller.msg("Usage: hurt <character> <amount>")
+        if not self.args:
+            self.caller.msg("Usage: harm <name>=<amount> or harm <amount>")
             return
 
-        target_name, damage = self.args.split()
-        target = self.caller.search(target_name, global_search=True)
-        if not target:
-            return
+        if "=" in self.args:
+            target_name, amount_str = self.args.split("=", 1)
+            target_name = target_name.strip()
+            amount_str = amount_str.strip()
+            if not target_name:
+                self.caller.msg("Usage: harm <name>=<amount>")
+                return
+            target = self.caller.search(target_name, global_search=True)
+            if not target:
+                return
+        else:
+            # Player shorthand: harm <amount> targets self
+            amount_str = self.args.strip()
+            target = self.caller
+
+        # Non-staff can only harm their own characters
+        if not self.caller.check_perm("Admin"):
+            caller_account = getattr(self.caller, "account", self.caller)
+            target_account = getattr(target, "account", None)
+            if target_account != caller_account:
+                self.caller.msg("You can only harm your own characters.")
+                return
 
         try:
-            damage = int(damage)
+            damage = int(amount_str)
         except ValueError:
-            self.caller.msg("Damage must be a number.")
+            self.caller.msg("Damage amount must be a number.")
             return
 
         if damage <= 0:
-            self.caller.msg("Damage must be a positive number.")
+            self.caller.msg("Damage amount must be a positive number.")
             return
 
         if not hasattr(target, 'character_sheet'):
@@ -398,14 +437,14 @@ class CmdHurt(AdminCommand):
             
             actual_damage = old_hp - cs._current_hp
             
-            self.caller.msg(f"You hurt {target.name} for {actual_damage} damage.")
-            target.msg(f"{self.caller.name} hurt you for {actual_damage} damage.")
+            self.caller.msg(f"You harmed {target.name} for {actual_damage} damage.")
+            target.msg(f"{self.caller.name} harmed you for {actual_damage} damage.")
 
             if cs._current_hp == 0:
                 self.caller.msg(f"{target.name} has been incapacitated!")
                 target.msg("You have been incapacitated!")
         except Exception as e:
-            self.caller.msg(f"Error hurting {target.name}: {str(e)}")
+            self.caller.msg(f"Error harming {target.name}: {str(e)}")
 
 class CmdApprove(AdminCommand):
     """

@@ -114,16 +114,20 @@ def calculate_points_spent(character):
     role = (getattr(character, 'role', None) or "").strip()
     role_ability_skill = ROLE_ABILITY_SKILLS.get(role) if role else None
     skill_points = 0
+    # Medtech: Surgery and Medical Tech are derived from Medicine specialties. Never count paramedic.
+    medtech_derived_skills = frozenset(("paramedic", "surgery", "medical_tech"))
     for skill in SKILL_MAPPING.values():
         if skill in core_stats:
             continue  # Never count stats as skills (e.g. technology)
-        val = getattr(character, skill, 0) or 0
+        if role == "Medtech" and skill in medtech_derived_skills:
+            continue  # Derived from Medicine allocation; avoid double-count
+        val = int(getattr(character, skill, 0) or 0)
         mult = 2 if skill in double_cost_skills else 1
         if skill == role_ability_skill:
-            billable = max(0, int(val) - ROLE_ABILITY_FREE_POINTS)
+            billable = max(0, val - ROLE_ABILITY_FREE_POINTS)
             skill_points += billable * mult
         else:
-            skill_points += int(val) * mult
+            skill_points += val * mult
 
     # Add points from languages. Streetslang 4 (automatic) and lifepath language are free.
     if hasattr(character, 'sheet_language_proficiencies'):

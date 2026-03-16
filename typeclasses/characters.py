@@ -1227,8 +1227,13 @@ class Character(DefaultCharacter):
         core_stats = frozenset(STATS)
         known_skills = frozenset(SKILL_MAPPING.values())
         skills = dict(self.db.skills or {})
-        # Remove stats and non-skill keys that erroneously ended up in skills
-        to_remove = [k for k in skills if k in core_stats or k not in known_skills]
+        role = (self.db.role or "").strip()
+        # Remove stats, non-skill keys, and Medtech Medicine specialty allocations (they're not skills)
+        medtech_specialty_keys = frozenset(("medicine_surgery", "medicine_pharma", "medicine_cryo"))
+        to_remove = [
+            k for k in skills
+            if k in core_stats or k not in known_skills or (role == "Medtech" and k in medtech_specialty_keys)
+        ]
         if to_remove:
             for k in to_remove:
                 del skills[k]
@@ -1243,11 +1248,15 @@ class Character(DefaultCharacter):
                 if "(" in skill_instance:
                     skills_with_instances.add(skill_instance.split("(")[0])
         skill_points = 0
-        role = (self.db.role or "").strip()
         role_ability_skill = ROLE_ABILITY_SKILLS.get(role) if role else None
+        # Medtech: Surgery and Medical Tech are derived from Medicine specialties (medicine_surgery,
+        # medicine_pharma, medicine_cryo). Never count paramedic, surgery, or medical_tech.
+        medtech_derived_skills = frozenset(("paramedic", "surgery", "medical_tech"))
         for skill, value in skills.items():
             if skill in skills_with_instances:
                 continue  # Instance counts instead; avoid double-count
+            if role == "Medtech" and skill in medtech_derived_skills:
+                continue  # Derived from Medicine allocation; avoid double-count
             try:
                 val = int(value) if value is not None else 0
             except (TypeError, ValueError):

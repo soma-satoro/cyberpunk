@@ -33,9 +33,10 @@ def menunode_local_expert(caller, raw_string, **kwargs):
     """Prompt for Local Expert area - everyone has this skill."""
     method, role, full_name = _get_menu_params(caller, kwargs)
     choices = kwargs.get("choices", {})
+    method_label = "Complete Package" if (method or "").strip().lower() == "complete_package" else "Edgerunner"
 
     text = (
-        "|wEdgerunner - Skill Details|n\n\n"
+        f"|w{method_label} - Skill Details|n\n\n"
         "|yLocal Expert|n: Knowledge of a specific area.\n"
         "Everyone has Local Expert at rank 2. What area is your character an expert in?\n\n"
         "|wExamples:|n Night City, Corporate Zones, The Badlands, Pacifica, Watson, "
@@ -79,9 +80,10 @@ def menunode_play_instrument(caller, raw_string, **kwargs):
     """Prompt for Play Instrument - Rockerboy only."""
     method, role, full_name = _get_menu_params(caller, kwargs)
     choices = kwargs.get("choices", {})
+    method_label = "Complete Package" if (method or "").strip().lower() == "complete_package" else "Edgerunner"
 
     text = (
-        "|wEdgerunner - Skill Details|n\n\n"
+        f"|w{method_label} - Skill Details|n\n\n"
         "|yPlay Instrument|n: Rockerboys have this skill at rank 2.\n"
         "What instrument does your character play?\n\n"
         "|wExamples:|n guitar, electric guitar, synth, piano, drums, bass, violin, etc.\n\n"
@@ -116,9 +118,10 @@ def menunode_science(caller, raw_string, **kwargs):
     """Prompt for Science skill choice - Tech and Medtech pick one."""
     method, role, full_name = _get_menu_params(caller, kwargs)
     choices = kwargs.get("choices", {})
+    method_label = "Complete Package" if (method or "").strip().lower() == "complete_package" else "Edgerunner"
 
     lines = [
-        "|wEdgerunner - Science Skill Selection|n",
+        f"|w{method_label} - Science Skill Selection|n",
         "",
         f"|y{role}|n: Choose one Science skill at rank 2.",
         "",
