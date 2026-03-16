@@ -37,6 +37,7 @@ SELL_YOUR_SOUL_MILITARY_OPTIONS = [
     "NorCal Military Police",
     "British Combined Forces",
     "Danger Girl",
+    "Night City Police Department",
 ]
 
 SELL_YOUR_SOUL_CRIME_OPTIONS = [
@@ -51,8 +52,9 @@ SELL_YOUR_SOUL_CRIME_OPTIONS = [
     "El Norte Cartel",
 ]
 
-# Corporations from Cyberpunk 2077 Database (cyberpunk.fandom.com)
+# Corporations from Cyberpunk 2077 / Red universe
 SELL_YOUR_SOUL_CORPORATION_OPTIONS = [
+    # Major mega-corps
     "Arasaka",
     "Militech",
     "Kang Tao",
@@ -62,6 +64,32 @@ SELL_YOUR_SOUL_CORPORATION_OPTIONS = [
     "Trauma Team International",
     "Zetatech",
     "NetWatch",
+    # Additional corps from Red-2077
+    "Network News 54",
+    "Nippon Network",
+    "Diverse Media Systems",
+    "Akaromi BioCorp",
+    "ConAg",
+    "SovOil",
+    "Tsunami Defense Systems",
+    "Microtech",
+    "Adrek Robotics",
+    "Akagi Systems Incorporated",
+    "Raven Microcybernetics",
+    "Rocklin Augmentics",
+    "Kenjiri Technology",
+    "Kiroshi Optics",
+    "InfoComp",
+    "Merrill, Asukaga, & Finch",
+    "Orbital Air",
+    "REO Meatwagon",
+    "WorldSat Communications Network",
+    "Meiji Sumitomo",
+    "EuroBank",
+]
+
+# Gangs (street gangs, nomad clans, etc.) - separate from corporations
+SELL_YOUR_SOUL_GANG_OPTIONS = [
     "Raffen Shiv",
     "6th Street",
     "Maelstrom",

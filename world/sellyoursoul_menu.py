@@ -7,6 +7,7 @@ from world.chargen_constants import (
     SELL_YOUR_SOUL_MILITARY_OPTIONS,
     SELL_YOUR_SOUL_CRIME_OPTIONS,
     SELL_YOUR_SOUL_CORPORATION_OPTIONS,
+    SELL_YOUR_SOUL_GANG_OPTIONS,
 )
 from world.cyberpunk_sheets.services import CharacterMoneyService
 from world.cyberware.models import Cyberware
@@ -95,12 +96,14 @@ def menunode_employer_type(caller, raw_string, **kwargs):
         "|y1|n - Military (Covert forces, national armies)\n"
         "|y2|n - Organized Crime (Mob, Yakuza, Triads, Cartels)\n"
         "|y3|n - Corporation (Mega-corps from 2077)\n"
+        "|y4|n - Gang (Street gangs, nomad clans, crews)\n"
         "|y0|n - Back"
     )
     options = [
         {"key": "1", "desc": "Military", "goto": (_set_employer_type, {"employer_type": "military"})},
         {"key": "2", "desc": "Organized Crime", "goto": (_set_employer_type, {"employer_type": "crime"})},
         {"key": "3", "desc": "Corporation", "goto": (_set_employer_type, {"employer_type": "corporation"})},
+        {"key": "4", "desc": "Gang", "goto": (_set_employer_type, {"employer_type": "gang"})},
         {"key": "0", "desc": "Back", "goto": "menunode_start"},
     ]
     return text, options
@@ -113,8 +116,10 @@ def menunode_employer(caller, raw_string, **kwargs):
         opts = SELL_YOUR_SOUL_MILITARY_OPTIONS
     elif employer_type == "crime":
         opts = SELL_YOUR_SOUL_CRIME_OPTIONS
-    else:
+    elif employer_type == "corporation":
         opts = SELL_YOUR_SOUL_CORPORATION_OPTIONS
+    else:
+        opts = SELL_YOUR_SOUL_GANG_OPTIONS  # gang
 
     text = f"|ySelect Employer ({employer_type.title()})|n\n\n"
     options = []
