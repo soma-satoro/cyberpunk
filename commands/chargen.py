@@ -531,10 +531,6 @@ class CmdChargen(MuxCommand):
             pass
         char.db.character_sheet_id = None
 
-        # --- Reset character key to baseline (account's Character) ---
-        if hasattr(char, 'account') and char.account:
-            char.key = f"{char.account.username}'s Character"
-
         # --- Core identity & stats ---
         char.db.full_name = ""
         char.db.handle = ""
