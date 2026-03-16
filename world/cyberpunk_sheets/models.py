@@ -66,7 +66,7 @@ class CharacterSheet(SharedMemoryModel):
             ])
             logger.log_info(f"Stat points: {stat_points}")
 
-            double_cost_skills = ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic'], 
+            double_cost_skills = ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
             skill_points = sum([
                 getattr(self, skill) * (2 if skill in double_cost_skills else 1)
                 for skill in [
@@ -607,7 +607,8 @@ class CharacterSheet(SharedMemoryModel):
 
     def save(self, *args, **kwargs):
         # Add a flag to prevent recursive calls
-        if not kwargs.get('skip_recalculation'):
+        skip_recalculation = kwargs.pop('skip_recalculation', False)
+        if not skip_recalculation:
             self.recalculate_derived_stats()
         super().save(*args, **kwargs)
 

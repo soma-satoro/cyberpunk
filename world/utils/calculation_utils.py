@@ -106,15 +106,24 @@ SKILL_MAPPING = {
 }
 
 def calculate_points_spent(character):
-    stat_points = sum(getattr(character, attr) for attr in STAT_MAPPING.values())
+    stat_points = sum(getattr(character, attr, 0) for attr in STAT_MAPPING.values())
     double_cost_skills = ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
-    skill_points = sum([
-        getattr(character, skill, 0) * (2 if skill in double_cost_skills else 1)
-        for skill in SKILL_MAPPING.values()
-    ])
-    
-    # Add points from languages
-    skill_points += sum(lang.level for lang in character.sheet_language_proficiencies.all())
+    from world.chargen_constants import ROLE_ABILITY_FREE_POINTS, ROLE_ABILITY_SKILLS
+    role = (getattr(character, 'role', None) or "").strip()
+    role_ability_skill = ROLE_ABILITY_SKILLS.get(role) if role else None
+    skill_points = 0
+    for skill in SKILL_MAPPING.values():
+        val = getattr(character, skill, 0) or 0
+        mult = 2 if skill in double_cost_skills else 1
+        if skill == role_ability_skill:
+            billable = max(0, int(val) - ROLE_ABILITY_FREE_POINTS)
+            skill_points += billable * mult
+        else:
+            skill_points += int(val) * mult
+
+    # Add points from languages (CharacterSheet uses sheet_language_proficiencies)
+    if hasattr(character, 'sheet_language_proficiencies'):
+        skill_points += sum(lang.level for lang in character.sheet_language_proficiencies.all())
     
     return stat_points, skill_points
 

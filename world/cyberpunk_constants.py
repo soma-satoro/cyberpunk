@@ -171,7 +171,7 @@ ROLE_SKILL_NAME_MAP = {
 # Role-specific skills
 ROLE_SKILLS = {
     "Rockerboy": {
-        'charismatic_impact': 2,
+        'charismatic_impact': 4,  # Role ability: 4 free, min 4, max 8
         'athletics': 2, 
         'brawling': 2, 
         'concentration': 2, 
@@ -193,7 +193,7 @@ ROLE_SKILLS = {
         'wardrobe_and_style': 2
     },
     "Solo": {
-        'combat_awareness': 2,
+        'combat_awareness': 4,  # Role ability: 4 free, min 4, max 8
         'athletics': 2,
         'brawling': 2,
         'concentration': 2,
@@ -226,7 +226,7 @@ ROLE_SKILLS = {
         'evasion': 2,
         'first_aid': 2,
         'human_perception': 2,
-        'interface': 2,
+        'interface': 4,  # Role ability: 4 free, min 4, max 8
         'library_search': 2,
         'local_expert': 2,
         'perception': 2,
@@ -235,6 +235,7 @@ ROLE_SKILLS = {
         'system_knowledge': 2
             },
     "Tech": {
+        'maker': 4,  # Role ability: 4 free, min 4, max 8
         'athletics': 2,
         'basic_tech': 2,
         'brawling': 2,
@@ -256,13 +257,13 @@ ROLE_SKILLS = {
         'stealth': 2
     },
     "Medtech": {
+        'medicine': 4,  # Role ability: 4 free; specialties (surgery/pharma/cryo) allocated via selfstat
         'athletics': 2,
         'basic_tech': 2,
         'brawling': 2,
         'concentration': 2,
         'conversation': 2,
         'deduction': 2,
-        'diagnosis': 2,
         'education': 2,
         'first_aid': 2,
         'human_perception': 2,
@@ -270,10 +271,8 @@ ROLE_SKILLS = {
         'paramedic': 2,
         'perception': 2,
         'persuasion': 2,
-        'pharmaceuticals': 2,
         'pick_lock': 2,
         'stealth': 2,
-        'surgery': 2,
         'zoology': 2
     },
     "Media": {
@@ -282,7 +281,7 @@ ROLE_SKILLS = {
         'composition': 2,
         'concentration': 2,
         'conversation': 2,
-        'credibility': 2,
+        'credibility': 4,  # Role ability: 4 free, min 4, max 8
         'cryptography': 2,
         'deduction': 2,
         'education': 2,
@@ -298,6 +297,7 @@ ROLE_SKILLS = {
         'stealth': 2
     },
     "Lawman": {
+        'backup': 4,  # Role ability: 4 free, min 4, max 8
         'athletics': 2,
         'autofire': 2,
         'brawling': 2,
@@ -319,6 +319,7 @@ ROLE_SKILLS = {
         'tracking': 2
     },
     "Exec": {
+        'teamwork': 4,  # Role ability: 4 free, min 4, max 8
         'accounting': 2,
         'athletics': 2,
         'brawling': 2,
@@ -340,6 +341,7 @@ ROLE_SKILLS = {
         'stock_market': 2
     },
     "Fixer": {
+        'operator': 4,  # Role ability: 4 free, min 4, max 8
         'athletics': 2,
         'brawling': 2,
         'bribery': 2,
@@ -361,6 +363,7 @@ ROLE_SKILLS = {
         'trading': 2
     },
     "Nomad": {
+        'moto': 4,  # Role ability: 4 free, min 4, max 8
         'animal_handling': 2,
         'athletics': 2,
         'basic_tech': 2,

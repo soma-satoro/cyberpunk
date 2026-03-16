@@ -250,17 +250,38 @@ class CmdIP(MuxCommand):
             return
 
         stat_name = self.args.strip()
-        if not is_valid_stat(stat_name):
+        first_word = (stat_name.split() or [""])[0]
+        stat_key = normalize_stat_name(first_word)
+
+        # Medicine requires specialty: +ip/buy medicine <surgery|pharma|cryo>
+        medicine_specialty = None
+        if stat_key == "medicine":
+            parts = stat_name.split()
+            if len(parts) >= 2:
+                spec = parts[1].lower()
+                if spec in ("surgery", "pharma", "cryo", "cryosystem"):
+                    medicine_specialty = "cryo" if spec == "cryosystem" else spec
+            if not medicine_specialty:
+                self.caller.msg(
+                    "Medicine requires a specialty. Use: +ip/buy medicine <surgery|pharma|cryo>\n"
+                    "Surgery: 1 pt = 2 Surgery skill. Pharma/Cryo: 1 pt = 1 Medical Tech (max 5 each)."
+                )
+                return
+
+        if not is_valid_stat(stat_name.split()[0] if stat_name else stat_name):
             self.caller.msg(f"'{stat_name}' is not a valid skill or attribute to purchase.")
             return
 
-        current_val = get_character_stat_value(char, stat_name)
+        current_val = get_character_stat_value(char, "medicine" if stat_key == "medicine" else stat_name)
         if current_val is None:
             self.caller.msg(f"Could not read current value for {stat_name}.")
             return
 
-        stat_key = normalize_stat_name(stat_name)
-        cost, next_level = get_ip_cost(stat_name, current_val,
+        if not medicine_specialty:
+            stat_key = normalize_stat_name(stat_name)
+        cost, next_level = get_ip_cost(
+            "medicine" if stat_key == "medicine" else stat_name,
+            current_val,
             is_attribute=stat_key in IP_ATTRIBUTES,
             is_role_ability=stat_key in IP_ROLE_ABILITIES)
         if cost is None:
@@ -272,25 +293,55 @@ class CmdIP(MuxCommand):
             self.caller.msg(f"You need {cost} IP to raise {get_stat_display_name(stat_name)} to {next_level}. You have {ip_current} IP.")
             return
 
+        # Medicine: validate specialty limit (pharma/cryo max 5) before purchase
+        if stat_key == "medicine" and medicine_specialty:
+            from world.chargen_constants import MEDICINE_PHARMA_MAX, MEDICINE_CRYO_MAX
+            s = getattr(char.db, "medicine_surgery", 0) or 0
+            p = getattr(char.db, "medicine_pharma", 0) or 0
+            c = getattr(char.db, "medicine_cryo", 0) or 0
+            if medicine_specialty == "surgery":
+                pass  # no cap
+            elif medicine_specialty == "pharma":
+                if p >= MEDICINE_PHARMA_MAX:
+                    self.caller.msg(f"Pharmaceuticals is already at maximum ({MEDICINE_PHARMA_MAX}).")
+                    return
+            elif medicine_specialty == "cryo":
+                if c >= MEDICINE_CRYO_MAX:
+                    self.caller.msg(f"Cryosystem is already at maximum ({MEDICINE_CRYO_MAX}).")
+                    return
+
         # Perform purchase
-        set_character_stat_value(char, stat_name, next_level)
+        set_character_stat_value(char, "medicine" if stat_key == "medicine" else stat_name, next_level)
+        if stat_key == "medicine" and medicine_specialty and hasattr(char, "set_medicine_specialty"):
+            key = f"medicine_{medicine_specialty}"
+            current_spec = getattr(char.db, key, 0) or 0
+            char.set_medicine_specialty(medicine_specialty, current_spec + 1)
         new_ip = ip_current - cost
         char.attributes.add("improvement_points", new_ip)
         char.attributes.add("ip_spent", ip_spent + cost)
 
         details = f"{current_val} > {next_level}"
+        if stat_key == "medicine" and medicine_specialty:
+            details += f" (+1 {medicine_specialty})"
         add_ip_log_entry(char, -cost, get_stat_display_name(stat_name), details)
 
         # Store for refund
-        char.attributes.add("ip_last_purchase", {
-            "stat": normalize_stat_name(stat_name),
+        refund_data = {
+            "stat": "medicine" if stat_key == "medicine" else stat_key,
             "from_level": current_val,
             "to_level": next_level,
             "cost": cost,
             "timestamp": __import__("datetime").datetime.now().isoformat(),
-        })
+        }
+        if stat_key == "medicine" and medicine_specialty:
+            refund_data["medicine_specialty"] = medicine_specialty
+        char.attributes.add("ip_last_purchase", refund_data)
 
-        self.caller.msg(f"You spent {cost} IP to raise {get_stat_display_name(stat_name)} from {current_val} to {next_level}. You have {new_ip} IP remaining.")
+        msg = f"You spent {cost} IP to raise {get_stat_display_name(stat_name)} from {current_val} to {next_level}."
+        if stat_key == "medicine" and medicine_specialty:
+            msg += f" +1 {medicine_specialty.title()}."
+        msg += f" You have {new_ip} IP remaining."
+        self.caller.msg(msg)
 
     def do_refund(self):
         """Refund the last purchase."""
@@ -316,6 +367,13 @@ class CmdIP(MuxCommand):
             return
 
         set_character_stat_value(char, stat_key, from_level)
+
+        # Medicine: also revert the specialty point that was added
+        if stat_key == "medicine" and last.get("medicine_specialty"):
+            spec = last["medicine_specialty"]
+            key = f"medicine_{spec}"
+            current = getattr(char.db, key, 0) or 0
+            setattr(char.db, key, max(0, current - 1))
         ip_current, ip_spent, _, _, _ = get_character_ip(char)
         char.attributes.add("improvement_points", ip_current + cost)
         char.attributes.add("ip_spent", ip_spent - cost)

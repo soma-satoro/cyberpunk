@@ -2404,7 +2404,7 @@ cyberdecks = [
         "value": 500,
     },
     {
-        "name": "SIG Technologies Warlock's Book",
+        "name": "SGI Technologies Warlock's Book",
         "description": "",
         "hardware_slots": 0,
         "program_slots": 0,

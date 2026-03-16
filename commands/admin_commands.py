@@ -113,115 +113,137 @@ class AdminCommand(MuxCommand):
 
 class CmdStat(AdminCommand):
     """
-    Set or modify stats on a player character.
+    Set a stat or skill on a player character (staff only).
+    Stats are applied to the character typeclass so they appear on +sheet.
+
     Usage:
-      stat <character> <stat> = <value>
-      stat <character> <stat> +<value>
-      stat <character> <stat> -<value>
+      stat <character>=<stat or skill>/<level>
+
     Examples:
-      stat Bob intelligence = 5
-      stat Alice cool +2
-      stat Charlie empathy -1
-      stat David full_name = David Martinez
-    This command allows you to set or modify various stats on a player character.
-    You can set a stat to an absolute value, or increase/decrease it by a certain amount.
-    String fields (like full_name, role, gender) only support the '=' operation.
+      stat Bob=intelligence/5
+      stat Alice Smith=athletics/3
+      stat Charlie=cool/7
+      stat David=medicine/6
+      stat Eve=paramedic/4
+
+    Supports abbreviations (INT, ATH, MED, etc.) and full names.
+    Values are 0-10 for stats/skills. Medicine specialties: medicine_surgery,
+    medicine_pharma, medicine_cryo (e.g. stat Bob=medicine_surgery/2).
     """
     key = "stat"
     aliases = ["staffstat", "modstat"]
     locks = "cmd:perm(Admin)"
     help_category = "Admin"
-   
+
     def func(self):
         if not self.args:
-            self.caller.msg("Usage: stat <character> <stat> = <value>")
+            self.caller.msg("Usage: stat <character>=<stat or skill>/<level>")
             return
+
         try:
-            char_name, stat, operation, value = self.parse_input(self.args)
+            char_name, stat_name, value_str = self.parse_input(self.args)
         except ValueError as e:
             self.caller.msg(str(e))
             return
-       
-        # Find the character
-        char = self.caller.search(char_name, global_search=True)
+
+        # Find the character (handles names with spaces)
+        char = self.caller.search(char_name.strip(), global_search=True)
         if not char:
             return
-        
-        # Check if the character has a character sheet
-        try:
-            cs = CharacterSheet.objects.get(character=char)
-        except CharacterSheet.DoesNotExist:
+
+        # Require character sheet for sync
+        if not (hasattr(char, 'character_sheet') and char.character_sheet):
             self.caller.msg(f"{char.name} doesn't have a character sheet.")
             return
-        
-        # Get the current value of the stat
+
+        # Parse value
         try:
-            current_value = getattr(cs, stat)
-        except AttributeError:
-            self.caller.msg(f"{char.name} doesn't have a stat named '{stat}'.")
+            new_value = int(value_str)
+        except ValueError:
+            self.caller.msg(f"Level must be a number, got: {value_str}")
             return
-       
-        # Determine the new value
-        try:
-            if isinstance(current_value, int):
-                if operation == '=':
-                    new_value = int(value)
-                elif operation == '+':
-                    new_value = current_value + int(value)
-                elif operation == '-':
-                    new_value = current_value - int(value)
-                else:
-                    raise ValueError("Invalid operation for numeric stat. Use '=', '+', or '-'.")
-                new_value = max(0, min(new_value, 10))  # Ensure value is between 0 and 10 for numerical stats
-            elif isinstance(current_value, str):
-                if operation != '=':
-                    raise ValueError("String fields only support the '=' operation.")
-                new_value = value  # For string fields, we just use the value as-is
-            else:
-                raise ValueError(f"Unsupported data type for stat '{stat}'.")
-        except ValueError as e:
-            self.caller.msg(str(e))
+
+        if new_value < 0 or new_value > 10:
+            self.caller.msg("Level must be between 0 and 10.")
             return
-       
-        # Set the new value
-        try:
-            setattr(cs, stat, new_value)
-            if hasattr(cs, 'recalculate_derived_stats'):
-                cs.recalculate_derived_stats()
-            cs.save()
-            self.caller.msg(f"Set {char.name}'s {stat} to {new_value}.")
-            char.msg(f"Your {stat} has been changed to {new_value}.")
-           
-            # Show updated derived stats only for numeric fields
-            if isinstance(new_value, int):
-                derived_stats = self.get_derived_stats(cs)
-                self.caller.msg("Updated derived statistics:")
-                for stat, value in derived_stats.items():
-                    self.caller.msg(f"{stat}: {value}")
-        except Exception as e:
-            self.caller.msg(f"Error setting {stat} on {char.name}: {str(e)}")
-   
+
+        # Resolve stat name (abbreviations, spaces, ROLE_SKILL_NAME_MAP, etc.)
+        from world.utils.character_utils import get_full_attribute_name, MEDICINE_SPECIALTY_ATTRIBUTES
+        from world.cyberpunk_constants import ROLE_SKILL_NAME_MAP
+        from world.improvement_points import IP_ATTRIBUTES, set_character_stat_value
+
+        full_key = get_full_attribute_name(stat_name) if stat_name else None
+        if not full_key:
+            # Fallback: lowercase with underscores
+            full_key = stat_name.strip().lower().replace(" ", "_") if stat_name else None
+        if not full_key:
+            self.caller.msg(f"Unknown stat or skill: '{stat_name}'")
+            return
+        # Apply ROLE_SKILL_NAME_MAP (e.g. diagnosis->medicine, melee_weapon->melee)
+        full_key = ROLE_SKILL_NAME_MAP.get(full_key, full_key)
+
+        # Medicine specialties are stored on character.db, not in skills
+        if full_key in MEDICINE_SPECIALTY_ATTRIBUTES:
+            setattr(char.db, full_key, new_value)
+            # Mirror to sheet if it has the field
+            sheet = char.character_sheet
+            if hasattr(sheet, full_key):
+                setattr(sheet, full_key, new_value)
+                if hasattr(sheet, 'save'):
+                    sheet.save()
+        else:
+            # Use set_character_stat_value: updates character and mirrors to sheet
+            if not set_character_stat_value(char, full_key, new_value):
+                self.caller.msg(f"Could not set {full_key} on {char.name}.")
+                return
+
+        # Recalculate derived stats (HP, Death Save, Serious Wounds, Humanity)
+        if hasattr(char, 'recalculate_derived_stats'):
+            char.recalculate_derived_stats()
+
+        # Sync to CharacterSheet for persistence (stats affect HP, etc.)
+        sheet = char.character_sheet
+        if sheet and hasattr(sheet, 'recalculate_derived_stats'):
+            # Sync character.db stats to sheet first so recalc has correct base
+            for attr in IP_ATTRIBUTES:
+                if hasattr(char.db, attr) and hasattr(sheet, attr):
+                    setattr(sheet, attr, getattr(char.db, attr))
+            # Sync all skills from character.db.skills to sheet columns
+            if hasattr(char.db, 'skills') and char.db.skills:
+                for skill_key, skill_val in char.db.skills.items():
+                    if hasattr(sheet, skill_key):
+                        setattr(sheet, skill_key, skill_val)
+            # Sync current/max HP from character to sheet
+            for hp_attr in ('current_hp', 'max_hp', 'death_save', 'serious_wounds', 'humanity'):
+                db_attr = hp_attr if hp_attr != 'current_hp' else 'current_hp'
+                sheet_attr = f'_{hp_attr}' if hp_attr in ('current_hp', 'max_hp') else hp_attr
+                if hasattr(char.db, db_attr) and hasattr(sheet, sheet_attr):
+                    setattr(sheet, sheet_attr, getattr(char.db, db_attr))
+            sheet.recalculate_derived_stats()
+            sheet.save()
+
+        display_name = full_key.replace("_", " ").title()
+        self.caller.msg(f"Set {char.name}'s {display_name} to {new_value}.")
+        if char.sessions.all():
+            char.msg(f"Your {display_name} has been set to {new_value} by staff.")
+        return
+
     def parse_input(self, args):
-        parts = args.split()
-        if len(parts) < 4:
-            raise ValueError("Not enough arguments. Usage: stat <character> <stat> = <value>")
-       
-        char_name = parts[0]
-        stat = parts[1].lower()
-        operation = parts[2]
-        value = " ".join(parts[3:])
-        if operation not in ['=', '+', '-']:
-            raise ValueError("Invalid operation. Use '=', '+', or '-'.")
-        return char_name, stat, operation, value
-   
-    def get_derived_stats(self, sheet):
-        return {
-            "Max HP": sheet._max_hp,
-            "Current HP": sheet._current_hp,
-            "Death Save": sheet.death_save,
-            "Serious Wounds": sheet.serious_wounds,
-            "Humanity": sheet.humanity
-        }
+        """Parse 'char_name=stat/value' syntax."""
+        if "=" not in args:
+            raise ValueError("Usage: stat <character>=<stat or skill>/<level>")
+        lhs, rhs = args.split("=", 1)
+        char_name = lhs.strip()
+        if not char_name:
+            raise ValueError("Character name is required.")
+        if "/" not in rhs:
+            raise ValueError("Use stat/skill/level format, e.g. intelligence/5")
+        stat_name, value_str = rhs.split("/", 1)
+        stat_name = stat_name.strip()
+        value_str = value_str.strip()
+        if not stat_name or not value_str:
+            raise ValueError("Stat name and level are required.")
+        return char_name, stat_name, value_str
 
 from evennia import Command
 from evennia.utils import utils

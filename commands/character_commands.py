@@ -313,15 +313,28 @@ class CmdSheet(MuxCommand):
                 for label, v in zip(row[::2], row[1::2])
             ) + "\n"
 
-        # Skills
+        # Skills (2 columns, 30+5=35 visible per column to stay within 80)
         output += sheet_section("SKILLS", width=W)
         active_skills = self.get_active_skills(target)
-        for i in range(0, len(active_skills), 3):
-            row = active_skills[i:i+3]
+        for i in range(0, len(active_skills), 2):
+            row = active_skills[i:i+2]
             output += "".join(
-                f"|y{(s or ''):<20}|n {(v if v is not None else ''):<5}"
+                f"|y{(s or ''):<30}|n {(v if v is not None else ''):<5}"
                 for s, v in row
-            ).ljust(80) + "\n"
+            ) + "\n"
+
+        # Role Abilities (primary role + any bought with IP)
+        output += sheet_section("Role Abilities", width=W)
+        role_abilities = self.get_role_abilities(target)
+        if role_abilities:
+            for i in range(0, len(role_abilities), 2):
+                row = role_abilities[i:i+2]
+                output += "".join(
+                    f"|y{(s or ''):<30}|n {(v if v is not None else ''):<5}"
+                    for s, v in row
+                ) + "\n"
+        else:
+            output += "|wNone|n\n"
 
         # Derived Stats
         output += sheet_section("Derived Statistics", width=W)
@@ -460,8 +473,11 @@ class CmdSheet(MuxCommand):
         'unarmed_damage_die_type', 'unarmed_damage_dice',
     })
 
-    # Max width for skill names on sheet (3 columns, 80 char width)
-    SKILL_NAME_WIDTH = 20
+    # Role ability keys - displayed in Role Abilities section, excluded from SKILLS
+    ROLE_ABILITY_KEYS = frozenset(ROLE_ABILITY_TO_ROLE.keys())
+
+    # Max width for skill names on sheet (2 columns, 30+5=35 per column, fits 80)
+    SKILL_NAME_WIDTH = 30
 
     def _format_skill_for_sheet(self, name, skill_key=None):
         """
@@ -488,10 +504,10 @@ class CmdSheet(MuxCommand):
         """
         skill_list = []
 
-        # Get skills from character's skills dictionary (includes role abilities)
+        # Get skills from character's skills dictionary (exclude role abilities)
         if hasattr(char, 'db') and char.db.skills:
             for skill_name, value in char.db.skills.items():
-                if value > 0 and skill_name not in self.NON_SKILL_KEYS:
+                if value > 0 and skill_name not in self.NON_SKILL_KEYS and skill_name not in self.ROLE_ABILITY_KEYS:
                     display_name = skill_name.replace('_', ' ').title()
                     display_name = self._format_skill_for_sheet(display_name)
                     skill_list.append([display_name, value])
@@ -509,9 +525,53 @@ class CmdSheet(MuxCommand):
                         skill_key=skill_key,
                     )
                     skill_list.append([formatted_name, value])
-        
+
         skill_list.sort(key=lambda x: (x[0].lower(), -x[1]))  # Alphabetical by name, then by value desc
         return skill_list
+
+    def get_role_abilities(self, char):
+        """
+        Get a list of role abilities (primary + any bought with IP) for the Role Abilities section.
+        Includes Medicine specialty breakdown for Medtechs.
+        Returns [(display_name, value), ...] sorted alphabetically.
+        """
+        ability_list = []
+
+        if not hasattr(char, 'db') or not char.db.skills:
+            return ability_list
+
+        # Standard role abilities (from db.skills)
+        for ability_key in self.ROLE_ABILITY_KEYS:
+            value = char.db.skills.get(ability_key, 0)
+            if value <= 0:
+                continue
+            if ability_key == 'medicine':
+                # Medicine: add base rank plus specialty breakdown (handled below)
+                continue
+            display_name = ability_key.replace('_', ' ').title()
+            display_name = self._format_skill_for_sheet(display_name)
+            ability_list.append([display_name, value])
+
+        # Medicine (Medtech): add base Medicine + specialty breakdown when available
+        medicine = char.db.skills.get('medicine', 0)
+        if medicine > 0:
+            if hasattr(char, 'get_medicine_specialties'):
+                from world.chargen_constants import get_medicine_surgery_skill, get_medical_tech_skill
+                s, p, c = char.get_medicine_specialties()
+                surg_skill = get_medicine_surgery_skill(s)
+                medtech_skill = get_medical_tech_skill(p, c)
+                if surg_skill > 0:
+                    ability_list.append(["Surgery", surg_skill])
+                if p > 0:
+                    ability_list.append(["Med Tech (Pharma)", p])
+                if c > 0:
+                    ability_list.append(["Med Tech (Cryo)", c])
+                if medtech_skill > 0:
+                    ability_list.append(["Medical Tech", medtech_skill])
+            ability_list.append(["Medicine", medicine])
+
+        ability_list.sort(key=lambda x: (x[0].lower(), -x[1]))
+        return ability_list
 
 class CmdShortDesc(Command):
     """

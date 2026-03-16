@@ -174,7 +174,12 @@ class EdgerunnerChargen:
         
         # Reset role abilities and skills (each to 0)
         character.db.skills = {}
-        
+
+        # Reset Medicine specialties (Medtech)
+        character.db.medicine_surgery = 0
+        character.db.medicine_pharma = 0
+        character.db.medicine_cryo = 0
+
         # Reset derived stats
         character.db.max_hp = 10
         character.db.current_hp = 10
@@ -208,14 +213,23 @@ class EdgerunnerChargen:
 
     @classmethod
     def calculate_remaining_skill_points_typeclass(cls, character, role):
-        """Calculate remaining skill points for a typeclass character (role skills only, with double-cost)."""
+        """Calculate remaining skill points for a typeclass character (role skills only, with double-cost).
+        Role ability: first 4 points are free (not deducted from skill pool).
+        """
+        from world.chargen_constants import ROLE_ABILITY_FREE_POINTS, ROLE_ABILITY_SKILLS
         role_skills = ROLE_SKILLS.get(role, {})
         skills_dict = character.db.skills or {}
         total = 0
+        role_ability_skill = ROLE_ABILITY_SKILLS.get(role)
         for orig_skill in role_skills:
             mapped = ROLE_SKILL_NAME_MAP.get(orig_skill, orig_skill).lower().replace(' ', '_')
             val = skills_dict.get(mapped, 0)
-            total += val * (2 if mapped in DOUBLE_COST_SKILLS else 1)
+            mult = 2 if mapped in DOUBLE_COST_SKILLS else 1
+            if mapped == role_ability_skill:
+                billable = max(0, int(val) - ROLE_ABILITY_FREE_POINTS)
+                total += billable * mult
+            else:
+                total += int(val) * mult
         langs = getattr(character.db, 'languages', {}) or {}
         lang_pts = sum(v for v in langs.values() if v)
         return max(0, 86 - total - lang_pts)
@@ -239,16 +253,24 @@ class EdgerunnerChargen:
                 eligible_stats = [s for s in eligible_stats if s != stat]
 
         # Spend skill points: 86 total, role skills only, double-cost for some
+        # Role ability: first 4 points free (not counted toward spent)
+        from world.chargen_constants import ROLE_ABILITY_FREE_POINTS, ROLE_ABILITY_SKILLS
         role_skills = ROLE_SKILLS.get(role, {})
         skills_dict = dict(character.db.skills or {})
         for orig, val in role_skills.items():
             mapped = ROLE_SKILL_NAME_MAP.get(orig, orig).lower().replace(' ', '_')
             if mapped not in skills_dict:
                 skills_dict[mapped] = 0
-        spent = sum(
-            skills_dict.get(ROLE_SKILL_NAME_MAP.get(o, o).lower().replace(' ', '_'), 0) * (2 if ROLE_SKILL_NAME_MAP.get(o, o).lower().replace(' ', '_') in DOUBLE_COST_SKILLS else 1)
-            for o in role_skills
-        )
+        role_ability_skill = ROLE_ABILITY_SKILLS.get(role)
+        spent = 0
+        for o in role_skills:
+            mapped = ROLE_SKILL_NAME_MAP.get(o, o).lower().replace(' ', '_')
+            val = skills_dict.get(mapped, 0)
+            mult = 2 if mapped in DOUBLE_COST_SKILLS else 1
+            if mapped == role_ability_skill:
+                spent += max(0, int(val) - ROLE_ABILITY_FREE_POINTS) * mult
+            else:
+                spent += int(val) * mult
         langs = getattr(character.db, 'languages', {}) or {}
         lang_pts = sum(v for v in langs.values() if v)
         skill_points = max(0, 86 - spent - lang_pts)
@@ -448,6 +470,7 @@ class EdgerunnerChargen:
     @classmethod
     def assign_skills_to_typeclass(cls, character, role):
         """Assign skills to character typeclass"""
+        from world.chargen_constants import MEDICINE_PHARMA_MAX, MEDICINE_CRYO_MAX
         role_skills = ROLE_SKILLS.get(role, {})
         skills_dict = {}
         
@@ -456,6 +479,14 @@ class EdgerunnerChargen:
             skills_dict[sheet_skill_name] = value
             
         character.db.skills = skills_dict
+
+        # Medtech: initialize Medicine specialties (surgery 2, pharma 1, cryo 1 = 4 total)
+        if role == "Medtech":
+            character.db.medicine_surgery = 2
+            character.db.medicine_pharma = 1
+            character.db.medicine_cryo = 1
+            logger.info("Assigned Medicine specialties: Surgery 2, Pharma 1, Cryo 1")
+
         logger.info(f"Assigned {len(skills_dict)} skills to character typeclass")
 
     @classmethod

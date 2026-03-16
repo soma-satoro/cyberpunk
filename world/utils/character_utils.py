@@ -167,6 +167,14 @@ SKILL_MAPPING = {
     'MOTO': 'moto'
 }
 
+# Medicine (Medtech) specialties - allocate Medicine rank: surgery, pharma, cryo
+MEDICINE_SPECIALTY_MAPPING = {
+    'MEDSUG': 'medicine_surgery',
+    'MEDPHA': 'medicine_pharma',
+    'MEDCRY': 'medicine_cryo',
+}
+MEDICINE_SPECIALTY_ATTRIBUTES = frozenset(MEDICINE_SPECIALTY_MAPPING.values())
+
 TOPSHEET_MAPPING = {
     'FN': 'full_name',
     'HANDLE': 'handle',
@@ -181,7 +189,7 @@ ALL_ATTRIBUTES = {**STAT_MAPPING, **SKILL_MAPPING, **TOPSHEET_MAPPING}
 
 # Create a reverse mapping with multiple options
 REVERSE_MAPPING = {}
-for mapping in [STAT_MAPPING, SKILL_MAPPING, TOPSHEET_MAPPING]:
+for mapping in [STAT_MAPPING, SKILL_MAPPING, TOPSHEET_MAPPING, MEDICINE_SPECIALTY_MAPPING]:
     for abbr, full in mapping.items():
         REVERSE_MAPPING[abbr] = full
         REVERSE_MAPPING[full.upper()] = full
@@ -189,7 +197,7 @@ for mapping in [STAT_MAPPING, SKILL_MAPPING, TOPSHEET_MAPPING]:
         if '_' in full:
             REVERSE_MAPPING[full.replace('_', ' ').upper()] = full
         # Add plural form for skills (e.g. HANDGUNS -> handgun)
-        if mapping is SKILL_MAPPING and not full.endswith('s'):
+        if mapping is SKILL_MAPPING and not full.endswith('s') and full not in MEDICINE_SPECIALTY_MAPPING.values():
             REVERSE_MAPPING[(full + 's').upper()] = full
         # Add partial matches
         for i in range(1, len(abbr)):

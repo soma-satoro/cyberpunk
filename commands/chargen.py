@@ -4,20 +4,36 @@ from evennia import Command, CmdSet
 from world.jobs.models import Job
 from world.languages.language_dictionary import LANGUAGES
 from world.languages.models import Language, CharacterLanguage
-from world.utils.character_utils import ALL_ATTRIBUTES, SKILL_MAPPING, STAT_MAPPING, get_full_attribute_name
+from world.utils.character_utils import (
+    ALL_ATTRIBUTES,
+    SKILL_MAPPING,
+    STAT_MAPPING,
+    get_full_attribute_name,
+    MEDICINE_SPECIALTY_ATTRIBUTES,
+)
 from world.cyberpunk_sheets.models import CharacterSheet
 from evennia.utils import evmenu
 from world.cyberpunk_constants import ROLE_SKILLS, ROLE_SKILL_NAME_MAP
 from world.cyberpunk_sheets.edgerunner import EdgerunnerChargen
 from world.cyberpunk_constants import EQUIPMENT_OR_CHOICES
 from commands.edgerunner_gear_menu import start_edgerunner_gear_menu
+from world.medtech_medicine_menu import start_medtech_medicine_menu
+from world.edgerunner_skill_instances_menu import start_edgerunner_skill_instances_menu
 from world.cyberpunk_sheets.services import CharacterMoneyService
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils import logger
 from typeclasses.chargen import ChargenRoom
 from evennia.utils.utils import class_from_module
 from world.sellyoursoul_menu import start_sellyoursoul_menu
-from world.chargen_constants import FASHION_BUDGET
+from world.chargen_constants import (
+    FASHION_BUDGET,
+    ROLE_ABILITY_SKILLS,
+    CHARGEN_STAT_MIN,
+    CHARGEN_STAT_MAX,
+    CHARGEN_SKILL_MIN,
+    CHARGEN_SKILL_MAX,
+    validate_medicine_specialties,
+)
 
 def get_character_model():
     return class_from_module(settings.BASE_CHARACTER_TYPECLASS)
@@ -154,6 +170,18 @@ class CmdChargen(MuxCommand):
                     on_complete=self._on_gear_menu_complete
                 ):
                     return
+            if method == "edgerunner" and role == "Medtech":
+                if start_medtech_medicine_menu(
+                    self.caller, method, role, full_name,
+                    on_complete=self._on_medicine_menu_complete
+                ):
+                    return
+            if method == "edgerunner":
+                if start_edgerunner_skill_instances_menu(
+                    self.caller, method, role, full_name,
+                    on_complete=self._on_skill_instances_menu_complete
+                ):
+                    return
             self.create_character(method, role, full_name)
             return
 
@@ -207,26 +235,74 @@ class CmdChargen(MuxCommand):
         except Exception as e:
             logger.error(f"Error checking for existing sheets: {str(e)}")
 
-        # No existing character data found - show gear OR menu if needed, else proceed
+        # No existing character data found - chain menus: gear (if needed) -> medicine (Medtech) -> skill instances -> create
         if method == "edgerunner" and EQUIPMENT_OR_CHOICES.get(role):
             if start_edgerunner_gear_menu(
                 self.caller, method, role, full_name,
                 on_complete=self._on_gear_menu_complete
             ):
-                return  # Menu is running; it will call create_character when done
+                return  # Gear menu running; on exit -> medicine (Medtech) or skill instances
+        if method == "edgerunner" and role == "Medtech":
+            if start_medtech_medicine_menu(
+                self.caller, method, role, full_name,
+                on_complete=self._on_medicine_menu_complete
+            ):
+                return  # Medicine menu running; on exit -> skill instances
+        if method == "edgerunner":
+            if start_edgerunner_skill_instances_menu(
+                self.caller, method, role, full_name,
+                on_complete=self._on_skill_instances_menu_complete
+            ):
+                return  # Skill instances menu; on exit -> create_character
         self.create_character(method, role, full_name)
 
     def _on_gear_menu_complete(self, caller, menu=None):
-        """Called when gear choices menu exits. Run create_character with stored choices."""
+        """Called when gear menu exits. Chain to medicine (Medtech) or skill instances menu."""
         if hasattr(caller.ndb, "_chargen_params") and hasattr(caller.ndb, "_chargen_gear_choices"):
             method, role, full_name = caller.ndb._chargen_params
-            gear_choices = caller.ndb._chargen_gear_choices
-            del caller.ndb._chargen_params
-            del caller.ndb._chargen_gear_choices
-            self.create_character(method, role, full_name, gear_choices=gear_choices)
+            if role == "Medtech":
+                start_medtech_medicine_menu(
+                    caller, method, role, full_name,
+                    on_complete=self._on_medicine_menu_complete
+                )
+            else:
+                start_edgerunner_skill_instances_menu(
+                    caller, method, role, full_name,
+                    on_complete=self._on_skill_instances_menu_complete
+                )
         # If no params (menu was aborted?), do nothing
 
-    def create_character(self, method, role, full_name, gear_choices=None):
+    def _on_medicine_menu_complete(self, caller, menu=None):
+        """Called when Medtech Medicine specialty menu exits. Chain to skill instances menu."""
+        if hasattr(caller.ndb, "_chargen_params") and hasattr(caller.ndb, "_chargen_medicine_specialties"):
+            method, role, full_name = caller.ndb._chargen_params
+            start_edgerunner_skill_instances_menu(
+                caller, method, role, full_name,
+                on_complete=self._on_skill_instances_menu_complete
+            )
+        # If no params (menu was aborted?), do nothing
+
+    def _on_skill_instances_menu_complete(self, caller, menu=None):
+        """Called when skill instances menu exits. Run create_character with all gathered data."""
+        if not hasattr(caller.ndb, "_chargen_skill_instances"):
+            # User aborted the menu - don't create character
+            return
+        method, role, full_name = caller.ndb._chargen_params
+        skill_instances = caller.ndb._chargen_skill_instances
+        gear_choices = getattr(caller.ndb, "_chargen_gear_choices", None)
+        medicine_specialties = getattr(caller.ndb, "_chargen_medicine_specialties", None)
+        # Clear ndb
+        for key in ("_chargen_params", "_chargen_skill_instances", "_chargen_gear_choices", "_chargen_medicine_specialties"):
+            if hasattr(caller.ndb, key):
+                delattr(caller.ndb, key)
+        self.create_character(
+            method, role, full_name,
+            gear_choices=gear_choices,
+            medicine_specialties=medicine_specialties,
+            skill_instance_choices=skill_instances,
+        )
+
+    def create_character(self, method, role, full_name, gear_choices=None, medicine_specialties=None, skill_instance_choices=None):
         logger.info(f"Creating character with method: {method}, role: {role}, full_name: {full_name}")
         try:
             char = self.caller
@@ -245,6 +321,7 @@ class CmdChargen(MuxCommand):
 
             # Set basic character attributes (full_name is stored in db - never change char.key)
             char.db.full_name = full_name
+            char.db.handle = full_name  # Default Handle to full name; user can change later
             char.db.role = role
             char.db.gender = char.db.gender or "Other"  # Set default gender if not set
             
@@ -260,14 +337,21 @@ class CmdChargen(MuxCommand):
                 sheet = char.character_sheet
                 logger.info(f"Using existing character sheet with ID {sheet.id}")
             
-            # Update sheet with role and name
+            # Update sheet with role, name, and handle
             sheet.role = role
             sheet.full_name = full_name
+            sheet.handle = full_name  # Default Handle to full name; user can change later
             sheet.save()
             
             # Generate character based on method
+            char.db.chargen_method = method  # Store for point calculation (edgerunner vs complete_package)
             if method == "edgerunner":
-                result = self.edgerunner_chargen(char, sheet, role, gear_choices=gear_choices)
+                result = self.edgerunner_chargen(
+                    char, sheet, role,
+                    gear_choices=gear_choices,
+                    medicine_specialties=medicine_specialties,
+                    skill_instance_choices=skill_instance_choices,
+                )
             else:  # complete_package
                 result = self.complete_package_chargen(char, sheet)
             
@@ -280,7 +364,7 @@ class CmdChargen(MuxCommand):
             self.caller.msg(f"An error occurred during character creation: {str(e)}")
             return False
 
-    def edgerunner_chargen(self, char, sheet, role, gear_choices=None):
+    def edgerunner_chargen(self, char, sheet, role, gear_choices=None, medicine_specialties=None, skill_instance_choices=None):
         """Create character using edgerunner method, storing data in DB attributes."""
         # Generate stat table
         stat_templates = EdgerunnerChargen.generate_stat_table(role)
@@ -307,14 +391,42 @@ class CmdChargen(MuxCommand):
         sheet.save()
         
         # Assign skills (map ROLE_SKILLS names to model field names)
+        # Skip local_expert, play_instrument (set via skill_instance_choices), and Medtech zoology (replaced by chosen science)
+        skill_instance_choices = skill_instance_choices or {}
         skills = ROLE_SKILLS.get(role, {})
+        skip_skills = {"local_expert", "play_instrument"}
+        if role == "Medtech":
+            skip_skills.add("zoology")
         for skill_name, skill_value in skills.items():
+            if skill_name in skip_skills:
+                continue
             sheet_skill_name = ROLE_SKILL_NAME_MAP.get(skill_name, skill_name)
-            # Store in character skills dict
             char.set_skill(sheet_skill_name, skill_value)
-            # For compatibility, also update sheet if the attribute exists
             if hasattr(sheet, sheet_skill_name):
                 setattr(sheet, sheet_skill_name, skill_value)
+
+        # Apply skill instance choices: Local Expert (all), Play Instrument (Rockerboy), Science (Tech/Medtech)
+        local_expert_area = skill_instance_choices.get("local_expert") or "Unknown"
+        char.set_skill_instance("local_expert", local_expert_area, 2)
+        if role == "Rockerboy":
+            play_inst = skill_instance_choices.get("play_instrument") or "guitar"
+            char.set_skill_instance("play_instrument", play_inst, 2)
+        if role in ("Tech", "Medtech"):
+            science_skill = skill_instance_choices.get("science") or "zoology"
+            char.set_skill(science_skill, 2)
+            if hasattr(sheet, science_skill):
+                setattr(sheet, science_skill, 2)
+
+        # Medtech: set Medicine specialties from menu or defaults
+        if role == "Medtech":
+            if medicine_specialties:
+                char.db.medicine_surgery = medicine_specialties.get("surgery", 2)
+                char.db.medicine_pharma = medicine_specialties.get("pharma", 1)
+                char.db.medicine_cryo = medicine_specialties.get("cryo", 1)
+            else:
+                char.db.medicine_surgery = 2
+                char.db.medicine_pharma = 1
+                char.db.medicine_cryo = 1
         
         # Assign gear and cyberware
         EdgerunnerChargen.assign_gear(sheet, role, gear_choices=gear_choices or {})
@@ -430,6 +542,7 @@ class CmdChargen(MuxCommand):
         # Reset all character attributes to defaults
         char.db.full_name = ""
         char.db.handle = ""
+        char.db.chargen_method = ""
         char.db.role = ""
         char.db.gender = ""
         char.db.age = 0
@@ -504,7 +617,19 @@ class CmdChargen(MuxCommand):
             self.caller.msg("You don't have a character sheet. Use 'chargen' to create one.")
             return
 
-        remaining_stat_points, remaining_skill_points = sheet.get_remaining_points()
+        # Refresh from DB to ensure we use latest data (chargen room does this before display)
+        sheet.refresh_from_db()
+
+        # Use character typeclass (source of truth) for point calculation; sheet can be stale
+        # and doesn't handle skill_instances or double-cost skills correctly.
+        char = self.caller
+        if hasattr(char, 'get_remaining_points'):
+            try:
+                remaining_stat_points, remaining_skill_points = char.get_remaining_points()
+            except Exception:
+                remaining_stat_points, remaining_skill_points = sheet.get_remaining_points()
+        else:
+            remaining_stat_points, remaining_skill_points = sheet.get_remaining_points()
         total_remaining_points = remaining_stat_points + remaining_skill_points
 
         if total_remaining_points > 0:
@@ -630,12 +755,14 @@ class CmdSelfStat(MuxCommand):
       selfstat AUTO=3
       selfstat HANDLE=CoolRunner
       selfstat AGE=25
-      selfstat charismatic impact=6
+      selfstat handgun=6
       selfstat play instrument(guitar)=3
       selfstat Spanish=4
       selfstat Japanese=6
 
-    Languages cost 1 skill point per rank (max rank 6). Use +lang all to see available languages.
+    Languages cost 1 skill point per rank (max rank 6). Role abilities cannot be
+    modified at chargen (they start at 4); improve them with +ip during play.
+    Role abilities cannot be modified at chargen; they start at 4 and are improved with +ip during play.
     """
 
     key = "selfstat"
@@ -696,8 +823,12 @@ class CmdSelfStat(MuxCommand):
                 points_needed = value - current_level
 
                 _, skill_points_spent = char.calculate_spent_points()
-                remaining_skill_points = max(0, 86 - skill_points_spent)
+                skill_pool = 86 if (char.db.chargen_method or "").strip().lower() == "edgerunner" else 52
+                remaining_skill_points = max(0, skill_pool - skill_points_spent)
 
+                if remaining_skill_points <= 0 and points_needed > 0:
+                    self.caller.msg("You have no skill points remaining. Lower a skill or language value first to free up points.")
+                    return
                 if points_needed > remaining_skill_points:
                     self.caller.msg(f"Not enough skill points. You need {points_needed} but only have {remaining_skill_points}.")
                     return
@@ -719,10 +850,15 @@ class CmdSelfStat(MuxCommand):
 
         # Check if this is a core stat
         if full_attr_name in STAT_MAPPING.values():
+            # Edgerunner: stats are pre-assigned from the table; no allocation
+            if (char.db.chargen_method or "").strip().lower() == "edgerunner":
+                self.caller.msg("Edgerunner characters have pre-assigned stats from the role table. Use 'selfstat' to allocate skill points only.")
+                return
+
             try:
                 value = int(value)
-                if value < 0 or value > 10:
-                    self.caller.msg("Stat value must be between 0 and 10.")
+                if value < CHARGEN_STAT_MIN or value > CHARGEN_STAT_MAX:
+                    self.caller.msg(f"Stat value must be between {CHARGEN_STAT_MIN} and {CHARGEN_STAT_MAX} at chargen.")
                     return
             except ValueError:
                 self.caller.msg("You must specify an integer value for stats.")
@@ -731,15 +867,18 @@ class CmdSelfStat(MuxCommand):
             # Get current value from DB attributes
             current_value = getattr(char.db, full_attr_name, 1)  # Default to 1 if not set
             points_needed = value - current_value
-            
+
             # Calculate remaining points
             stat_points_spent, _ = char.calculate_spent_points()
             remaining_stat_points = max(0, 62 - stat_points_spent)
 
+            if remaining_stat_points <= 0 and points_needed > 0:
+                self.caller.msg("You have no stat points remaining. Lower a stat value first to free up points.")
+                return
             if points_needed > remaining_stat_points:
                 self.caller.msg(f"Not enough stat points. You need {points_needed} but only have {remaining_stat_points}.")
                 return
-                
+
             # Set the new value directly on the character's DB
             setattr(char.db, full_attr_name, value)
 
@@ -747,15 +886,41 @@ class CmdSelfStat(MuxCommand):
         elif full_attr_name in SKILL_MAPPING.values():
             try:
                 value = int(value)
-                if value < 0 or value > 10:
-                    self.caller.msg("Skill value must be between 0 and 10.")
-                    return
             except ValueError:
                 self.caller.msg("You must specify an integer value for skills.")
                 return
 
+            role = (char.db.role or "").strip()
+            role_ability_skill = ROLE_ABILITY_SKILLS.get(role)
+            is_role_ability = full_attr_name == role_ability_skill
+
+            if is_role_ability:
+                self.caller.msg(
+                    "Role abilities cannot be modified during character generation. "
+                    "Your role ability starts at 4 and can only be improved beyond that using improvement points (+ip) during play."
+                )
+                return
+
+            # Medtech: surgery and medical_tech are derived from medicine specialties
+            # use medicine_surgery, medicine_pharma, medicine_cryo instead
+            if (char.db.role or "").strip() == "Medtech" and full_attr_name in ("surgery", "medical_tech"):
+                self.caller.msg(
+                    "For Medtechs, Surgery and Medical Tech are derived from Medicine specialties. "
+                    "Use 'selfstat medicine_surgery=', 'medicine_pharma=', or 'medicine_cryo=' instead."
+                )
+                return
+
+            if value < CHARGEN_SKILL_MIN or value > CHARGEN_SKILL_MAX:
+                self.caller.msg(f"Skill value must be between {CHARGEN_SKILL_MIN} and {CHARGEN_SKILL_MAX} at chargen.")
+                return
+
             # If instance is provided, handle it as a skill instance
             if instance:
+                # Chargen: skill instances 2-8 (no role ability for instances)
+                if value < CHARGEN_SKILL_MIN or value > CHARGEN_SKILL_MAX:
+                    self.caller.msg(f"Skill instance value must be between {CHARGEN_SKILL_MIN} and {CHARGEN_SKILL_MAX} at chargen.")
+                    return
+
                 # Create a skill instance key
                 skill_instance_key = f"{full_attr_name}({instance})"
                 
@@ -767,10 +932,14 @@ class CmdSelfStat(MuxCommand):
                 is_double_cost = full_attr_name in ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
                 actual_points_needed = points_needed * 2 if is_double_cost else points_needed
 
-                # Calculate remaining skill points
+                # Calculate remaining skill points (Edgerunner: 86, Complete Package: 52)
                 _, skill_points_spent = char.calculate_spent_points()
-                remaining_skill_points = max(0, 86 - skill_points_spent)
+                skill_pool = 86 if (char.db.chargen_method or "").strip().lower() == "edgerunner" else 52
+                remaining_skill_points = max(0, skill_pool - skill_points_spent)
 
+                if remaining_skill_points <= 0 and actual_points_needed > 0:
+                    self.caller.msg("You have no skill points remaining. Lower a skill value first to free up points.")
+                    return
                 if actual_points_needed > remaining_skill_points:
                     self.caller.msg(f"Not enough skill points. You need {actual_points_needed} but only have {remaining_skill_points}.")
                     return
@@ -786,25 +955,60 @@ class CmdSelfStat(MuxCommand):
                 # Display success message with instance
                 self.caller.msg(f"Set {full_attr_name.replace('_', ' ').title()} ({instance}) to {value}.")
             else:
-                # Regular skill without instance
-                # Get current skill value
+                # Regular skill without instance (role abilities blocked above)
                 current_value = char.get_skill(full_attr_name)
                 points_needed = value - current_value
-                
-                # Check for double-cost skills
+
                 is_double_cost = full_attr_name in ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
                 actual_points_needed = points_needed * 2 if is_double_cost else points_needed
 
-                # Calculate remaining skill points
                 _, skill_points_spent = char.calculate_spent_points()
-                remaining_skill_points = max(0, 86 - skill_points_spent)
+                skill_pool = 86 if (char.db.chargen_method or "").strip().lower() == "edgerunner" else 52
+                remaining_skill_points = max(0, skill_pool - skill_points_spent)
 
+                if remaining_skill_points <= 0 and actual_points_needed > 0:
+                    self.caller.msg("You have no skill points remaining. Lower a skill value first to free up points.")
+                    return
                 if actual_points_needed > remaining_skill_points:
                     self.caller.msg(f"Not enough skill points. You need {actual_points_needed} but only have {remaining_skill_points}.")
                     return
-                    
-                # Set the skill value using the character's skill setter method
+
                 char.set_skill(full_attr_name, value)
+
+        # Medicine specialties (Medtech only, chargen only) - allocate Medicine rank
+        elif full_attr_name in MEDICINE_SPECIALTY_ATTRIBUTES:
+            if (char.db.role or "").strip() != "Medtech":
+                self.caller.msg("Medicine specialties are only for Medtechs.")
+                return
+            try:
+                value = int(value)
+            except ValueError:
+                self.caller.msg("You must specify an integer value.")
+                return
+            medicine = char.get_skill("medicine") or 0
+            s = getattr(char.db, "medicine_surgery", 0) or 0
+            p = getattr(char.db, "medicine_pharma", 0) or 0
+            c = getattr(char.db, "medicine_cryo", 0) or 0
+            if full_attr_name == "medicine_surgery":
+                s = value
+            elif full_attr_name == "medicine_pharma":
+                p = value
+            else:
+                c = value
+            ok, err = validate_medicine_specialties(medicine, s, p, c)
+            if not ok:
+                self.caller.msg(err)
+                return
+            char.set_medicine_specialty(
+                "surgery" if full_attr_name == "medicine_surgery" else "pharma" if full_attr_name == "medicine_pharma" else "cryo",
+                value,
+            )
+            s, p, c = char.get_medicine_specialties()
+            self.caller.msg(
+                f"Set {full_attr_name.replace('_', ' ').title()} to {value}. "
+                f"Medicine allocation: Surgery {s}, Pharma {p}, Cryo {c} (must sum to {medicine})."
+            )
+            return
 
         # For role attribute specifically, validate against allowed values
         elif full_attr_name == 'role':

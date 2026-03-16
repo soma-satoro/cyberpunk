@@ -530,12 +530,38 @@ class Character(DefaultCharacter):
     
     def get_skill(self, skill_name):
         """Get a skill value by name."""
-        return self.db.skills.get(skill_name.lower().replace(' ', '_'), 0)
+        skill_key = skill_name.lower().replace(' ', '_')
+        # Medtech: Surgery and Medical Tech are derived from Medicine specialties
+        if (self.db.role or "").strip() == "Medtech":
+            if skill_key == "surgery":
+                from world.chargen_constants import get_medicine_surgery_skill
+                return get_medicine_surgery_skill(self.db.medicine_surgery)
+            if skill_key == "medical_tech":
+                from world.chargen_constants import get_medical_tech_skill
+                return get_medical_tech_skill(self.db.medicine_pharma, self.db.medicine_cryo)
+        return self.db.skills.get(skill_key, 0)
+    
+    def get_medicine_specialties(self):
+        """Return (surgery, pharma, cryo) allocation for Medtech."""
+        return (
+            getattr(self.db, 'medicine_surgery', 0) or 0,
+            getattr(self.db, 'medicine_pharma', 0) or 0,
+            getattr(self.db, 'medicine_cryo', 0) or 0
+        )
+    
+    def set_medicine_specialty(self, specialty, value):
+        """Set a Medicine specialty (surgery, pharma, or cryo). Medtech only."""
+        key = f"medicine_{specialty}"
+        setattr(self.db, key, int(value))
     
     def set_skill(self, skill_name, value):
-        """Set a skill value."""
+        """Set a skill value. Rejects core stat names (they belong in db.<stat>)."""
+        from world.cyberpunk_constants import STATS
         skill_key = skill_name.lower().replace(' ', '_')
-        skills = self.db.skills
+        if skill_key in STATS:
+            # Don't allow stats to be stored in skills - would cause double-counting
+            return
+        skills = self.db.skills or {}
         skills[skill_key] = value
         self.db.skills = skills
     
@@ -1172,35 +1198,72 @@ class Character(DefaultCharacter):
         return self.db.skill_instances or {}
     
     def calculate_spent_points(self):
-        """Calculate spent character points"""
-        # Stats
+        """Calculate spent character points.
+        Role ability: first 4 points are free (not deducted from skill pool).
+        Skills with instances (e.g. Martial Arts (Krav Maga)): count instances only, not base.
+        """
+        # Stats - use (x or 0) to handle None from uninitialized attributes
         stat_points = sum([
-            self.db.intelligence, self.db.reflexes, self.db.dexterity, 
-            self.db.technology, self.db.cool, self.db.willpower,
-            self.db.luck, self.db.move, self.db.body, self.db.empathy
+            self.db.intelligence or 0, self.db.reflexes or 0, self.db.dexterity or 0,
+            self.db.technology or 0, self.db.cool or 0, self.db.willpower or 0,
+            self.db.luck or 0, self.db.move or 0, self.db.body or 0, self.db.empathy or 0
         ])
-        
+
         # Skills - get from skills dictionary
-        skills = self.db.skills
-        double_cost_skills = ['autofire', 'martial_arts', 'pilot_air', 
-                            'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
+        from world.chargen_constants import ROLE_ABILITY_FREE_POINTS, ROLE_ABILITY_SKILLS
+        from world.cyberpunk_constants import STATS
+        core_stats = frozenset(STATS)  # Don't count stats that erroneously ended up in skills
+        skills = dict(self.db.skills or {})
+        # Remove any stats that erroneously ended up in skills (e.g. technology); prevents double-counting
+        stats_to_remove = [k for k in skills if k in core_stats]
+        if stats_to_remove:
+            for k in stats_to_remove:
+                del skills[k]
+            self.db.skills = skills
+        double_cost_skills = ['autofire', 'martial_arts', 'pilot_air',
+                             'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
+        # Base skills that have instances: don't count base (instance counts instead)
+        skills_with_instances = set()
+        if self.db.skill_instances:
+            for skill_instance in self.db.skill_instances:
+                if "(" in skill_instance:
+                    skills_with_instances.add(skill_instance.split("(")[0])
         skill_points = 0
+        role = (self.db.role or "").strip()
+        role_ability_skill = ROLE_ABILITY_SKILLS.get(role) if role else None
         for skill, value in skills.items():
+            if skill in skills_with_instances:
+                continue  # Instance counts instead; avoid double-count
+            try:
+                val = int(value) if value is not None else 0
+            except (TypeError, ValueError):
+                val = 0
             multiplier = 2 if skill in double_cost_skills else 1
-            skill_points += value * multiplier
-        
+            if skill == role_ability_skill:
+                billable = max(0, val - ROLE_ABILITY_FREE_POINTS)
+                skill_points += billable * multiplier
+            else:
+                skill_points += val * multiplier
+
         # Skill instances - get from skill_instances dictionary
         if self.db.skill_instances:
             for skill_instance, value in self.db.skill_instances.items():
-                # Extract base skill name from instance key (format: "skill(instance)")
-                if "(" in skill_instance:
-                    base_skill = skill_instance.split("(")[0]
-                    multiplier = 2 if base_skill in double_cost_skills else 1
-                    skill_points += value * multiplier
-        
+                if "(" not in skill_instance:
+                    continue
+                base_skill = skill_instance.split("(")[0]
+                try:
+                    val = int(value) if value is not None else 0
+                except (TypeError, ValueError):
+                    val = 0
+                multiplier = 2 if base_skill in double_cost_skills else 1
+                skill_points += val * multiplier
+
         # Languages
-        language_points = sum(level for _, level in self.languages.items())
-        
+        language_points = sum(
+            int(level) if level is not None else 0
+            for _, level in self.languages.items()
+        )
+
         total_skill_points = skill_points + language_points
         return stat_points, total_skill_points
         
@@ -1514,9 +1577,19 @@ class Character(DefaultCharacter):
         return sheet
 
     def get_remaining_points(self):
-        """Get remaining character points"""
+        """Get remaining character points.
+        Edgerunner: stats pre-assigned from table (0 remaining), skills use 86 pool.
+        Complete Package: 62 stat points, 52 skill points.
+        """
         stat_points_spent, skill_points_spent = self.calculate_spent_points()
-        remaining_stat_points = max(0, 62 - stat_points_spent)
-        remaining_skill_points = max(0, 86 - skill_points_spent)
+        method = (self.db.chargen_method or "").strip().lower()
+        if method == "edgerunner":
+            # Stats are pre-assigned; no allocation. Skills: 86 pool.
+            remaining_stat_points = 0
+            remaining_skill_points = max(0, 86 - skill_points_spent)
+        else:
+            # Complete Package: 62 stat, 52 skill
+            remaining_stat_points = max(0, 62 - stat_points_spent)
+            remaining_skill_points = max(0, 52 - skill_points_spent)
         return remaining_stat_points, remaining_skill_points
 

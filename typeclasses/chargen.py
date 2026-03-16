@@ -20,10 +20,19 @@ class ChargenRoom(DefaultRoom):
     def get_remaining_points(self, character):
         """
         Calculate and return the remaining stat and skill points for the character.
+        Use character typeclass (source of truth for Edgerunner) when available;
+        fall back to sheet for Complete Package / legacy.
         """
         if not hasattr(character, 'character_sheet'):
             return None, None
 
+        # Character typeclass has the actual stats/skills for Edgerunner;
+        # sheet can be stale. Prefer character.get_remaining_points().
+        if hasattr(character, 'get_remaining_points'):
+            try:
+                return character.get_remaining_points()
+            except Exception:
+                pass
         return character.character_sheet.get_remaining_points()
 
     def update_remaining_points(self, character):

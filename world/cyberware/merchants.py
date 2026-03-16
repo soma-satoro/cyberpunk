@@ -10,6 +10,25 @@ from world.commerce.pricing import get_purchase_discount_percent, calculate_fina
 from .models import Cyberware
 from evennia import CmdSet
 
+# Main cyberware that provide option slots. Include both standard and discount variants.
+# Add new discount versions here when they are added to cyberware_data.
+MAIN_CYBERWARE_NAMES = {
+    "cybereye": ["Cybereye"],
+    "cyberaudio": ["Cyberaudio Suite", "Discount Cyberaudio Suite"],
+    "cyberarm": ["Cyberarm"],
+    "cyberleg": ["Cyberleg"],
+}
+# Slots provided by each main piece (discount variants often have fewer)
+MAIN_CYBERWARE_SLOTS = {
+    "Cybereye": 3,
+    "Cyberaudio Suite": 3,
+    "Discount Cyberaudio Suite": 1,
+    "Cyberarm": 4,
+    "Cyberleg": 3,
+}
+# Names to exclude when counting "used" slots (main pieces provide slots; options use them)
+MAIN_CYBERWARE_EXCLUDE = ["Cybereye", "Cyberaudio Suite", "Discount Cyberaudio Suite", "Cyberarm", "Cyberleg"]
+
 def check_cyberware_requirements(character, cyberware):
     print(f"Debug: Entering check_cyberware_requirements for {cyberware.name}")
     
@@ -45,8 +64,13 @@ def check_cyberware_requirements(character, cyberware):
                 print("Debug: Artificial Shoulder Mount required but not found")
                 return False, "You need to install an Artificial Shoulder Mount to have more than two Cyberarms."
     
-    elif cyberware.name.lower() == "cyberaudio suite":
-        cyberaudio_suite_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cyberaudio Suite", installed=True).count()
+    elif cyberware.name.lower() in [n.lower() for n in MAIN_CYBERWARE_NAMES["cyberaudio"]]:
+        # Count both standard and discount - you can only have one total without Sensor Array
+        cyberaudio_suite_count = CyberwareInstance.objects.filter(
+            character_sheet=character,
+            cyberware__name__in=MAIN_CYBERWARE_NAMES["cyberaudio"],
+            installed=True
+        ).count()
         print(f"Debug: Current Cyberaudio Suite count: {cyberaudio_suite_count}")
         
         if cyberaudio_suite_count >= 1:
@@ -66,10 +90,14 @@ def check_cyberware_requirements(character, cyberware):
     
     # Check slot availability for cyberware options
     elif cyberware.type.lower() in ["cybereye", "cyberaudio", "cyberarm", "cyberleg"]:
-        main_cyberware_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact=cyberware.type, installed=True).count()
+        names_to_check = MAIN_CYBERWARE_NAMES.get(cyberware.type.lower(), [cyberware.type])
+        main_cyberware_count = CyberwareInstance.objects.filter(
+            character_sheet=character, cyberware__name__in=names_to_check, installed=True
+        ).count()
         if main_cyberware_count == 0:
-            print(f"Debug: No {cyberware.type} installed")
-            return False, f"You need to install a {cyberware.type} before installing {cyberware.name}."
+            display_name = "Cyberaudio Suite" if cyberware.type.lower() == "cyberaudio" else cyberware.type
+            print(f"Debug: No {display_name} installed")
+            return False, f"You need to install a {display_name} before installing {cyberware.name}."
         
         total_slots, used_slots = count_available_slots(character, cyberware.type.lower())
         if used_slots + cyberware.slots > total_slots:
@@ -95,26 +123,32 @@ def check_cyberware_requirements(character, cyberware):
     return True, ""
 
 def count_available_slots(character, slot_type):
+    """Sum slots from all installed main cyberware (standard and discount variants)."""
     if slot_type == "cybereye":
-        cybereye_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cybereye", installed=True).count()
-        total_slots = cybereye_count * 3
+        main_names = MAIN_CYBERWARE_NAMES["cybereye"]
     elif slot_type == "cyberaudio":
-        cyberaudio_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cyberaudio Suite", installed=True).count()
-        total_slots = cyberaudio_count * 3
+        main_names = MAIN_CYBERWARE_NAMES["cyberaudio"]
     elif slot_type == "cyberarm":
-        cyberarm_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cyberarm", installed=True).count()
-        total_slots = cyberarm_count * 4
+        main_names = MAIN_CYBERWARE_NAMES["cyberarm"]
     elif slot_type == "cyberleg":
-        cyberleg_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cyberleg", installed=True).count()
-        total_slots = cyberleg_count * 3
+        main_names = MAIN_CYBERWARE_NAMES["cyberleg"]
     else:
         return 0, 0
+
+    # Sum slots from each installed main piece (discount variants have fewer slots)
+    total_slots = 0
+    for cw_instance in CyberwareInstance.objects.filter(
+        character_sheet=character,
+        cyberware__name__in=main_names,
+        installed=True
+    ).select_related("cyberware"):
+        total_slots += MAIN_CYBERWARE_SLOTS.get(cw_instance.cyberware.name, 0)
 
     used_slots = CyberwareInstance.objects.filter(
         character_sheet=character,
         cyberware__type__iexact=slot_type,
         installed=True
-    ).exclude(cyberware__name__in=["Cybereye", "Cyberaudio Suite", "Cyberarm", "Cyberleg"]).count()
+    ).exclude(cyberware__name__in=MAIN_CYBERWARE_EXCLUDE).count()
 
     return total_slots, used_slots
 
