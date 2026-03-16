@@ -153,7 +153,7 @@ class CmdRoom(MuxCommand):
       +room/area <target>=<code>     - Set area and auto-assign room code (e.g. NC)
       +room/code <target>=<code>     - Manual room code override (e.g. NC01)
       +room/hierarchy <target>=<district>,<area> - Set location hierarchy for display
-      +room/tag <target>=<tag1>,<tag2> - Set room tags
+      +room/tag <target>=<tag1>,<tag2> - Set room tags (vendor tags enable list/buy)
       +room/tags <target>            - View room tags
       +room/coords <target>=<x>,<y>  - Set coordinates for mapping
       +room/chargen <target>=<on/off> - Convert room to/from ChargenRoom typeclass
@@ -166,7 +166,12 @@ class CmdRoom(MuxCommand):
       +room/area here=NC
       +room/hierarchy here=Northside,Watson
       +room/tag here=bar,nightlife
+      +room/tag here=handguns,drugs,cyberware
       +room/tags here
+
+    Vendor tags (enable list/buy without NPCs): handguns, shoulder_arms, ranged, melee,
+    weapons, armor, gear, medical, drugs, electronics, tools, clothing, cyberdecks,
+    cyberware (or ripperdoc). Broad: ranged, melee, weapons, armor, gear, cyberware.
 
     'District' is smaller; 'Area' is larger. If you are in the room East Kabuki, 
     and you set the hierarchy to Kabuki,Watson, it will display as

@@ -63,6 +63,8 @@ SKILL_MAPPING = {
     'MA': 'martial_arts',
     'MEL': 'melee',
     'ACT': 'acting',
+    'PI': 'play_instrument',
+    'PG': 'personal_grooming',
     'ARCH': 'archery',
     'AUTO': 'autofire',
     'HG': 'handgun',

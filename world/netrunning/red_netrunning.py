@@ -273,15 +273,15 @@ def roll_d10() -> int:
 
 def _format_interface_dice(details: dict, bonus: int = 0) -> str:
     """Format dice part for interface check display."""
-    parts = [str(details["first_roll"])]
+    segments = [str(details["first_roll"])]
     for roll_val, added in details.get("extra_rolls", []):
         if added:
-            parts.append(f"+ {roll_val} (crit)")
+            segments.append(f"+ {roll_val} (crit)")
         else:
-            parts.append(f"- {roll_val} (fumble)")
+            segments.append(f"- {roll_val} (fumble: 2nd d10 = {roll_val})")
     if bonus != 0:
-        parts.append(f"+ {bonus}" if bonus > 0 else f"- {-bonus}")
-    return " + ".join(parts)
+        segments.append(f"+ {bonus}" if bonus > 0 else f"- {-bonus}")
+    return " ".join(segments)
 
 
 def interface_check(character, bonus: int = 0) -> Tuple[int, int, int, dict]:

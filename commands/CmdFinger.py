@@ -3,7 +3,7 @@ from evennia.utils.ansi import ANSIString
 from evennia.utils.utils import crop, time_format
 from world.utils.formatting import header, footer, divider
 from world.utils.time_utils import TIME_MANAGER
-from evennia.utils.search import search_object
+from world.utils.search_helpers import search_character
 from time import time
 import datetime
 import re
@@ -264,21 +264,12 @@ class CmdFinger(MuxCommand):
         else:
             # Clean up the search term by removing quotes
             search_term = self.args.strip("'\"").strip()
-            
-            # First try direct name match, restricting to Character typeclass
-            target = self.caller.search(search_term, global_search=True, typeclass=Character)
-            
-            # If no direct match or search failed, try alias
-            if not target:
-                target = Character.get_by_alias(search_term.lower())
+
+            # search_character handles name, dbref, and alias (both Evennia's and custom finger alias)
+            target = search_character(self.caller, search_term, global_search=True, quiet=True)
 
             if not target:
                 self.caller.msg(f"Could not find a character named '{search_term}'.")
-                return
-            
-            # Double check that we have a Character
-            if not isinstance(target, Character):
-                self.caller.msg(f"'{search_term}' is not a valid character.")
                 return
 
         # Get basic character info - modified to handle None case

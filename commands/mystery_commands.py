@@ -264,7 +264,7 @@ class CmdInvestigate(MuxCommand):
         skill_val = getattr(char.db, "deduction", 0) or 0
         stat_val = getattr(char.db, "intelligence", 5) or 5
         from world.utils.roll_utils import roll_skill_check, check_success
-        total, _ = roll_skill_check(stat_val, skill_val)
+        total, details = roll_skill_check(stat_val, skill_val)
         success = check_success(total, 15)
         focus_damage = _roll_dice("1d6")
         focus_obj.current_focus -= focus_damage

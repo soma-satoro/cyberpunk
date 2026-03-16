@@ -21,6 +21,13 @@ from world.commerce.pricing import (
     calculate_final_price,
     is_expensive_item,
 )
+from world.commerce.vendor_tags import (
+    is_vendor_room,
+    get_vendor_catalog_filters,
+    item_matches_vendor_filters,
+    get_available_main_categories,
+    get_available_subcategories,
+)
 
 # Import ChargenRoom for chargen buy
 from typeclasses.chargen import ChargenRoom
@@ -155,6 +162,138 @@ def _get_chargen_subcategories():
     return result
 
 
+def _get_vendor_catalog(room, main_cat=None, subcategory=None):
+    """
+    Build catalog for a tag-based vendor room. No price limit (filtered at buy time).
+    Filters by room's vendor tags. main_cat/subcategory further narrow the result.
+    """
+    filters = get_vendor_catalog_filters(room)
+    if not filters:
+        return []
+
+    catalog = []
+    # Weapons
+    if main_cat is None or main_cat == "weapons":
+        for w in weapons:
+            entry = dict(w)
+            entry["_type"] = "weapon"
+            entry["_merchant_type"] = "arms_dealer"
+            if not item_matches_vendor_filters(entry, filters):
+                continue
+            if subcategory and w.get("category", "").lower() != subcategory.lower():
+                continue
+            catalog.append(entry)
+    # Armor
+    if main_cat is None or main_cat == "armor":
+        for a in armors:
+            entry = dict(a)
+            entry["_type"] = "armor"
+            entry["_merchant_type"] = "clothier"
+            if not item_matches_vendor_filters(entry, filters):
+                continue
+            if subcategory:
+                locs = [x.strip().lower() for x in (a.get("locations", "") or "").split(",")]
+                if subcategory.lower() not in locs:
+                    continue
+            catalog.append(entry)
+    # Gear (including cyberdecks)
+    if main_cat is None or main_cat == "gear":
+        for g in gears:
+            if g.get("category") == "Cyberware":
+                continue
+            entry = dict(g)
+            entry["_type"] = "gear"
+            entry["_merchant_type"] = "gear_merchant"
+            if not item_matches_vendor_filters(entry, filters):
+                continue
+            if subcategory and g.get("category", "").lower() != subcategory.lower():
+                continue
+            catalog.append(entry)
+        if not subcategory or subcategory.lower() == "cyberdeck":
+            for cd in cyberdecks_data:
+                entry = {
+                    "name": cd["name"],
+                    "value": cd["value"],
+                    "hardware_slots": cd.get("hardware_slots", 0),
+                    "program_slots": cd.get("program_slots", 0),
+                    "any_slots": cd.get("any_slots", 0),
+                    "_type": "cyberdeck",
+                    "_merchant_type": "cyberdeck_merchant",
+                }
+                if item_matches_vendor_filters(entry, filters):
+                    catalog.append(entry)
+    # Cyberware
+    if main_cat is None or main_cat == "cyberware":
+        for cw in Cyberware.objects.all().order_by("type", "name"):
+            entry = {
+                "name": cw.name,
+                "value": cw.cost,
+                "_type": "cyberware_implant",
+                "_cyberware": cw,
+            }
+            if not item_matches_vendor_filters(entry, filters):
+                continue
+            if subcategory and getattr(cw, "type", "").lower() != subcategory.lower():
+                continue
+            catalog.append(entry)
+        for g in gears:
+            if g.get("category") != "Cyberware":
+                continue
+            entry = dict(g)
+            entry["_type"] = "gear"
+            entry["_merchant_type"] = "gear_merchant"
+            if not item_matches_vendor_filters(entry, filters):
+                continue
+            if subcategory:
+                continue
+            catalog.append(entry)
+    return catalog
+
+
+def _get_vendor_subcategories(room):
+    """Return dict of main_category -> set of subcategories available in this vendor room."""
+    catalog = _get_vendor_catalog(room)
+    result = {"weapons": set(), "armor": set(), "gear": set(), "cyberware": set()}
+    for item in catalog:
+        mt = item.get("_type")
+        if mt == "weapon":
+            if item.get("category"):
+                result["weapons"].add(item["category"])
+        elif mt == "armor":
+            for loc in (item.get("locations") or "").split(","):
+                if loc.strip():
+                    result["armor"].add(loc.strip())
+        elif mt == "gear":
+            cat = item.get("category")
+            if cat and cat != "Cyberware":
+                result["gear"].add(cat)
+        elif mt == "cyberdeck":
+            result["gear"].add("Cyberdeck")
+        elif mt == "cyberware_implant":
+            cw = item.get("_cyberware")
+            if cw and getattr(cw, "type", ""):
+                result["cyberware"].add(cw.type)
+    return result
+
+
+def _find_vendor_item(room, item_name, cyberware_only=False):
+    """Find item in vendor room catalog by name. Returns (item_dict, item_type, gear_category) or None."""
+    item_name_lower = item_name.lower()
+    if cyberware_only:
+        catalog = _get_vendor_catalog(room, main_cat="cyberware")
+        for item in catalog:
+            if item.get("_type") == "cyberware_implant" and item.get("name", "").lower() == item_name_lower:
+                return (item, "cyberware_implant", None)
+        return None
+    catalog = _get_vendor_catalog(room)
+    for item in catalog:
+        if item.get("name", "").lower() == item_name_lower:
+            itype = item.get("_type")
+            gear_cat = item.get("category") if itype == "gear" else None
+            return (item, itype, gear_cat)
+    return None
+
+
 def _find_chargen_item(item_name, cyberware_only=False):
     """Find item in chargen catalog by name (value <= 1000). Returns (item_dict_or_cyberware, item_type, gear_category) or None.
     cyberware_only: if True, only search Cyberware model (body implants). If False, search weapons/armor/gear/cyberdecks only."""
@@ -190,19 +329,18 @@ def _find_chargen_item(item_name, cyberware_only=False):
     return None
 
 
-class CmdBuy(Command):
+class CmdBuy(MuxCommand):
     """
-    Buy an item from a merchant or from the chargen catalog.
+    Buy an item from a merchant, vendor room, or chargen catalog.
 
     Usage:
-      buy <item name> from <merchant>   - Buy from a vendor (items 1000eb or under)
-      buy <item name>                   - In chargen: buy equipment (weapons, armor, gear, cyberdecks)
-      buy/cyberware <name>              - In chargen: buy body cyberware (implants)
-      buy/stash <cyberware>             - In chargen: buy cyberware without installing (use with /cyberware)
+      buy <item name> from <merchant>   - Buy from an NPC vendor
+      buy <item name>                   - In chargen or vendor room: buy equipment
+      buy/cyberware <name>              - Buy body cyberware (implants)
+      buy/stash <cyberware>             - Buy cyberware without installing (use with /cyberware)
 
-    In the chargen room, you can purchase equipment (up to 1000 eb) without vendors.
-    At vendors, items over 1000eb cannot be purchased (except by Fixer, Medtech,
-    Netrunner, or Tech in their specialty categories).
+    Vendor rooms are locations tagged with item categories (e.g. handguns, drugs, cyberware).
+    Use 'list' to see what's available. Items over 1000eb require role specialty.
     Role discounts apply.
     """
 
@@ -211,8 +349,18 @@ class CmdBuy(Command):
     locks = "cmd:all()"
     help_category = "Economy"
 
+    def parse(self):
+        MuxCommand.parse(self)
+        # Fallback: if parser put switch in args (e.g. "/cyberware biomonitor"), strip it
+        args = (self.args or "").strip()
+        for prefix in ("/cyberware ", "cyberware ", "/stash ", "stash "):
+            if args.lower().startswith(prefix.lower()):
+                self.args = args[len(prefix):].strip()
+                break
+
     def func(self):
         in_chargen = isinstance(self.caller.location, ChargenRoom)
+        in_vendor_room = is_vendor_room(self.caller.location)
 
         if " from " in self.args:
             # Vendor purchase: buy <item> from <merchant>
@@ -220,6 +368,9 @@ class CmdBuy(Command):
         elif in_chargen and self.args.strip():
             # Chargen purchase: buy <item> (no merchant)
             self._buy_from_chargen()
+        elif in_vendor_room and self.args.strip():
+            # Tag-based vendor room: buy <item> (no merchant)
+            self._buy_from_vendor_room()
         else:
             if in_chargen:
                 self.caller.msg(
@@ -228,11 +379,111 @@ class CmdBuy(Command):
                     "Use 'list chargen/weapons', 'list chargen/armor', 'list chargen/gear', "
                     "or 'list chargen/cyberware' to see available items."
                 )
+            elif in_vendor_room:
+                self.caller.msg(
+                    "Usage: buy <item name> - Purchase from this vendor. "
+                    "Use buy/cyberware <name> for cyberware. Use 'list' to see available items."
+                )
             else:
                 self.caller.msg(
                     "Usage: buy <item name> from <merchant> - Purchase from a vendor in your location."
                 )
             return
+
+    def _buy_from_vendor_room(self):
+        """Handle purchase from tag-based vendor room (no NPC merchant)."""
+        item_name = self.args.strip()
+        cyberware_only = "cyberware" in (self.switches or [])
+        result = _find_vendor_item(self.caller.location, item_name, cyberware_only=cyberware_only)
+        if not result:
+            hint = "Use 'buy/cyberware <name>' for cyberware." if not cyberware_only else ""
+            self.caller.msg(
+                f"'{item_name}' is not available here. Use 'list' to see what's for sale. " + hint
+            )
+            return
+
+        item, item_type, gear_category = result
+
+        if item_type == "cyberware_implant":
+            stash = "stash" in (self.switches or [])
+            self._buy_cyberware_from_chargen(item, stash=stash)
+            return
+
+        merchant_type = item.get("_merchant_type", "gear_merchant")
+        base_price = item["value"]
+        item_type_for_pricing = "gear" if item_type == "cyberdeck" else item_type
+
+        if is_expensive_item(base_price):
+            if not can_purchase_expensive_from_vendor(
+                self.caller, base_price, item_type_for_pricing,
+                "Cyberdeck" if item_type == "cyberdeck" else gear_category
+            ):
+                self.caller.msg(
+                    f"{item['name']} costs {base_price} eb and is too expensive for vendors to sell. "
+                    "Very expensive items can only be purchased in the chargen room, or by Fixer, "
+                    "Medtech, Netrunner, Tech, or Nomad within their specialty categories."
+                )
+                return
+
+        discount = get_purchase_discount_percent(
+            self.caller, item_type_for_pricing,
+            "Cyberdeck" if item_type == "cyberdeck" else gear_category
+        )
+        price = calculate_final_price(base_price, discount)
+
+        inventory, _ = Inventory.get_or_create_for_character(self.caller)
+
+        if self._item_exists_in_inventory(inventory, item):
+            self.caller.msg(f"You already own {item['name']}.")
+            return
+
+        is_fashion = (
+            gear_category == "Clothing"
+            or (item.get("name") or "").strip() in FASHION_ITEM_NAMES
+        )
+        fashion_to_spend = 0
+        cash_to_spend = 0
+        if is_fashion:
+            fashion_budget = CharacterMoneyService.get_fashion_budget(self.caller)
+            cash_balance = CharacterMoneyService.get_balance(self.caller)
+            fashion_to_spend = min(fashion_budget, price)
+            cash_to_spend = price - fashion_to_spend
+            if fashion_budget + cash_balance < price:
+                self.caller.msg(
+                    f"You don't have enough for {item['name']}. "
+                    f"It costs {price} eb."
+                )
+                return
+            if fashion_to_spend > 0 and not CharacterMoneyService.spend_fashion_money(self.caller, fashion_to_spend):
+                self.caller.msg(f"You don't have enough fashion budget.")
+                return
+            if cash_to_spend > 0 and not CharacterMoneyService.spend_money(self.caller, cash_to_spend):
+                if fashion_to_spend > 0:
+                    CharacterMoneyService.add_fashion_money(self.caller, fashion_to_spend)
+                self.caller.msg(
+                    f"You don't have enough Eurodollars for {item['name']}. "
+                    f"It costs {price} eb (after {fashion_to_spend} eb from fashion budget)."
+                )
+                return
+        elif not CharacterMoneyService.spend_money(self.caller, price):
+            self.caller.msg(
+                f"You don't have enough Eurodollars to buy {item['name']}. It costs {price} eb."
+            )
+            return
+
+        self._add_item_to_inventory(self.caller, item, merchant_type)
+        if discount > 0:
+            self.caller.msg(
+                f"You have purchased {item['name']} for {price} eb "
+                f"(base {base_price} eb, {discount}% role discount applied)."
+            )
+        elif is_fashion and fashion_to_spend > 0 and cash_to_spend > 0:
+            self.caller.msg(
+                f"You have purchased {item['name']} for {price} eb "
+                f"({fashion_to_spend} eb from fashion budget, {cash_to_spend} eb from cash)."
+            )
+        else:
+            self.caller.msg(f"You have purchased {item['name']} for {price} eb.")
 
     def _buy_from_chargen(self):
         """Handle chargen room purchase - only items 1000eb or under."""
@@ -262,9 +513,12 @@ class CmdBuy(Command):
         discount = get_purchase_discount_percent(self.caller, item_type, gear_category)
         price = calculate_final_price(base_price, discount)
 
-        inventory = self.get_character_inventory(self.caller)
-        if not inventory:
-            self.caller.msg("You don't have an inventory!")
+        try:
+            inventory, _ = Inventory.get_or_create_for_character(self.caller)
+        except Exception as e:
+            from evennia import logger
+            logger.log_err(f"buy chargen: get_or_create_for_character failed: {e}")
+            self.caller.msg("Could not access or create your inventory. Please contact staff.")
             return
 
         if self._item_exists_in_inventory(inventory, item):
@@ -470,9 +724,12 @@ class CmdBuy(Command):
             self.caller.msg(f"Sorry, {item_name} is not available from this merchant.")
             return
 
-        inventory = self.get_character_inventory(self.caller)
-        if not inventory:
-            self.caller.msg("You don't have an inventory!")
+        try:
+            inventory, _ = Inventory.get_or_create_for_character(self.caller)
+        except Exception as e:
+            from evennia import logger
+            logger.log_err(f"buy from vendor: get_or_create_for_character failed: {e}")
+            self.caller.msg("Could not access or create your inventory. Please contact staff.")
             return
 
         if self._item_exists_in_inventory(inventory, item):
@@ -556,11 +813,8 @@ class CmdBuy(Command):
         return False
 
     def _add_item_to_inventory(self, character, item, merchant_type):
-        # Get character's inventory (checking typeclass first)
-        inventory = self.get_character_inventory(character)
-        if not inventory:
-            self.caller.msg("Error: Couldn't find your inventory.")
-            return
+        # Get or create character's inventory (creates if missing, e.g. during chargen)
+        inventory, _ = Inventory.get_or_create_for_character(character)
         
         if merchant_type == "arms_dealer":
             weapon, created = Weapon.objects.get_or_create(
@@ -571,7 +825,8 @@ class CmdBuy(Command):
                     'hands': item['hands'],
                     'concealable': item['concealable'],
                     'weight': item['weight'],
-                    'value': item['value']
+                    'value': item['value'],
+                    'category': item.get('category', 'handgun'),
                 }
             )
             inventory.weapons.add(weapon)
@@ -626,24 +881,23 @@ class CmdBuy(Command):
 
 class CmdListItems(MuxCommand):
     """
-    List items available from a merchant or the chargen catalog.
+    List items available from a merchant, vendor room, or chargen catalog.
 
     Usage:
-      list from <merchant>
-      list items from <merchant>
-      list chargen                    - Show category menu
+      list                            - In vendor room: show category menu
+      list <category>                 - In vendor room: list weapons, handguns, cyberware, etc.
+      list from <merchant>            - List from NPC vendor
+      list chargen                    - In chargen: show category menu
       list chargen/weapons            - All weapons (or list chargen weapons)
       list chargen/gear               - All gear
       list chargen/medical            - Gear in Medical category
       list chargen/shoulder_arms      - Weapons in shoulder_arms category
       list chargen/search <string>    - Search chargen catalog (in chargen room)
-      list/search <string>            - Search all equipment
+      list/search <string>            - Search equipment (or vendor catalog if in vendor room)
       list/search chargen <string>    - Search chargen catalog (1000 eb or under)
       list/info <item>                - Detailed info on an item
-      list/info chargen/<item>        - Same (chargen/ prefix optional)
 
-    In the chargen room, list chargen shows equipment (1000 eb or under).
-    Use subcategories for granular filtering (e.g. medical, shoulder_arms).
+    Vendor rooms use +room/tag with categories like handguns, drugs, cyberware, ranged, melee.
     """
 
     key = "list"
@@ -659,6 +913,9 @@ class CmdListItems(MuxCommand):
         # list/search [chargen] <string> - search equipment
         if "search" in (self.switches or []):
             raw = (self.args or "").strip()
+            if is_vendor_room(self.caller.location) and raw:
+                self._list_vendor_search(raw)
+                return
             chargen_only = False
             if raw.lower().startswith("chargen"):
                 rest = raw[7:].lstrip(" /")
@@ -686,16 +943,32 @@ class CmdListItems(MuxCommand):
             self.caller.msg("\n".join(format_item_info(source, data)))
             return
 
+        in_chargen = isinstance(self.caller.location, ChargenRoom)
+        in_vendor_room = is_vendor_room(self.caller.location)
+
         if not self.args:
-            self.caller.msg(
-                "Usage: list from <merchant> | list chargen/weapons | list chargen/armor | "
-                "list chargen/gear | list chargen/cyberware"
-            )
+            if in_vendor_room:
+                self._list_vendor_menu()
+                return
+            if in_chargen:
+                self.caller.msg(
+                    "Usage: list chargen | list chargen/weapons | list chargen/armor | "
+                    "list chargen/gear | list chargen/cyberware"
+                )
+            else:
+                self.caller.msg(
+                    "Usage: list from <merchant> | list chargen/weapons | list chargen/armor | "
+                    "list chargen/gear | list chargen/cyberware"
+                )
             return
 
         args = self.args.strip().lower()
 
-        in_chargen = isinstance(self.caller.location, ChargenRoom)
+        # Vendor room: list, list weapons, list handguns, etc. (list/search handled above)
+        if in_vendor_room and " from " not in args:
+            self._list_vendor(args)
+            return
+
         if in_chargen and (args == "chargen" or args.startswith("chargen/") or args.startswith("chargen ")):
             if "/" in args:
                 _, sub = args.split("/", 1)
@@ -834,6 +1107,107 @@ class CmdListItems(MuxCommand):
         output.append("          |wlist/info constitutional arms multi|n  (fuzzy string matching)")
         output.append(footer())
         self.caller.msg("\n".join(output))
+
+    def _list_vendor_menu(self):
+        """Show vendor category menu based on room tags."""
+        main_cats = get_available_main_categories(self.caller.location)
+        if not main_cats:
+            self.caller.msg("This location doesn't have any vendor categories configured.")
+            return
+        subcats = _get_vendor_subcategories(self.caller.location)
+        output = []
+        output.append(header("Vendor Catalog"))
+        output.append("Items available at this location. Use |wlist <category>|n to browse.")
+        output.append("|b-----------------------------------------------------------------------------|n")
+        for mc in main_cats:
+            subs = sorted(subcats.get(mc, []))
+            if subs:
+                sub_links = " | ".join(f"|w{s.lower().replace(' ', '_')}|n" for s in subs)
+                output.append(f"  |y{mc.title()}|n: {sub_links}")
+                output.append(f"      Or |w{mc}|n for all")
+            else:
+                output.append(f"  |y{mc.title()}|n: |w{mc}|n")
+        output.append("")
+        output.append("Examples: |wlist weapons|n  |wlist handguns|n  |wlist cyberware|n  |wlist/search pistol|n")
+        output.append(footer())
+        self.caller.msg("\n".join(output))
+
+    def _list_vendor(self, category):
+        """List items in vendor room by category."""
+        main_cats = get_available_main_categories(self.caller.location)
+        subcats = _get_vendor_subcategories(self.caller.location)
+        cat_lower = category.lower().replace(" ", "_")
+        main_cat = None
+        subcategory = None
+        if cat_lower in main_cats:
+            main_cat = cat_lower
+        else:
+            for mc in main_cats:
+                for sc in subcats.get(mc, []):
+                    if sc.lower().replace(" ", "_") == cat_lower:
+                        main_cat = mc
+                        subcategory = sc
+                        break
+                if main_cat:
+                    break
+        if not main_cat:
+            self.caller.msg(
+                f"Unknown category '{category}'. Use |wlist|n to see available categories."
+            )
+            return
+        catalog = _get_vendor_catalog(self.caller.location, main_cat, subcategory)
+        if not catalog:
+            label = f"{subcategory or main_cat}" if subcategory else main_cat
+            self.caller.msg(f"No {label} items available here.")
+            return
+        display_label = f"{subcategory} ({main_cat})" if subcategory else main_cat.title()
+        output = []
+        output.append(header(f"Vendor: {display_label}"))
+        if main_cat == "weapons":
+            output.append(self._format_chargen_weapons(catalog))
+        elif main_cat == "armor":
+            output.append(self._format_chargen_armor(catalog))
+        elif main_cat == "gear":
+            gears = [e for e in catalog if e.get("_type") == "gear"]
+            cyberdecks = [e for e in catalog if e.get("_type") == "cyberdeck"]
+            if gears:
+                output.append(self._format_chargen_gear(gears))
+            if cyberdecks:
+                output.append(self._format_chargen_cyberdecks(cyberdecks))
+        elif main_cat == "cyberware":
+            output.append(self._format_chargen_cyberware(catalog))
+        output.append(footer())
+        self.caller.msg("\n".join(filter(None, output)))
+
+    def _list_vendor_search(self, search_str):
+        """Search vendor catalog and display results."""
+        catalog = _get_vendor_catalog(self.caller.location)
+        q = search_str.lower()
+        matches = [
+            item for item in catalog
+            if q in (item.get("name") or "").lower()
+            or q in (item.get("category") or "").lower()
+            or q in (str(item.get("description", "") or "").lower())
+        ]
+        if not matches:
+            self.caller.msg(f"No items matching '{search_str}' at this vendor.")
+            return
+        output = []
+        output.append(header(f"Vendor Search: {search_str}"))
+        weapons = [m for m in matches if m.get("_type") == "weapon"]
+        armor = [m for m in matches if m.get("_type") == "armor"]
+        gear = [m for m in matches if m.get("_type") in ("gear", "cyberdeck")]
+        cyberware = [m for m in matches if m.get("_type") == "cyberware_implant" or m.get("category") == "Cyberware"]
+        if weapons:
+            output.append(self._format_chargen_weapons(weapons))
+        if armor:
+            output.append(self._format_chargen_armor(armor))
+        if gear:
+            output.append(self._format_chargen_gear(gear))
+        if cyberware:
+            output.append(self._format_chargen_cyberware(cyberware))
+        output.append(footer())
+        self.caller.msg("\n".join(filter(None, output)))
 
     def _format_chargen_weapons(self, catalog):
         """Format weapons like equipdb."""

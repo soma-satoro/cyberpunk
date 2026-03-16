@@ -5,8 +5,7 @@ Handles:
 - Critical Success: Natural 10 on d10 -> roll another d10 and add. If another 10, do not add again.
 - Critical Failure: Natural 1 on d10 -> roll another d10 and subtract. If another 1, do not subtract again.
 - Luck spending: +1 per luck point spent (deducted from character's pool before roll).
-- Success = total exceeds DV (total > dv). Standard RPG convention uses >= for "meet or exceed".
-  Per user preference, we use > for "exceed" (strictly greater).
+- Success = total exceeds DV (total > dv). Hitting the DV exactly is failure.
 """
 import random
 from typing import Optional, Tuple, Any
@@ -103,20 +102,22 @@ def check_success(total: int, dv: int) -> bool:
     """
     Determine if a roll succeeds against a DV.
     Success = total exceeds DV (total > dv). Hitting the DV exactly is failure.
+    Critical Success only adds another d10 to your roll; it does not auto-succeed.
     """
     return total > dv
 
 
 def format_roll_details(details: dict, stat_val: int, skill_val: int, modifier: int = 0) -> str:
     """Build a readable breakdown string for a roll."""
-    parts = [f"{stat_val} + {skill_val} + {details['first_roll']}"]
+    segments = [f"{stat_val} + {skill_val} + {details['first_roll']}"]
     for roll_val, added in details.get("extra_rolls", []):
         if added:
-            parts.append(f"{roll_val} (crit)")
+            segments.append(f"+ {roll_val} (crit)")
         else:
-            parts.append(f"-{roll_val} (fumble)")
+            # Fumble: rolled another d10 and subtract it. Explain the -X as "2nd d10 = X"
+            segments.append(f"- {roll_val} (fumble: 2nd d10 = {roll_val})")
     if modifier != 0:
-        parts.append(f"{modifier}" if modifier > 0 else f"{modifier}")
+        segments.append(f"{'+' if modifier > 0 else ''}{modifier}")
     if details.get("luck_spent", 0) > 0:
-        parts.append(f"{details['luck_spent']} (luck)")
-    return " + ".join(parts)
+        segments.append(f"+ {details['luck_spent']} (luck)")
+    return " ".join(segments)

@@ -48,6 +48,10 @@ class CmdSheet(MuxCommand):
             return obj.attributes.get(attr, 'N/A')
         return getattr(obj, attr, 'N/A')
 
+    def _safe_fmt(self, val, default=''):
+        """Return value for formatting; use default if value is None to avoid TypeErrors."""
+        return val if val is not None else default
+
     def parse(self):
         """Parse command arguments."""
         super().parse()
@@ -258,6 +262,16 @@ class CmdSheet(MuxCommand):
         if not target:
             return
 
+        # New players without a character sheet should be directed to chargen
+        if not hasattr(target, 'character_sheet') or not target.character_sheet:
+            if target == self.caller:
+                self.caller.msg(
+                    "You don't have a character sheet yet. Proceed to the chargen room to create your character."
+                )
+            else:
+                self.caller.msg(f"{target.name} doesn't have a character sheet yet.")
+            return
+
         # Recalculate humanity from cyberware before display (CharacterSheet is source of truth)
         if hasattr(target, 'character_sheet') and target.character_sheet:
             sheet = target.character_sheet
@@ -294,14 +308,20 @@ class CmdSheet(MuxCommand):
             ("Dexterity:", target.db.dexterity, "Willpower:", target.db.willpower, "Empathy:", target.db.empathy)
         ]
         for row in stats:
-            output += "".join(f"|y{label:<13}|n {value:<8}" for label, value in zip(row[::2], row[1::2])) + "\n"
+            output += "".join(
+                f"|y{label:<13}|n {(v if v is not None else ''):<8}"
+                for label, v in zip(row[::2], row[1::2])
+            ) + "\n"
 
         # Skills
         output += sheet_section("SKILLS", width=W)
         active_skills = self.get_active_skills(target)
         for i in range(0, len(active_skills), 3):
             row = active_skills[i:i+3]
-            output += "".join(f"|y{skill:<20}|n {value:<5}" for skill, value in row).ljust(80) + "\n"
+            output += "".join(
+                f"|y{(s or ''):<20}|n {(v if v is not None else ''):<5}"
+                for s, v in row
+            ).ljust(80) + "\n"
 
         # Derived Stats
         output += sheet_section("Derived Statistics", width=W)
@@ -313,13 +333,17 @@ class CmdSheet(MuxCommand):
         if unarmed_dice is None:
             unarmed_dice = getattr(target.db, 'unarmed_damage_dice', 1)
         unarmed_die_display = f"d{unarmed_die}"
+        hp_str = f"{target.db.current_hp or 0}/{target.db.max_hp or 0}"
         derived_stats = [
-            ("Hit Points:", f"{target.db.current_hp}/{target.db.max_hp}", "Death Save:", target.db.death_save),
+            ("Hit Points:", hp_str, "Death Save:", target.db.death_save),
             ("Serious Wounds:", target.db.serious_wounds, "Humanity:", target.db.humanity),
             ("Unarmed Damage:", unarmed_die_display, "Unarmed Dice:", unarmed_dice)
         ]
         for row in derived_stats:
-            output += "".join(f"|y{label:<16}|n {value:<18}" for label, value in zip(row[::2], row[1::2])) + "\n"
+            output += "".join(
+                f"|y{label:<16}|n {(v if v is not None else ''):<18}"
+                for label, v in zip(row[::2], row[1::2])
+            ) + "\n"
         output += "\n"
 
         # Equipment (use same inventory source as +inventory: character_sheet.inventory)
@@ -436,6 +460,27 @@ class CmdSheet(MuxCommand):
         'unarmed_damage_die_type', 'unarmed_damage_dice',
     })
 
+    # Max width for skill names on sheet (3 columns, 80 char width)
+    SKILL_NAME_WIDTH = 20
+
+    def _format_skill_for_sheet(self, name, skill_key=None):
+        """
+        Format skill name for sheet display. Uses abbreviated form for instanced skills
+        (e.g. 'P Instrument (flute)') and truncates if too long.
+        """
+        if skill_key and "(" in skill_key and ")" in skill_key:
+            base_name, instance = skill_key.split("(", 1)
+            instance = instance.rstrip(")")
+            base_display = base_name.replace('_', ' ').title()
+            if base_name.lower() == 'play_instrument':
+                base_display = "P Instrument"
+            formatted = f"{base_display} ({instance})"
+        else:
+            formatted = name
+        if len(formatted) > self.SKILL_NAME_WIDTH:
+            formatted = formatted[: self.SKILL_NAME_WIDTH - 3] + "..."
+        return formatted
+
     def get_active_skills(self, char):
         """
         Get a list of active skills (skills with value > 0) directly from the character.
@@ -448,6 +493,7 @@ class CmdSheet(MuxCommand):
             for skill_name, value in char.db.skills.items():
                 if value > 0 and skill_name not in self.NON_SKILL_KEYS:
                     display_name = skill_name.replace('_', ' ').title()
+                    display_name = self._format_skill_for_sheet(display_name)
                     skill_list.append([display_name, value])
 
         # Add skill instances from character typeclass
@@ -457,8 +503,11 @@ class CmdSheet(MuxCommand):
                     # Extract the base name and instance from the key (format: "base_skill(instance)")
                     base_name, instance = skill_key.split("(", 1)
                     instance = instance.rstrip(")")
-                    # Format as "Base Skill (Instance)"
-                    formatted_name = f"{base_name.replace('_', ' ').title()} ({instance})"
+                    # Format for sheet (abbreviated + truncated)
+                    formatted_name = self._format_skill_for_sheet(
+                        f"{base_name.replace('_', ' ').title()} ({instance})",
+                        skill_key=skill_key,
+                    )
                     skill_list.append([formatted_name, value])
         
         skill_list.sort(key=lambda x: (x[0].lower(), -x[1]))  # Alphabetical by name, then by value desc
