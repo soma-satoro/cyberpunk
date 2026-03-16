@@ -1,7 +1,7 @@
 import traceback
 from django.conf import settings
 from evennia import Command, CmdSet
-from world.jobs.models import Job
+from world.jobs.models import Job, Queue
 from world.languages.language_dictionary import LANGUAGES
 from world.languages.models import Language, CharacterLanguage
 from world.utils.character_utils import (
@@ -640,13 +640,20 @@ class CmdChargen(MuxCommand):
         sheet.save()
         self.caller.msg("Character creation complete. Your character sheet is now locked for approval.")
         
-        # create a +job indicating that the character is ready for approval
-        job = Job.objects.create(
-            character=self.caller,
-            job_type="approval",
-            description="Character is ready for approval"
+        # Create a +job indicating that the character is ready for approval
+        queue, _ = Queue.objects.get_or_create(
+            name="Approval",
+            defaults={"automatic_assignee": None}
         )
-        job.save()
+        char_name = getattr(self.caller.db, "full_name", None) or self.caller.key or "Unknown"
+        Job.objects.create(
+            title=f"Character approval: {char_name}",
+            description="Character is ready for approval",
+            requester=self.caller.account,
+            queue=queue,
+            status="open",
+            template_args={"character_id": self.caller.id, "character_name": char_name},
+        )
 
 
 class CmdConfirmReset(Command):
