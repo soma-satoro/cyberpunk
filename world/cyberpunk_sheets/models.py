@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.utils import OperationalError
 from django.core.exceptions import ObjectDoesNotExist
 from evennia.accounts.models import AccountDB
 from evennia.objects.models import ObjectDB
@@ -98,8 +99,8 @@ class CharacterSheet(SharedMemoryModel):
     gender = models.CharField(max_length=50, blank=True)
     age = models.PositiveIntegerField(default=0)
     hometown = models.CharField(max_length=40, blank=True)
-    height = models.PositiveIntegerField(default=0)
-    weight = models.PositiveIntegerField(default=0)
+    height = models.FloatField(default=0)
+    weight = models.FloatField(default=0)
     current_luck = models.PositiveIntegerField(default=1)
     _max_hp = models.PositiveIntegerField(default=0)
     _current_hp = models.PositiveIntegerField(default=0)
@@ -557,7 +558,36 @@ class CharacterSheet(SharedMemoryModel):
         self.death_save = self.body
         self.serious_wounds = self.body
 
-        total_cyberware_hl = self.calculate_total_cyberware_hl()
+        # Brawling damage scales with BODY; Cyberarm grants minimum 2d6 (CPR p.169)
+        base_unarmed_dice = self.calculate_base_unarmed_damage()
+        sheet_pk = getattr(self, 'pk', None)
+        if sheet_pk:
+            try:
+                CyberwareInstance = apps.get_model('inventory', 'CyberwareInstance')
+                active_inst = CyberwareInstance.objects.filter(
+                    character_sheet_id=sheet_pk, installed=True, active=True
+                ).select_related('cyberware').first()
+                weapon_dice = 0
+                if active_inst:
+                    cw = active_inst.cyberware
+                    if cw.is_weapon and cw.damage_dice:
+                        weapon_dice = cw.damage_dice
+                    elif cw.name.lower() in ('popup melee weapon', 'popup ranged weapon'):
+                        popup_name = getattr(active_inst, 'popup_weapon_name', None)
+                        if popup_name:
+                            from world.equipment_data import get_weapon_damage_dice
+                            weapon_dice = get_weapon_damage_dice(popup_name)
+                self.unarmed_damage_dice = max(base_unarmed_dice, weapon_dice) if weapon_dice else base_unarmed_dice
+            except OperationalError:
+                self.unarmed_damage_dice = base_unarmed_dice
+        else:
+            self.unarmed_damage_dice = base_unarmed_dice
+        self.unarmed_damage_die_type = 6  # Always d6 per CPR rules
+
+        try:
+            total_cyberware_hl = self.calculate_total_cyberware_hl()
+        except OperationalError:
+            total_cyberware_hl = 0
         trauma_hl = getattr(self, "trauma_humanity_loss", 0) or 0
 
         # Calculate current humanity (includes trauma from removed cyberware)
@@ -718,7 +748,36 @@ class CharacterSheet(SharedMemoryModel):
         self.death_save = self.body
         self.serious_wounds = self.body
 
-        total_cyberware_hl = self.calculate_total_cyberware_hl()
+        # Brawling damage scales with BODY; Cyberarm grants minimum 2d6 (CPR p.169)
+        base_unarmed_dice = self.calculate_base_unarmed_damage()
+        sheet_pk = getattr(self, 'pk', None)
+        if sheet_pk:
+            try:
+                CyberwareInstance = apps.get_model('inventory', 'CyberwareInstance')
+                active_inst = CyberwareInstance.objects.filter(
+                    character_sheet_id=sheet_pk, installed=True, active=True
+                ).select_related('cyberware').first()
+                weapon_dice = 0
+                if active_inst:
+                    cw = active_inst.cyberware
+                    if cw.is_weapon and cw.damage_dice:
+                        weapon_dice = cw.damage_dice
+                    elif cw.name.lower() in ('popup melee weapon', 'popup ranged weapon'):
+                        popup_name = getattr(active_inst, 'popup_weapon_name', None)
+                        if popup_name:
+                            from world.equipment_data import get_weapon_damage_dice
+                            weapon_dice = get_weapon_damage_dice(popup_name)
+                self.unarmed_damage_dice = max(base_unarmed_dice, weapon_dice) if weapon_dice else base_unarmed_dice
+            except OperationalError:
+                self.unarmed_damage_dice = base_unarmed_dice
+        else:
+            self.unarmed_damage_dice = base_unarmed_dice
+        self.unarmed_damage_die_type = 6  # Always d6 per CPR rules
+
+        try:
+            total_cyberware_hl = self.calculate_total_cyberware_hl()
+        except OperationalError:
+            total_cyberware_hl = 0
         trauma_hl = getattr(self, "trauma_humanity_loss", 0) or 0
 
         # Calculate current humanity (includes trauma from removed cyberware)

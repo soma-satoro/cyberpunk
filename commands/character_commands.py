@@ -2,7 +2,7 @@ import random
 import re
 from evennia import Command, logger, search_object, default_cmds
 from typeclasses.rental import CharacterSheetMoneyService
-from world.utils.character_utils import get_full_attribute_name, ALL_ATTRIBUTES, TOPSHEET_MAPPING
+from world.utils.character_utils import get_full_attribute_name, ALL_ATTRIBUTES, TOPSHEET_MAPPING, is_staff
 from world.utils.calculation_utils import get_remaining_points, STAT_MAPPING, SKILL_MAPPING
 from typeclasses.chargen import ChargenRoom
 from evennia.utils import evtable
@@ -85,7 +85,7 @@ class CmdSheet(MuxCommand):
             return caller
         
         # Check if the caller has staff permissions
-        if not caller.check_permstring("builders") and not caller.check_permstring("wizards"):
+        if not is_staff(caller):
             caller.msg("|rYou don't have permission to view other character sheets.|n")
             return None
         
@@ -560,8 +560,8 @@ class CmdSheet(MuxCommand):
             value = char.db.skills.get(ability_key, 0)
             if value <= 0:
                 continue
-            if ability_key == 'medicine':
-                # Medicine: add base rank plus specialty breakdown (handled below)
+            if ability_key in ('medicine', 'maker'):
+                # Medicine/Maker: add base rank plus specialty breakdown (handled below)
                 continue
             display_name = ability_key.replace('_', ' ').title()
             display_name = self._format_skill_for_sheet(display_name)
@@ -584,6 +584,21 @@ class CmdSheet(MuxCommand):
                 if medtech_skill > 0:
                     ability_list.append(["Medical Tech", medtech_skill])
             ability_list.append(["Medicine", medicine])
+
+        # Maker (Tech): add base Maker + specialty breakdown when available
+        maker = char.db.skills.get('maker', 0)
+        if maker > 0:
+            if hasattr(char, 'get_maker_specialties'):
+                f, u, fab, inv = char.get_maker_specialties()
+                if f > 0:
+                    ability_list.append(["Field Expertise", f])
+                if u > 0:
+                    ability_list.append(["Upgrade Expertise", u])
+                if fab > 0:
+                    ability_list.append(["Fabrication Expertise", fab])
+                if inv > 0:
+                    ability_list.append(["Invention Expertise", inv])
+            ability_list.append(["Maker", maker])
 
         ability_list.sort(key=lambda x: (x[0].lower(), -x[1]))
         return ability_list
@@ -662,6 +677,7 @@ class CmdRoll(MuxCommand):
     With 'vs', shows success (total exceeds DV) or failure. Hitting the DV exactly fails.
 
     Use roll/luck <N>= to spend N luck points before rolling (+1 per point).
+    Use roll/job <#>=<stat> + <skill> [vs <DV>] to roll and post result to a job (e.g. repair).
 
     Difficulty names: Simple (9), Everyday (13), Difficult (15), Professional (17),
     Heroic (21), Incredible (24), Legendary (29).
@@ -698,6 +714,11 @@ class CmdRoll(MuxCommand):
 
     def func(self):
         args = (self.args or "").strip()
+
+        # Parse roll/job <#>=<roll> - post roll result as job comment
+        if "job" in self.switches:
+            self._roll_into_job(args)
+            return
 
         # Parse roll/luck N=... syntax
         luck_spend = 0
@@ -813,6 +834,104 @@ class CmdRoll(MuxCommand):
             out += f" - |{color}{result}|n"
 
         self.caller.msg(out)
+
+    def _roll_into_job(self, args):
+        """roll/job <job#>=<attribute> + <skill> [vs <DV>] - Roll and post result to job."""
+        if not args or "=" not in args:
+            self.caller.msg("Usage: roll/job <job#>=<attribute> + <skill> [vs <DV>]")
+            return
+
+        job_part, roll_part = args.split("=", 1)
+        job_part = job_part.strip()
+        roll_part = roll_part.strip()
+
+        try:
+            job_id = int(job_part)
+        except ValueError:
+            self.caller.msg("Job number must be a number.")
+            return
+
+        from world.jobs.models import Job
+
+        try:
+            job = Job.objects.get(id=job_id, archive_id__isnull=True)
+        except Job.DoesNotExist:
+            self.caller.msg(f"Job #{job_id} not found.")
+            return
+
+        if not (
+            job.requester == self.caller.account
+            or job.participants.filter(id=self.caller.account.id).exists()
+            or self.caller.check_permstring("builders")
+            or self.caller.check_permstring("wizards")
+        ):
+            self.caller.msg("You don't have permission to roll into this job.")
+            return
+
+        # Parse roll: "Stat + Skill" or "Stat + Skill vs DV"
+        vs_info = None
+        vs_match = re.search(r'\s+vs\s+', roll_part, re.IGNORECASE)
+        if vs_match:
+            vs_str = roll_part[vs_match.end():].strip()
+            roll_part = roll_part[:vs_match.start()].strip()
+            vs_info = parse_dv(vs_str)
+
+        if " + " not in roll_part:
+            self.caller.msg("Roll format: <stat> + <skill> [vs <DV>]")
+            return
+
+        parts = roll_part.split(" + ", 1)
+        attr_input = parts[0].strip()
+        skill_input, modifier = self._parse_modifier(parts[1])
+
+        full_attr_name = get_full_attribute_name(attr_input)
+        full_skill_name = get_full_attribute_name(skill_input)
+        if not full_attr_name or full_attr_name not in STAT_MAPPING.values():
+            self.caller.msg(f"Invalid attribute: {attr_input}")
+            return
+        if not full_skill_name or full_skill_name not in SKILL_MAPPING.values():
+            self.caller.msg(f"Invalid skill: {skill_input}")
+            return
+
+        char = self.caller
+        attr_value = self._get_stat_value(char, full_attr_name, is_stat=True)
+        skill_value = self._get_stat_value(char, full_skill_name, is_stat=False)
+        attr_display = full_attr_name.replace("_", " ").title()
+        skill_display = full_skill_name.replace("_", " ").title()
+
+        from world.utils.roll_utils import roll_skill_check, check_success, format_roll_details
+
+        total, details = roll_skill_check(attr_value, skill_value, modifier=modifier)
+        breakdown = format_roll_details(details, attr_value, skill_value, modifier)
+        out = f"Roll: {attr_display} + {skill_display} + 1d10: {breakdown} = {total}"
+        if details.get("is_crit_success"):
+            out += " (Critical Success!)"
+        elif details.get("is_crit_failure"):
+            out += " (Critical Failure!)"
+        if vs_info is not None:
+            dv, diff_name, _ = vs_info
+            success = check_success(total, dv)
+            result = "Success" if success else "Failure"
+            out += f" vs {dv}"
+            if diff_name:
+                out += f" ({diff_name})"
+            out += f" - {result}"
+
+        from django.utils import timezone
+
+        comment = {
+            "author": self.caller.account.username,
+            "text": out,
+            "created_at": timezone.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        if not job.comments:
+            job.comments = []
+        job.comments.append(comment)
+        job.save()
+
+        self.caller.msg(f"|gRoll posted to Job #{job_id}:|n {out}")
+        self.caller.msg("Staff will review and process the repair.")
+
 
 class CmdLuck(MuxCommand):
     """

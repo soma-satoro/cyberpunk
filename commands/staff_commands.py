@@ -179,6 +179,15 @@ class CmdRemoveCyberware(MuxCommand):
         inventory.cyberware.remove(cw_instance)
         cw_instance.delete()
 
+        # Update has_cyberarm if we removed a Cyberarm (affects brawling damage)
+        if cyberware.name.lower() == "cyberarm":
+            remaining_cyberarms = CyberwareInstance.objects.filter(
+                character_sheet=char_sheet, installed=True,
+                cyberware__name__iexact="Cyberarm"
+            ).exists()
+            char_sheet.has_cyberarm = remaining_cyberarms
+            char_sheet.recalculate_derived_stats()
+
         if retain_humanity:
             # Add the humanity loss to trauma (permanent) so it's retained
             char_obj = character if character else char_sheet.character

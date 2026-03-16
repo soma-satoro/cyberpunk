@@ -221,6 +221,10 @@ class CmdStat(AdminCommand):
                     setattr(sheet, sheet_attr, getattr(char.db, db_attr))
             sheet.recalculate_derived_stats()
             sheet.save()
+            # Sync unarmed damage (derived from BODY/has_cyberarm) to character
+            if hasattr(sheet, 'unarmed_damage_dice'):
+                char.db.unarmed_damage_dice = sheet.unarmed_damage_dice
+                char.db.unarmed_damage_die_type = sheet.unarmed_damage_die_type
 
         display_name = full_key.replace("_", " ").title()
         self.caller.msg(f"Set {char.name}'s {display_name} to {new_value}.")
@@ -337,7 +341,7 @@ class CmdHeal(AdminCommand):
             target = self.caller
 
         # Non-staff can only heal their own characters
-        if not self.caller.check_perm("Admin"):
+        if not self.caller.check_permstring("Admin"):
             caller_account = getattr(self.caller, "account", self.caller)
             target_account = getattr(target, "account", None)
             if target_account != caller_account:
@@ -363,9 +367,10 @@ class CmdHeal(AdminCommand):
             old_hp = cs._current_hp
             cs._current_hp = min(cs._current_hp + heal_amount, cs._max_hp)
             cs.save()
-            
+            target.db.current_hp = cs._current_hp  # Sync to character for display
+
             actual_heal = cs._current_hp - old_hp
-            
+
             self.caller.msg(f"You healed {target.name} for {actual_heal} HP.")
             target.msg(f"{self.caller.name} healed you for {actual_heal} HP.")
         except Exception as e:
@@ -408,7 +413,7 @@ class CmdHarm(AdminCommand):
             target = self.caller
 
         # Non-staff can only harm their own characters
-        if not self.caller.check_perm("Admin"):
+        if not self.caller.check_permstring("Admin"):
             caller_account = getattr(self.caller, "account", self.caller)
             target_account = getattr(target, "account", None)
             if target_account != caller_account:
@@ -434,9 +439,10 @@ class CmdHarm(AdminCommand):
             old_hp = cs._current_hp
             cs._current_hp = max(0, cs._current_hp - damage)
             cs.save()
-            
+            target.db.current_hp = cs._current_hp  # Sync to character for display
+
             actual_damage = old_hp - cs._current_hp
-            
+
             self.caller.msg(f"You harmed {target.name} for {actual_damage} damage.")
             target.msg(f"{self.caller.name} harmed you for {actual_damage} damage.")
 

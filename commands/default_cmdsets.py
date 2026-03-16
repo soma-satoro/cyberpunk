@@ -20,9 +20,9 @@ from evennia import default_cmds, CmdSet
 from .character_commands import CmdSheet, CmdRoll, CmdLuck, CmdShortDesc, CmdPlusOoc, CmdPlusIc, CmdMeet
 from .chargen import CmdChargen, CmdListCharacterSheets, CmdLifepath, CmdSelfStat, CmdSetLanguage, CmdSellYourSoul
 from .admin_commands import CmdStat, CmdHeal, CmdHarm, CmdApprove, CmdUnapprove, CmdSpawnRipperdoc, CmdGradientName, CmdClearAllStates, CmdClearRental, CmdCleanupDuplicates, CmdExamine, CmdAssociateAllCharacterSheets, CmdViewCharacterSheetID, CmdSetCharacterSheetID, CmdAllSheets, CmdViewSheetAttributes, CmdSyncLanguages, CmdJoin, CmdSummon
-from .inventory_commands import CmdInventory
+from .inventory_commands import CmdInventory, CmdWear
 from .voucher_commands import CmdVoucher, CmdConceal, CmdOwner
-from .equipment_commands import CmdAddWeapon, CmdAddArmor, CmdAddGear, CmdAddVehicle, CmdRemoveVehicle, CmdPopulateWeapons, CmdPopulateArmor, CmdPopulateGear, CmdPopulateVehicles, CmdViewEquipment, CmdPopulateAllEquipment, CmdRemoveEquipment, CmdPopulateCyberware, CmdDepopulateAllEquipment
+from .equipment_commands import CmdAddItem, CmdAddVehicle, CmdRemoveVehicle, CmdPopulateWeapons, CmdPopulateArmor, CmdPopulateGear, CmdPopulateVehicles, CmdViewEquipment, CmdPopulateAllEquipment, CmdRemoveEquipment, CmdPopulateCyberware, CmdDepopulateAllEquipment
 from .list_commands import CmdLookup
 from .mystery_commands import (
     CmdMystery,
@@ -39,7 +39,7 @@ from .cyberware_admin_commands import CmdAddCyberware
 from .staff_commands import CmdRemoveCyberware, CmdSetLifepath, CmdReputation, CmdNotoriety, CmdConfig
 from .economy import CmdAdminMoney, CmdGiveMoney, CmdBalance, CmdLeaveRental
 from .rent_commands import CmdRent, CmdHome
-from world.cyberpunk_sheets.commerce import CmdBuy, CmdListItems, CmdGive, CmdSellItem, CmdHaggle
+from world.cyberpunk_sheets.commerce import CmdBuy, CmdRefund, CmdListItems, CmdGive, CmdSellItem, CmdHaggle
 from .ip_commands import CmdIP
 from .vote_commands import CmdVote
 from .mission_commands import CmdMission
@@ -54,6 +54,9 @@ from .cyberware_commands import CmdCyberware
 from .netrun_commands import CmdNet
 from .netrun_admin_commands import CmdArchitecture
 from .combat_system import CmdCombat
+from .attack_commands import CmdAttack, CmdDodge
+from .repair_commands import CmdRepair, CmdJuryrig
+from .maker_commands import CmdMake
 from .language_commands import CmdLanguage
 from .building import CmdManageBuilding, CmdRoom, CmdAreaManage
 from .notes import CmdNote
@@ -115,6 +118,10 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdLifepath())
         self.add(CmdLuck())
         self.add(CmdInventory())
+        self.add(CmdWear())
+        self.add(CmdRepair())
+        self.add(CmdJuryrig())
+        self.add(CmdMake())
         self.add(CmdVoucher())
         self.add(CmdConceal())
         self.add(CmdOwner())
@@ -128,6 +135,8 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdRoom())
         self.add(CmdAreaManage())
         self.add(CmdCombat())
+        self.add(CmdAttack())
+        self.add(CmdDodge())
         self.add(CmdAlts())
         self.add(CmdEmit())
         self.add(CmdPose())
@@ -147,6 +156,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdBalance())
         self.add(CmdGiveMoney())
         self.add(CmdBuy())
+        self.add(CmdRefund())
         self.add(CmdListItems())
         self.add(CmdGive())
         self.add(CmdSellItem())
@@ -219,9 +229,7 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         # any commands you add below will overload the default ones.
         #
         self.add(CmdStat())
-        self.add(CmdAddWeapon())
-        self.add(CmdAddArmor())
-        self.add(CmdAddGear())
+        self.add(CmdAddItem())
         self.add(CmdAddVehicle())
         self.add(CmdRemoveVehicle())
         self.add(CmdPopulateWeapons())
@@ -281,9 +289,7 @@ class EquipmentAdminCmdSet(CmdSet): # type: ignore
     key = "EquipmentAdmin"
     
     def at_cmdset_creation(self):
-        self.add(CmdAddWeapon())
-        self.add(CmdAddArmor())
-        self.add(CmdAddGear())
+        self.add(CmdAddItem())
 
 class UnloggedinCmdSet(default_cmds.UnloggedinCmdSet):
     """

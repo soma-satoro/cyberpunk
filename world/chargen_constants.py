@@ -2,6 +2,10 @@
 
 FASHION_BUDGET = 800
 
+# Eurodollar allotments for chargen refund cap (refund cannot exceed this)
+CHARGEN_EURODOLLARS_EDGERUNNER = 500
+CHARGEN_EURODOLLARS_COMPLETE_PACKAGE = 2550
+
 # Chargen point limits (Complete Package / Edgerunner allocation)
 # Complete Package: 62 stat points, 86 skill points (per book p. 88-89)
 # Edgerunner: stats from table, 86 skill points
@@ -51,6 +55,31 @@ def validate_medicine_specialties(medicine, surgery, pharma, cryo):
         return False, f"Cryosystem cannot exceed {MEDICINE_CRYO_MAX}."
     if s < 0 or p < 0 or c < 0:
         return False, "Specialty values cannot be negative."
+    return True, None
+
+
+# Maker (Tech) specialty system - each Maker point allows 1 pt to two different specializations (2*Maker total)
+# Constraints: maker_field + maker_upgrade + maker_fabrication + maker_invention == maker * 2
+#             each specialty <= maker (capped by Maker skill)
+MAKER_SPECIALTIES = ("field", "upgrade", "fabrication", "invention")
+MAKER_ALLOCATION_PER_RANK = 2  # Each Maker rank = 2 allocation points
+
+
+def validate_maker_specialties(maker, field, upgrade, fabrication, invention):
+    """Check Maker specialty allocation is valid. Returns (ok, error_msg)."""
+    f, u, fab, inv = int(field or 0), int(upgrade or 0), int(fabrication or 0), int(invention or 0)
+    m = int(maker or 0)
+    total = f + u + fab + inv
+    expected = m * MAKER_ALLOCATION_PER_RANK
+    if total != expected:
+        return False, (
+            f"Maker specialties must sum to Maker rank × 2 ({m}×2={expected}): "
+            f"Field + Upgrade + Fabrication + Invention = {f}+{u}+{fab}+{inv}={total}"
+        )
+    if f < 0 or u < 0 or fab < 0 or inv < 0:
+        return False, "Specialty values cannot be negative."
+    if f > m or u > m or fab > m or inv > m:
+        return False, f"Each Maker specialty cannot exceed Maker rank ({m})."
     return True, None
 
 

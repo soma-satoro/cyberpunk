@@ -1,8 +1,12 @@
 # world/cyberpunk_sheets/services.py
 
 import logging
+from django.db.models import F
+
 from evennia.objects.models import ObjectDB
 from evennia.utils import logger
+
+from world.cyberpunk_sheets.models import CharacterSheet
 
 logger = logging.getLogger('cyberpunk.economy')
 
@@ -107,18 +111,29 @@ class CharacterSheetMoneyService:
     @staticmethod
     def add_money(character_sheet, amount):
         logger.info(f"Adding {amount} to character sheet {character_sheet.id}")
-        if not hasattr(character_sheet, 'eurodollars'):
-            logger.warning(f"Character sheet {character_sheet.id} has no eurodollars attribute")
-            character_sheet.eurodollars = 0
-        character_sheet.eurodollars += amount
-        character_sheet.save()
-        logger.info(f"New balance for character sheet {character_sheet.id}: {character_sheet.eurodollars}")
-        
+        sheet_id = getattr(character_sheet, 'id', None) or getattr(character_sheet, 'pk', None)
+        if not sheet_id:
+            logger.warning("Character sheet has no id/pk, cannot add money")
+            return 0
+
+        # Use atomic F() update to add to existing balance (prevents overwriting)
+        updated = CharacterSheet.objects.filter(pk=sheet_id).update(
+            eurodollars=F('eurodollars') + amount
+        )
+        if not updated:
+            logger.warning(f"No rows updated for character sheet {sheet_id}")
+            return 0
+
+        # Refresh from DB to get new value and sync to character object
+        character_sheet.refresh_from_db()
+        new_balance = character_sheet.eurodollars
+        logger.info(f"New balance for character sheet {sheet_id}: {new_balance}")
+
         # Also update character object if it exists
         if hasattr(character_sheet, 'character') and character_sheet.character:
-            character_sheet.character.db.eurodollars = character_sheet.eurodollars
-            
-        return character_sheet.eurodollars
+            character_sheet.character.db.eurodollars = new_balance
+
+        return new_balance
 
     @staticmethod
     def spend_money(character_sheet, amount):

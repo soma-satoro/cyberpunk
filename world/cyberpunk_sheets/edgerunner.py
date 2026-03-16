@@ -180,6 +180,12 @@ class EdgerunnerChargen:
         character.db.medicine_pharma = 0
         character.db.medicine_cryo = 0
 
+        # Reset Maker specialties (Tech)
+        character.db.maker_field = 0
+        character.db.maker_upgrade = 0
+        character.db.maker_fabrication = 0
+        character.db.maker_invention = 0
+
         # Reset derived stats
         character.db.max_hp = 10
         character.db.current_hp = 10

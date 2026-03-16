@@ -97,6 +97,13 @@ class CmdJobs(MuxCommand):
                     # Use the simple syntax for basic job creation
                     self.create_job_from_simple_syntax()
             else:
+                # Staff: +jobs <name> or +requests <name> - list that player's jobs
+                try:
+                    int(self.args.strip())
+                except ValueError:
+                    if self.caller.check_permstring("Builder"):
+                        self.list_jobs_from_player()
+                        return
                 self.view_job()
         elif "archive" in self.switches:
             self.view_archived_job()
@@ -1846,7 +1853,7 @@ class CmdJobs(MuxCommand):
 
     def list_jobs_from_player(self):
         """List all jobs associated with a player (staff only)."""
-        if not self.caller.check_permstring("Admin"):
+        if not self.caller.check_permstring("Builder"):
             self.caller.msg("You don't have permission to use this command.")
             return
 

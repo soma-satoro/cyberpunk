@@ -19,6 +19,15 @@ from world.utils.formatting import header, footer, divider, sheet_header, sheet_
 from world.utils.character_utils import get_full_attribute_name, format_skill_display, STAT_MAPPING, SKILL_MAPPING, is_character_approved
 from world.utils.difficulty_values import parse_dv
 from typeclasses.npcs import NPC, is_npc
+from commands.attack_commands import (
+    _get_dodge_dv,
+    _set_last_dodge_dv,
+    _get_and_clear_pending_attacks,
+    _clear_last_dodge_dv,
+    execute_attack_roll,
+    _resolve_pending_autofire,
+    _get_armor_ev_penalty,
+)
 
 from commands.CmdPose import PoseBreakMixin
 from utils.text import process_special_characters
@@ -168,6 +177,7 @@ class CmdNpc(MuxCommand):
       +npc/damage <name>=<amount>/<reason> - Damage NPC; minor NPCs at 0 HP are neutralized
       +npc/clear <name>              - Remove a minor NPC from the scene
       +npc/destroy <name>[=reason]   - Neutralize NPC (optional reason for log)
+      +npc/dodge <name>              - Roll dodge for NPC when they are being attacked
       +npc/log [major|minor] [<name>] - Staff: list neutralized NPCs (filter by type)
       +npc/log/all [major|minor]     - Staff: list all neutralized NPCs
 
@@ -230,6 +240,8 @@ class CmdNpc(MuxCommand):
             self.cmd_destroy()
         elif "log" in self.switches:
             self.cmd_log()
+        elif "dodge" in self.switches:
+            self.cmd_dodge()
         else:
             self.caller.msg("Unknown +npc switch.")
 
@@ -1190,3 +1202,54 @@ class CmdNpc(MuxCommand):
             out += footer(width=78)
             out += "\nUse +npc/log <name> to view details."
             self.caller.msg(out)
+
+    def cmd_dodge(self):
+        """+npc/dodge <name> - Roll dodge for an NPC you own. Used when the NPC is being attacked."""
+        if not self.args or not self.args.strip():
+            self.caller.msg("Usage: +npc/dodge <name>")
+            return
+        npc = _search_npc(self.caller, self.args.strip())
+        if not npc:
+            return
+        if not _can_manage_npc(self.caller, npc):
+            self.caller.msg(f"You cannot roll dodge for {npc.key}.")
+            return
+        # Roll dodge
+        d10, dex, evasion, total = _get_dodge_dv(npc)
+        _set_last_dodge_dv(npc, total)
+        # Broadcast
+        loc = self.caller.location
+        if npc.location:
+            loc = npc.location
+        ev_penalty = _get_armor_ev_penalty(npc)
+        roll_str = f"1d10 [{d10}] + Dexterity + Evasion"
+        if ev_penalty:
+            roll_str += f" - {ev_penalty} (armor EV)"
+        roll_str += f" = {total}"
+        msg_lines = [
+            f"|w{npc.key}|n dodges!",
+            f"  Roll: {roll_str} (DV for attacks)",
+        ]
+        output = "\n".join(msg_lines)
+        loc.msg_contents(output)
+        # Check for pending autofire first
+        if _resolve_pending_autofire(npc, total):
+            return
+        # Check for pending attacks and auto-execute each
+        pending = _get_and_clear_pending_attacks(npc)
+        if pending:
+            _clear_last_dodge_dv(npc)
+            for attacker, staff_override in pending:
+                kwargs = {}
+                if staff_override and staff_override.get("stat") is not None and staff_override.get("skill") is not None:
+                    kwargs = {
+                        "staff_stat": staff_override["stat"],
+                        "staff_skill": staff_override["skill"],
+                        "staff_skill_display": staff_override.get("skill_display"),
+                        "staff_weapon_name": staff_override.get("weapon_name"),
+                        "staff_num_dice": staff_override.get("num_dice"),
+                        "staff_stat_field": staff_override.get("stat_field"),
+                    }
+                aim_loc = staff_override.get("aim_location") if staff_override else None
+                execute_attack_roll(attacker, npc, total, f"{npc.key}'s dodge", npc.location,
+                                   aim_location=aim_loc, **kwargs)

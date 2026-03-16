@@ -495,7 +495,7 @@ weapons = [
         "clip": 4
     },
     {
-        "name": "Melee Weapon (Light)",
+        "name": "Light Melee Weapon",
         "damage": "1d6",
         "rof": "2",
         "hands": 1,
@@ -506,7 +506,7 @@ weapons = [
     },
 
     {
-        "name": "Melee Weapon (Medium)",
+        "name": "Medium Melee Weapon",
         "damage": "2d6",
         "rof": "2",
         "hands": 1,
@@ -516,7 +516,7 @@ weapons = [
         "category": "melee"
     },
     {
-        "name": "Melee Weapon (Heavy)",
+        "name": "Heavy Melee Weapon",
         "damage": "3d6",
         "rof": "2",
         "hands": 2,
@@ -526,7 +526,7 @@ weapons = [
         "category": "melee"
     },
     {
-        "name": "Melee Weapon (Very Heavy)",
+        "name": "Very Heavy Melee Weapon",
         "damage": "4d6",
         "rof": "1",
         "hands": 2,
@@ -534,36 +534,6 @@ weapons = [
         "weight": 3,
         "value": 100,
         "category": "melee"
-    },
-    {
-        "name": "Cyberarm (Medium)",
-        "damage": "2d6",
-        "rof": "2",
-        "hands": 1,
-        "concealable": False,
-        "weight": 0,
-        "value": 500,
-        "category": "brawling"
-    },
-    {
-        "name": "Cyberarm (Heavy)",
-        "damage": "3d6",
-        "rof": "2",
-        "hands": 1,
-        "concealable": False,
-        "weight": 0,
-        "value": 1000,
-        "category": "brawling"
-    },
-    {
-        "name": "Cyberarm (Very Heavy)",
-        "damage": "4d6",
-        "rof": "1",
-        "hands": 1,
-        "concealable": False,
-        "weight": 0,
-        "value": 2500,
-        "category": "brawling"
     },
     # Black Chrome weapons
     {
@@ -818,7 +788,7 @@ weapons = [
         "description": "Exotic Heavy Pistol with Tech Rebuild. Charge: ROF2, 3 rounds/shot, fire through Thin Cover, half SP."
     },
     {
-        "name": "Rostović DB-2 Satara Shotgun",
+        "name": "Rostovic DB-2 Satara Shotgun",
         "damage": "5d6",
         "rof": "1",
         "hands": 2,
@@ -2771,6 +2741,44 @@ def populate_ammunition():
         created += 1
         existing.add(key)
     print(f"Populated {len(ammunition)} ammunition types ({created} new).")
+
+def _parse_damage_dice(damage_str):
+    """Parse '2d6' or '3d6' format, return number of dice."""
+    if not damage_str:
+        return 0
+    try:
+        parts = str(damage_str).lower().split("d")
+        return int(parts[0]) if parts else 0
+    except (ValueError, IndexError):
+        return 0
+
+
+def get_popup_melee_weapons():
+    """One-handed melee weapons only (no Very Heavy Melee, no 2-handed)."""
+    return [w for w in weapons if w.get("category") == "melee" and w.get("hands", 2) == 1]
+
+
+def get_popup_ranged_weapons():
+    """One-handed handguns/SMGs only (no rifles, assault rifles, heavy_weapons)."""
+    return [w for w in weapons if w.get("category") == "handgun" and w.get("hands", 2) == 1]
+
+
+def get_weapon_by_name(name):
+    """Look up weapon from equipment_data by name (case-insensitive)."""
+    name_lower = (name or "").strip().lower()
+    for w in weapons:
+        if (w.get("name") or "").strip().lower() == name_lower:
+            return w
+    return None
+
+
+def get_weapon_damage_dice(weapon_name):
+    """Get damage dice count for a weapon from equipment_data."""
+    w = get_weapon_by_name(weapon_name)
+    if not w:
+        return 0
+    return _parse_damage_dice(w.get("damage", ""))
+
 
 def populate_all_equipment():
     populate_weapons()

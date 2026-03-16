@@ -175,6 +175,15 @@ MEDICINE_SPECIALTY_MAPPING = {
 }
 MEDICINE_SPECIALTY_ATTRIBUTES = frozenset(MEDICINE_SPECIALTY_MAPPING.values())
 
+# Maker (Tech) specialties - allocate Maker rank × 2: field, upgrade, fabrication, invention
+MAKER_SPECIALTY_MAPPING = {
+    'MAKF': 'maker_field',
+    'MAKU': 'maker_upgrade',
+    'MAKFAB': 'maker_fabrication',
+    'MAKINV': 'maker_invention',
+}
+MAKER_SPECIALTY_ATTRIBUTES = frozenset(MAKER_SPECIALTY_MAPPING.values())
+
 TOPSHEET_MAPPING = {
     'FN': 'full_name',
     'HANDLE': 'handle',
@@ -189,7 +198,7 @@ ALL_ATTRIBUTES = {**STAT_MAPPING, **SKILL_MAPPING, **TOPSHEET_MAPPING}
 
 # Create a reverse mapping with multiple options
 REVERSE_MAPPING = {}
-for mapping in [STAT_MAPPING, SKILL_MAPPING, TOPSHEET_MAPPING, MEDICINE_SPECIALTY_MAPPING]:
+for mapping in [STAT_MAPPING, SKILL_MAPPING, TOPSHEET_MAPPING, MEDICINE_SPECIALTY_MAPPING, MAKER_SPECIALTY_MAPPING]:
     for abbr, full in mapping.items():
         REVERSE_MAPPING[abbr] = full
         REVERSE_MAPPING[full.upper()] = full
@@ -197,7 +206,7 @@ for mapping in [STAT_MAPPING, SKILL_MAPPING, TOPSHEET_MAPPING, MEDICINE_SPECIALT
         if '_' in full:
             REVERSE_MAPPING[full.replace('_', ' ').upper()] = full
         # Add plural form for skills (e.g. HANDGUNS -> handgun)
-        if mapping is SKILL_MAPPING and not full.endswith('s') and full not in MEDICINE_SPECIALTY_MAPPING.values():
+        if mapping is SKILL_MAPPING and not full.endswith('s') and full not in MEDICINE_SPECIALTY_MAPPING.values() and full not in MAKER_SPECIALTY_MAPPING.values():
             REVERSE_MAPPING[(full + 's').upper()] = full
         # Add partial matches
         for i in range(1, len(abbr)):
@@ -226,10 +235,52 @@ def get_full_attribute_name(input_str):
     return result
 
 def get_character_sheet(character):
+    if isinstance(character, (list, tuple)) and character:
+        character = character[0]
     try:
         return CharacterSheet.objects.get(character=character)
     except CharacterSheet.DoesNotExist:
         return None
+
+
+def get_staff_target_character(caller, target_name, quiet=False):
+    """
+    Resolve a target name to a character for staff commands. Works for offline characters
+    (global search). Returns (character, sheet) or (None, None) if not found or not staff.
+
+    Staff = Builder+ (Builder, Admin, Developer).
+    quiet: If True, suppress search "not found" message (caller handles messaging).
+    """
+    if not target_name or not str(target_name).strip():
+        return None, None
+    if not is_staff(caller):
+        return None, None
+    target = caller.search(str(target_name).strip(), global_search=True, quiet=quiet)
+    if not target:
+        return None, None
+    # search() may return a list when multiple matches; take first
+    if isinstance(target, (list, tuple)):
+        target = target[0] if target else None
+    if not target:
+        return None, None
+    # Resolve to character and sheet
+    char = target
+    sheet = None
+    if hasattr(target, "character_sheet") and target.character_sheet:
+        sheet = target.character_sheet
+        char = getattr(sheet, "character", None) or target
+    elif hasattr(target, "characters"):
+        chars = list(target.characters) if not callable(target.characters) else list(target.characters())
+        if chars:
+            char = chars[0]
+            if isinstance(char, (list, tuple)) and char:
+                char = char[0]
+            sheet = get_character_sheet(char)
+    else:
+        sheet = get_character_sheet(target)
+    if not sheet:
+        return None, None
+    return char, sheet
 
 def get_pronouns(gender):
     if gender == "male":

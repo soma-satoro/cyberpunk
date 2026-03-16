@@ -1,26 +1,34 @@
 from evennia import Command
 from world.cyberpunk_sheets.models import CharacterSheet
 from world.inventory.models import CyberwareInstance
+from world.utils.character_utils import get_staff_target_character
 from world.cyberware.models import Cyberware
 from evennia.commands.default.muxcommand import MuxCommand
 from world.utils.formatting import sheet_header, footer, header, divider
 from django.db.models import Q
+from world.equipment_data import (
+    get_popup_melee_weapons,
+    get_popup_ranged_weapons,
+    get_weapon_by_name,
+    get_weapon_damage_dice,
+)
 
 class CmdCyberware(MuxCommand):
     """
     Show installed cyberware and its information.
 
     Usage:
-      cyberware
-      cyberware <name>
+      cyberware                    - List your cyberware
+      cyberware/info <item>        - Detailed info on a cyberware item
+      cyberware <name>             - Staff: list another's cyberware
+      cyberware/info <name>/<item> - Staff: detailed info on another's cyberware
       cyberware/activate <name>
+      cyberware/deactivate [<name>]
       cyberware/install <name>
+      cyberware/install "Popup Melee Weapon" = "<weapon>"
+      cyberware/install "Popup Ranged Weapon" = "<weapon>"
 
-    Examples:
-      cyberware
-      cyberware Neural Link
-      cyberware/activate Neural Link
-      cyberware/install Sandevistan
+    Activate/deactivate: cyberware weapons (Big Knucks, Rippers, Slice N Dice, Wolvers, Popup Melee/Ranged).
     """
 
     key = "cyberware"
@@ -29,6 +37,31 @@ class CmdCyberware(MuxCommand):
     help_category = "Character"
 
     def func(self):
+        raw = (self.args or "").strip()
+
+        # cyberware/info <name>/<item> or cyberware/info <item>
+        if "info" in self.switches:
+            self._do_info(raw)
+            return
+
+        # Staff can view another: cyberware <name> (list only)
+        if raw:
+            first_word = raw.split()[0]
+            target_char, character_sheet = get_staff_target_character(
+                self.caller, first_word, quiet=True
+            )
+            if target_char is not None and character_sheet is not None:
+                if self.switches and any(s in self.switches for s in ("activate", "deactivate", "install")):
+                    self.caller.msg("You can only view another character's cyberware, not modify it.")
+                    return
+                self.list_cyberware(character_sheet)
+                return
+            if len(raw.split()) == 1:
+                from world.utils.character_utils import is_staff
+                if is_staff(self.caller):
+                    self.caller.msg(f"No character named '{first_word}' found.")
+                    return
+
         try:
             character_sheet = CharacterSheet.objects.get(character=self.caller)
         except CharacterSheet.DoesNotExist:
@@ -40,15 +73,51 @@ class CmdCyberware(MuxCommand):
             return
 
         if self.switches and "activate" in self.switches:
-            self.activate_cyberware(character_sheet, self.args.strip() if self.args else "")
+            self.activate_cyberware(character_sheet, raw if raw else "")
+            return
+        if self.switches and "deactivate" in self.switches:
+            self.deactivate_cyberware(character_sheet, raw if raw else None)
             return
         if self.switches and "install" in self.switches:
-            self.install_cyberware(character_sheet, self.args.strip() if self.args else "")
+            if "=" in raw:
+                parts = raw.split("=", 1)
+                self.install_cyberware(character_sheet, parts[0].strip(), parts[1].strip())
+            else:
+                self.install_cyberware(character_sheet, raw, None)
             return
-        if not self.args:
+        if not raw:
             self.list_cyberware(character_sheet)
         else:
-            self.view_specific_cyberware(character_sheet, self.args.strip())
+            self.view_specific_cyberware(character_sheet, raw)
+
+    def _do_info(self, raw):
+        """Handle cyberware/info <item> or cyberware/info <name>/<item>."""
+        if not raw:
+            self.caller.msg("Usage: cyberware/info <item> or cyberware/info <name>/<item> (staff)")
+            return
+        target_char, character_sheet = None, None
+        item_name = raw
+        if "/" in raw:
+            from world.utils.character_utils import is_staff
+            if not is_staff(self.caller):
+                self.caller.msg("Only staff can view another character's cyberware.")
+                return
+            name_part, item_name = raw.split("/", 1)
+            name_part = name_part.strip()
+            item_name = item_name.strip()
+            target_char, character_sheet = get_staff_target_character(
+                self.caller, name_part, quiet=True
+            )
+            if target_char is None or character_sheet is None:
+                self.caller.msg(f"No character named '{name_part}' found.")
+                return
+        else:
+            try:
+                character_sheet = CharacterSheet.objects.get(character=self.caller)
+            except CharacterSheet.DoesNotExist:
+                self.caller.msg("You don't have a character sheet.")
+                return
+        self.view_specific_cyberware(character_sheet, item_name)
 
     def list_cyberware(self, character_sheet):
         installed_cyberware = CyberwareInstance.objects.filter(character_sheet=character_sheet, installed=True)
@@ -67,7 +136,7 @@ class CmdCyberware(MuxCommand):
             output += f"|w{cyberware.name:<20}{cyberware.type:<15}{cyberware.humanity_loss:<15}{description:<25}|n\n"
 
         output += footer(width=W, fillchar="-")
-        output += "\nUse 'cyberware <name>' to view full details of a specific piece of cyberware."
+        output += "\nUse 'cyberware/info <name>' to view full details of a specific piece of cyberware."
         self.caller.msg(output)
 
     def view_specific_cyberware(self, character_sheet, cyberware_name):
@@ -91,13 +160,18 @@ class CmdCyberware(MuxCommand):
         output += f"|cCost:|n {cyberware.cost} eb\n"
         output += divider("Description", width=78, fillchar="|m-|n") + "\n"
         output += f"{cyberware.description}\n"
+        if getattr(cyberware_instance, "popup_weapon_name", None):
+            output += f"\n|cWeapon:|n {cyberware_instance.popup_weapon_name}\n"
         output += footer(width=78, fillchar="|m-|n")
         
         self.caller.msg(output)
-    def install_cyberware(self, character_sheet, cyberware_name):
-        """Install uninstalled cyberware (e.g. purchased from Ripperdoc)."""
+    def install_cyberware(self, character_sheet, cyberware_name, weapon_name=None):
+        """Install uninstalled cyberware (e.g. purchased from Ripperdoc).
+        For Popup Melee Weapon / Popup Ranged Weapon: cyberware/install "Popup Melee Weapon" = "Light Melee Weapon"
+        """
         if not cyberware_name:
             self.caller.msg("Usage: cyberware/install <name>")
+            self.caller.msg("For Popup Melee/Ranged: cyberware/install \"Popup Melee Weapon\" = \"Light Melee Weapon\"")
             return
         cw_instance = CyberwareInstance.objects.filter(
             Q(character_sheet=character_sheet) | Q(character_object=self.caller),
@@ -110,65 +184,126 @@ class CmdCyberware(MuxCommand):
                 "Check your inventory with 'inv' to see uninstalled cyberware."
             )
             return
+        cw = cw_instance.cyberware
+        cw_lower = cw.name.lower()
+        # Popup Melee/Ranged require weapon selection
+        if cw_lower == "popup melee weapon":
+            if not weapon_name:
+                melee_list = get_popup_melee_weapons()
+                names = ", ".join(w["name"] for w in melee_list[:15])
+                self.caller.msg(f"Popup Melee Weapon requires a one-handed melee weapon. Usage: cyberware/install \"Popup Melee Weapon\" = \"<weapon>\"")
+                self.caller.msg(f"Eligible: {names}{'...' if len(melee_list) > 15 else ''}")
+                return
+            w = get_weapon_by_name(weapon_name)
+            if not w or w.get("category") != "melee" or w.get("hands", 2) != 1:
+                self.caller.msg(f"'{weapon_name}' is not a one-handed melee weapon. Use equipdb weapons to browse.")
+                return
+            cw_instance.popup_weapon_name = w["name"]
+        elif cw_lower == "popup ranged weapon":
+            if not weapon_name:
+                ranged_list = get_popup_ranged_weapons()
+                names = ", ".join(w["name"] for w in ranged_list[:15])
+                self.caller.msg(f"Popup Ranged Weapon requires a one-handed handgun/SMG. Usage: cyberware/install \"Popup Ranged Weapon\" = \"<weapon>\"")
+                self.caller.msg(f"Eligible: {names}{'...' if len(ranged_list) > 15 else ''}")
+                return
+            w = get_weapon_by_name(weapon_name)
+            if not w or w.get("category") != "handgun" or w.get("hands", 2) != 1:
+                self.caller.msg(f"'{weapon_name}' is not a one-handed handgun/SMG. Use equipdb weapons to browse.")
+                return
+            cw_instance.popup_weapon_name = w["name"]
         cw_instance.installed = True
         if not cw_instance.character_sheet:
             cw_instance.character_sheet = character_sheet
         cw_instance.save()
         character_sheet.calculate_humanity_loss()
-        self.caller.msg(
-            f"You have installed {cw_instance.cyberware.name}. "
-            f"Humanity loss: {cw_instance.cyberware.humanity_loss}. "
-            f"Current humanity: {character_sheet.humanity}."
-        )
+        # Cyberarm grants minimum 2d6 brawling damage (CPR p.169)
+        if cw_lower == "cyberarm":
+            character_sheet.has_cyberarm = True
+            character_sheet.recalculate_derived_stats()
+        msg = f"You have installed {cw.name}."
+        if cw_instance.popup_weapon_name:
+            msg += f" Weapon: {cw_instance.popup_weapon_name}."
+        msg += f" Humanity loss: {cw.humanity_loss}. Current humanity: {character_sheet.humanity}."
+        self.caller.msg(msg)
+
+    def _get_cyberware_weapon_damage(self, cw_instance):
+        """Get damage dice for a cyberware weapon (built-in or popup template)."""
+        cw = cw_instance.cyberware
+        if cw.is_weapon and cw.damage_dice:
+            return cw.damage_dice
+        # Popup Melee/Ranged use equipment_data template
+        popup_name = (getattr(cw_instance, "popup_weapon_name", None) or "").strip()
+        if popup_name and cw.name.lower() in ("popup melee weapon", "popup ranged weapon"):
+            return get_weapon_damage_dice(popup_name)
+        return 0
 
     def activate_cyberware(self, character_sheet, cyberware_name):
-        cyberware_name = cyberware_name.strip()  # Remove leading/trailing whitespace
-        try:
-            cyberware_instance = CyberwareInstance.objects.get(
-                character_sheet=character_sheet,
-                cyberware__name__iexact=cyberware_name,
-                installed=True
-            )
-        except CyberwareInstance.DoesNotExist:
-            self.caller.msg(f"You don't have a piece of cyberware named '{cyberware_name}' installed.")
+        cyberware_name = (cyberware_name or "").strip()
+        if not cyberware_name:
+            self.caller.msg("Usage: cyberware/activate <name>")
             return
-        # Attempt to find the cyberware
-        try:
-            cyberware = CyberwareInstance.objects.filter(
-                character_sheet=character_sheet,
-                installed=True,
-                cyberware__is_weapon=True
-            ).filter(
-                Q(cyberware__name__iexact=cyberware_name) |
-                Q(cyberware__name__icontains=cyberware_name)
-            ).first()
-
-            if not cyberware:
-                raise CyberwareInstance.DoesNotExist
-
-        except CyberwareInstance.DoesNotExist:
-            self.caller.msg(f"You don't have an installed cyberware weapon named '{cyberware_name}'.")
+        # Find installed cyberware: built-in weapons (is_weapon) OR Popup Melee/Ranged with popup_weapon_name
+        cw_instance = CyberwareInstance.objects.filter(
+            character_sheet=character_sheet,
+            installed=True,
+        ).filter(
+            Q(cyberware__name__iexact=cyberware_name) | Q(cyberware__name__icontains=cyberware_name)
+        ).first()
+        if not cw_instance:
+            self.caller.msg(f"You don't have installed cyberware named '{cyberware_name}'.")
+            return
+        cw = cw_instance.cyberware
+        # Must be a weapon: built-in (is_weapon) or Popup with template
+        weapon_damage = self._get_cyberware_weapon_damage(cw_instance)
+        if not weapon_damage and not cw.is_weapon:
+            self.caller.msg(f"'{cw.name}' is not a cyberware weapon. Use cyberware/activate for Big Knucks, Rippers, Popup Melee Weapon, etc.")
+            return
+        if cw.name.lower() in ("popup melee weapon", "popup ranged weapon") and not cw_instance.popup_weapon_name:
+            self.caller.msg(f"Your {cw.name} has no weapon configured. Reinstall with a weapon: cyberware/install \"{cw.name}\" = \"<weapon>\"")
             return
 
         # Deactivate any previously activated cyberware
         CyberwareInstance.objects.filter(character_sheet=character_sheet, active=True).update(active=False)
 
-        # Activate the selected cyberware
-        cyberware.active = True
-        cyberware.save()
+        cw_instance.active = True
+        cw_instance.save()
 
-        # Calculate base unarmed damage based on Body stat
         base_damage_dice = character_sheet.calculate_base_unarmed_damage()
-
-        # Update the character's unarmed strike damage
-        character_sheet.unarmed_damage_dice = max(base_damage_dice, cyberware.cyberware.damage_dice)
-        character_sheet.unarmed_damage_die_type = 6  # Always d6 as per the rules
+        character_sheet.unarmed_damage_dice = max(base_damage_dice, weapon_damage)
+        character_sheet.unarmed_damage_die_type = 6
         character_sheet.save()
 
-        self.caller.msg(f"You have activated {cyberware.cyberware.name}. Your unarmed strike now deals {character_sheet.unarmed_damage_dice}d6 damage.")
+        # Sync to character.db for combat/display
+        char = getattr(character_sheet, "character", None)
+        if char:
+            char.db.unarmed_damage_dice = character_sheet.unarmed_damage_dice
+            char.db.unarmed_damage_die_type = character_sheet.unarmed_damage_die_type
 
-        # Check if the cyberware is a cyberarm and update the has_cyberarm flag
-        if cyberware.cyberware.name.lower() == "cyberarm":
-            character_sheet.has_cyberarm = True
-            character_sheet.save()
-            self.caller.msg("Your Cyberarm installation has been registered.")
+        display_name = f"{cw.name} ({cw_instance.popup_weapon_name})" if cw_instance.popup_weapon_name else cw.name
+        self.caller.msg(f"You have activated {display_name}. Your unarmed strike now deals {character_sheet.unarmed_damage_dice}d6 damage.")
+
+    def deactivate_cyberware(self, character_sheet, cyberware_name=None):
+        """Deactivate cyberware weapon; return unarmed damage to base (BODY + has_cyberarm)."""
+        active_inst = CyberwareInstance.objects.filter(
+            character_sheet=character_sheet, installed=True, active=True
+        ).select_related("cyberware").first()
+        if not active_inst:
+            self.caller.msg("You have no cyberware weapon currently activated.")
+            return
+        if cyberware_name:
+            name_match = (
+                active_inst.cyberware.name.lower() == cyberware_name.strip().lower()
+                or cyberware_name.strip().lower() in active_inst.cyberware.name.lower()
+            )
+            if not name_match:
+                self.caller.msg(f"'{cyberware_name}' is not your active weapon. Your active weapon is {active_inst.cyberware.name}.")
+                return
+        active_inst.active = False
+        active_inst.save()
+        character_sheet.recalculate_derived_stats()
+        char = getattr(character_sheet, "character", None)
+        if char:
+            char.db.unarmed_damage_dice = character_sheet.unarmed_damage_dice
+            char.db.unarmed_damage_die_type = character_sheet.unarmed_damage_die_type
+        display = f"{active_inst.cyberware.name} ({active_inst.popup_weapon_name})" if active_inst.popup_weapon_name else active_inst.cyberware.name
+        self.caller.msg(f"You have deactivated {display}. Unarmed damage returns to base: {character_sheet.unarmed_damage_dice}d6.")

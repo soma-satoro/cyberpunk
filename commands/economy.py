@@ -2,7 +2,8 @@ from evennia import Command
 from evennia.utils.evtable import EvTable
 from world.inventory.models import Weapon, Armor, Inventory
 from world.cyberpunk_sheets.models import CharacterSheet
-from world.cyberpunk_sheets.services import CharacterSheetMoneyService
+from world.cyberpunk_sheets.services import CharacterSheetMoneyService, CharacterMoneyService
+from world.utils.character_utils import get_staff_target_character
 from typeclasses.rental import RentableRoom
 from evennia.utils import delay
 import logging
@@ -11,11 +12,11 @@ logger = logging.getLogger('cyberpunk.economy')
 
 class CmdBalance(Command):
     """
-    Check your Eurodollar balance
+    Check Eurodollar balance
 
     Usage:
-      balance
-      money
+      balance              - Your balance
+      balance <name>       - Staff: view another character's balance (works offline)
     """
 
     key = "balance"
@@ -25,6 +26,17 @@ class CmdBalance(Command):
 
     def func(self):
         logger.info(f"Balance command called for {self.caller.name}")
+        target_char, character_sheet = get_staff_target_character(self.caller, self.args)
+        if self.args and (target_char is None or character_sheet is None):
+            self.caller.msg("You don't have permission to view other character balances, or no such character found.")
+            return
+        if target_char is not None and character_sheet is not None:
+            # Staff viewing another character
+            display_name = getattr(target_char.db, 'full_name', None) or getattr(target_char, 'key', target_char)
+            balance = CharacterSheetMoneyService.get_balance(character_sheet)
+            self.caller.msg(f"{display_name} has {balance} Eurodollars.")
+            return
+        # Self or no args
         character_sheet = self.caller.character_sheet
         if not character_sheet:
             logger.warning(f"No character sheet found for {self.caller.name}")
@@ -90,7 +102,9 @@ class CmdAdminMoney(Command):
     Usage:
       money <character> = <amount>
 
-    Use a positive amount to add money, negative to remove.
+    Examples:
+      money Soma = 30000     Add 30000 eb to Soma
+      money Soma = -4000     Subtract 4000 eb from Soma
     """
 
     key = "money"
@@ -127,19 +141,25 @@ class CmdAdminMoney(Command):
                 self.caller.msg(f"No character sheet found with ID {sheet} for {target.name}.")
                 return
 
+        # Sync sheet balance to character.db first (in case character.db is stale, e.g. char offline)
+        if target_cs and hasattr(target, 'db'):
+            target.db.eurodollars = CharacterSheetMoneyService.get_balance(target_cs)
+
+        # Use CharacterMoneyService with the character (target) so we add to character.db
+        # and sync to sheet - avoids overwriting when sheet/character are out of sync
         if amount >= 0:
-            new_balance = CharacterSheetMoneyService.add_money(target_cs, amount)
+            new_balance = CharacterMoneyService.add_money(target, amount)
             self.caller.msg(f"Added {amount} Eurodollars to {target.name}'s account. New balance: {new_balance}")
             target.msg(f"An admin has added {amount} Eurodollars to your account. New balance: {new_balance}")
         else:
-            if CharacterSheetMoneyService.spend_money(target_cs, abs(amount)):
-                new_balance = CharacterSheetMoneyService.get_balance(target_cs)
+            if CharacterMoneyService.spend_money(target, abs(amount)):
+                new_balance = CharacterMoneyService.get_balance(target)
                 self.caller.msg(f"Removed {abs(amount)} Eurodollars from {target.name}'s account. New balance: {new_balance}")
                 target.msg(f"An admin has removed {abs(amount)} Eurodollars from your account. New balance: {new_balance}")
             else:
                 self.caller.msg(f"{target.name} doesn't have enough Eurodollars to remove {abs(amount)}.")
 
-        self.caller.msg(f"Current balance for {target.name}: {CharacterSheetMoneyService.get_balance(target_cs)} Eurodollars")
+        self.caller.msg(f"Current balance for {target.name}: {CharacterMoneyService.get_balance(target)} Eurodollars")
 
 # CmdRentRoom replaced by CmdRent in rent_commands.py
 

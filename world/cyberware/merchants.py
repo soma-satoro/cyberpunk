@@ -221,6 +221,15 @@ class CmdImplantCyberware(Command):
             )
             return
 
+        # Popup Melee/Ranged require weapon selection at install - must stash, then cyberware/install with weapon
+        cw_lower = cyberware.name.lower()
+        if not stash and cw_lower in ("popup melee weapon", "popup ranged weapon"):
+            stash = True
+            self.caller.msg(
+                f"{cyberware.name} requires selecting a weapon when installing. "
+                f"Use: cyberware/install \"{cyberware.name}\" = \"<weapon>\" (e.g. Light Melee Weapon, Heavy Pistol)"
+            )
+
         if not stash:
             requirements_met, error_message = check_cyberware_requirements(character_sheet, cyberware)
             if not requirements_met:

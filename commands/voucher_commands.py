@@ -7,6 +7,7 @@ import re
 from evennia import create_object
 from evennia.commands.default.muxcommand import MuxCommand
 from typeclasses.vouchers import Voucher
+from world.utils.character_utils import get_staff_target_character, is_staff
 
 VOUCHER_TYPECLASS = "typeclasses.vouchers.Voucher"
 ALIAS_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
@@ -129,14 +130,23 @@ class CmdVoucher(MuxCommand):
             self.caller.msg(f"Unknown switch: {switch}")
 
     def do_list(self):
-        """List all vouchers the character has (in inventory)."""
-        vouchers = [o for o in self.caller.contents if o.is_typeclass(VOUCHER_TYPECLASS)]
+        """List all vouchers the character has (in inventory). Staff: +voucher <name> to view another's."""
+        target_char, _ = get_staff_target_character(self.caller, self.args, quiet=True)
+        if self.args and is_staff(self.caller) and target_char is None:
+            self.caller.msg(f"No character named '{self.args}' found.")
+            return
+        container = target_char if (target_char and hasattr(target_char, "contents")) else self.caller
+        vouchers = [o for o in container.contents if o.is_typeclass(VOUCHER_TYPECLASS)]
         if not vouchers:
-            self.caller.msg("You have no vouchers.")
+            if target_char:
+                self.caller.msg(f"{getattr(target_char, 'key', target_char)} has no vouchers.")
+            else:
+                self.caller.msg("You have no vouchers.")
             return
         from world.utils.formatting import sheet_header, sheet_section, footer
         W = 80
-        out = sheet_header("Your Vouchers", width=W)
+        title = f"{getattr(target_char, 'key', target_char)}'s Vouchers" if target_char else "Your Vouchers"
+        out = sheet_header(title, width=W)
         out += f"|y{'Voucher':<35}{'Items':<12}{'Locked':<10}|n\n"
         for v in vouchers:
             items = v.get_items() if hasattr(v, 'get_items') else []
@@ -149,14 +159,30 @@ class CmdVoucher(MuxCommand):
     def do_info(self):
         if not self.args:
             self.caller.msg("Usage: +voucher/info <voucher> or +voucher/info <voucher>/<item#>")
+            self.caller.msg("Staff: +voucher/info <name>/<voucher> or +voucher/info <name>/<voucher>/<item#>")
             return
-        parts = self.args.split("/", 1)
+        # Staff: +voucher/info <name>/<voucher>[/<item#>]
+        target_char = None
+        search_loc = None
+        raw = self.args
+        if "/" in raw and is_staff(self.caller):
+            name_part, rest = raw.split("/", 1)
+            target_char, _ = get_staff_target_character(self.caller, name_part.strip(), quiet=True)
+            if target_char is not None and hasattr(target_char, "contents"):
+                search_loc = target_char
+                raw = rest
+        parts = raw.split("/", 1)
         v_arg = parts[0].strip()
         item_num = int(parts[1].strip()) if len(parts) > 1 and parts[1].strip().isdigit() else None
-        v = find_voucher(self.caller, v_arg)
+        v = find_voucher(self.caller, v_arg, location=search_loc, quiet=bool(search_loc))
         if not v:
+            if search_loc:
+                self.caller.msg(f"No voucher '{v_arg}' found in {getattr(target_char, 'key', target_char)}'s inventory.")
             return
-        if v.location != self.caller:
+        if search_loc and v.location != search_loc:
+            self.caller.msg("You don't have that voucher.")
+            return
+        if not search_loc and v.location != self.caller:
             self.caller.msg("You don't have that voucher.")
             return
         if item_num is not None:

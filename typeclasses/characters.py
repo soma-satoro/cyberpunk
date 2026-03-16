@@ -560,6 +560,20 @@ class Character(DefaultCharacter):
         """Set a Medicine specialty (surgery, pharma, or cryo). Medtech only."""
         key = f"medicine_{specialty}"
         setattr(self.db, key, int(value))
+
+    def get_maker_specialties(self):
+        """Return (field, upgrade, fabrication, invention) allocation for Tech."""
+        return (
+            getattr(self.db, 'maker_field', 0) or 0,
+            getattr(self.db, 'maker_upgrade', 0) or 0,
+            getattr(self.db, 'maker_fabrication', 0) or 0,
+            getattr(self.db, 'maker_invention', 0) or 0,
+        )
+
+    def set_maker_specialty(self, specialty, value):
+        """Set a Maker specialty (field, upgrade, fabrication, invention). Tech only."""
+        key = f"maker_{specialty}"
+        setattr(self.db, key, int(value))
     
     def set_skill(self, skill_name, value):
         """Set a skill value. Rejects core stat names (they belong in db.<stat>)."""
@@ -856,8 +870,11 @@ class Character(DefaultCharacter):
             
             string += joined_paragraphs + "\n"
 
-        # Add any other details you want to include in the character's appearance
-        # For example, you might want to add information about their equipment, stats, etc.
+        # Worn armor - visible when looking at the character
+        if hasattr(self, 'character_sheet') and self.character_sheet:
+            eqarmor = getattr(self.character_sheet, 'eqarmor', None)
+            if eqarmor:
+                string += f"\n|yThey are wearing {eqarmor.name}.|n\n"
 
         # Netrun indicator: show when character is jacked in (body vulnerable to attack)
         netrun_state = getattr(self.db, "netrun_state", None) or {}
@@ -1107,11 +1124,14 @@ class Character(DefaultCharacter):
                 pass  # Fail silently if language doesn't exist
 
     def calculate_base_unarmed_damage(self):
-        if self.body >= 11:
+        """Brawling damage scales with BODY; Cyberarm grants minimum 2d6 (CPR p.169)."""
+        body = getattr(self.db, 'body', 1) or 1
+        has_cyberarm = getattr(self.db, 'has_cyberarm', False) or False
+        if body >= 11:
             return 4
-        elif self.body >= 7:
+        elif body >= 7:
             return 3
-        elif self.body >= 5 or (self.body >= 1 and self.has_cyberarm):
+        elif body >= 5 or (body >= 1 and has_cyberarm):
             return 2
         else:
             return 1
@@ -1228,11 +1248,14 @@ class Character(DefaultCharacter):
         known_skills = frozenset(SKILL_MAPPING.values())
         skills = dict(self.db.skills or {})
         role = (self.db.role or "").strip()
-        # Remove stats, non-skill keys, and Medtech Medicine specialty allocations (they're not skills)
+        # Remove stats, non-skill keys, and role specialty allocations (they're not skills)
         medtech_specialty_keys = frozenset(("medicine_surgery", "medicine_pharma", "medicine_cryo"))
+        maker_specialty_keys = frozenset(("maker_field", "maker_upgrade", "maker_fabrication", "maker_invention"))
         to_remove = [
             k for k in skills
-            if k in core_stats or k not in known_skills or (role == "Medtech" and k in medtech_specialty_keys)
+            if k in core_stats or k not in known_skills
+            or (role == "Medtech" and k in medtech_specialty_keys)
+            or (role == "Tech" and k in maker_specialty_keys)
         ]
         if to_remove:
             for k in to_remove:

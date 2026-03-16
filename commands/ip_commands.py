@@ -270,34 +270,36 @@ class CmdIP(MuxCommand):
             )
             return
 
-        # Medicine requires specialty: +ip/buy medicine <surgery|pharma|cryo>
+        # Medicine: launch menu to pick specialty (surgery/pharma/cryo) - Medtech only
         medicine_specialty = None
         if stat_key == "medicine":
+            if (getattr(char.db, "role", None) or "").strip() != "Medtech":
+                self.caller.msg("Medicine is a Medtech role ability. Only Medtechs can purchase it.")
+                return
             parts = stat_name.split()
             if len(parts) >= 2:
                 spec = parts[1].lower()
                 if spec in ("surgery", "pharma", "cryo", "cryosystem"):
                     medicine_specialty = "cryo" if spec == "cryosystem" else spec
-            if not medicine_specialty:
-                self.caller.msg(
-                    "Medicine requires a specialty. Use: +ip/buy medicine <surgery|pharma|cryo>\n"
-                    "Surgery: 1 pt = 2 Surgery skill. Pharma/Cryo: 1 pt = 1 Medical Tech (max 5 each)."
-                )
+
+        # Maker: launch menu to allocate 2 points - Tech only
+        if stat_key == "maker":
+            if (getattr(char.db, "role", None) or "").strip() != "Tech":
+                self.caller.msg("Maker is a Tech role ability. Only Techs can purchase it.")
                 return
 
         if not is_valid_stat(stat_name.split()[0] if stat_name else stat_name):
             self.caller.msg(f"'{stat_name}' is not a valid skill or attribute to purchase.")
             return
 
-        current_val = get_character_stat_value(char, "medicine" if stat_key == "medicine" else stat_name)
+        purchase_stat = "medicine" if stat_key == "medicine" else "maker" if stat_key == "maker" else stat_key
+        current_val = get_character_stat_value(char, purchase_stat if purchase_stat in ("medicine", "maker") else stat_name)
         if current_val is None:
             self.caller.msg(f"Could not read current value for {stat_name}.")
             return
 
-        if not medicine_specialty:
-            stat_key = normalize_stat_name(stat_name)
         cost, next_level = get_ip_cost(
-            "medicine" if stat_key == "medicine" else stat_name,
+            purchase_stat,
             current_val,
             is_attribute=stat_key in IP_ATTRIBUTES,
             is_role_ability=stat_key in IP_ROLE_ABILITIES)
@@ -310,28 +312,113 @@ class CmdIP(MuxCommand):
             self.caller.msg(f"You need {cost} IP to raise {get_stat_display_name(stat_name)} to {next_level}. You have {ip_current} IP.")
             return
 
-        # Medicine: validate specialty limit (pharma/cryo max 5) before purchase
+        # Medicine or Maker: launch allocation menu, then apply purchase in callback
+        if stat_key in ("medicine", "maker") and (stat_key != "medicine" or not medicine_specialty):
+            from world.ip_medicine_menu import start_ip_medicine_menu
+            from world.ip_maker_menu import start_ip_maker_menu
+
+            def _apply_medicine_purchase(caller):
+                choice = getattr(caller.ndb, "_ip_medicine_specialty_choice", None)
+                if not choice:
+                    caller.msg("Purchase cancelled.")
+                    for key in ("_ip_purchase", "_ip_medicine_specialty_choice"):
+                        if hasattr(caller.ndb, key):
+                            delattr(caller.ndb, key)
+                    return
+                purchase = getattr(caller.ndb, "_ip_purchase", None)
+                if not purchase or purchase.get("stat") != "medicine":
+                    return
+                char = caller
+                cost = purchase["cost"]
+                next_level = purchase["next_level"]
+                current_val = purchase["current_val"]
+                set_character_stat_value(char, "medicine", next_level)
+                if hasattr(char, "set_medicine_specialty"):
+                    current_spec = getattr(char.db, f"medicine_{choice}", 0) or 0
+                    char.set_medicine_specialty(choice, current_spec + 1)
+                ip_current, ip_spent, _, _, _ = get_character_ip(char)
+                char.attributes.add("improvement_points", ip_current - cost)
+                char.attributes.add("ip_spent", ip_spent + cost)
+                add_ip_log_entry(char, -cost, "Medicine", f"{current_val} > {next_level} (+1 {choice})")
+                char.attributes.add("ip_last_purchase", {
+                    "stat": "medicine", "from_level": current_val, "to_level": next_level,
+                    "cost": cost, "medicine_specialty": choice,
+                    "timestamp": __import__("datetime").datetime.now().isoformat(),
+                })
+                char.msg(f"You spent {cost} IP to raise Medicine from {current_val} to {next_level}. +1 {choice.title()}. You have {ip_current - cost} IP remaining.")
+                if hasattr(char.ndb, "_ip_purchase"):
+                    delattr(char.ndb, "_ip_purchase")
+                if hasattr(char.ndb, "_ip_medicine_specialty_choice"):
+                    delattr(char.ndb, "_ip_medicine_specialty_choice")
+
+            def _apply_maker_purchase(caller):
+                specs = getattr(caller.ndb, "_ip_maker_specialties", None)
+                if not specs:
+                    caller.msg("Purchase cancelled.")
+                    for key in ("_ip_purchase", "_ip_maker_specialties"):
+                        if hasattr(caller.ndb, key):
+                            delattr(caller.ndb, key)
+                    return
+                purchase = getattr(caller.ndb, "_ip_purchase", None)
+                if not purchase or purchase.get("stat") != "maker":
+                    return
+                char = caller
+                cost = purchase["cost"]
+                next_level = purchase["next_level"]
+                current_val = purchase["current_val"]
+                set_character_stat_value(char, "maker", next_level)
+                # specs = points to add for this +1 Maker rank (2 total)
+                if hasattr(char, "set_maker_specialty"):
+                    for spec in ("field", "upgrade", "fabrication", "invention"):
+                        cur = getattr(char.db, f"maker_{spec}", 0) or 0
+                        char.set_maker_specialty(spec, cur + specs.get(spec, 0))
+                ip_current, ip_spent, _, _, _ = get_character_ip(char)
+                char.attributes.add("improvement_points", ip_current - cost)
+                char.attributes.add("ip_spent", ip_spent + cost)
+                detail = f"{current_val} > {next_level} (Field +{specs.get('field',0)}, Upgrade +{specs.get('upgrade',0)}, Fab +{specs.get('fabrication',0)}, Inv +{specs.get('invention',0)})"
+                add_ip_log_entry(char, -cost, "Maker", detail)
+                char.attributes.add("ip_last_purchase", {
+                    "stat": "maker", "from_level": current_val, "to_level": next_level,
+                    "cost": cost, "maker_specialties": dict(specs),
+                    "timestamp": __import__("datetime").datetime.now().isoformat(),
+                })
+                char.msg(f"You spent {cost} IP to raise Maker from {current_val} to {next_level}. You have {ip_current - cost} IP remaining.")
+                if hasattr(char.ndb, "_ip_purchase"):
+                    delattr(char.ndb, "_ip_purchase")
+                if hasattr(char.ndb, "_ip_maker_specialties"):
+                    delattr(char.ndb, "_ip_maker_specialties")
+
+            char.ndb._ip_purchase = {
+                "stat": stat_key,
+                "cost": cost,
+                "next_level": next_level,
+                "current_val": current_val,
+            }
+            if stat_key == "medicine":
+                start_ip_medicine_menu(char, _apply_medicine_purchase)
+                self.caller.msg("Allocate your +1 Medicine point to a specialty:")
+            else:
+                start_ip_maker_menu(char, _apply_maker_purchase)
+                self.caller.msg("Allocate your 2 Maker points to specialties (1 at a time):")
+            return
+
+        # Medicine with explicit specialty on command line (legacy)
         if stat_key == "medicine" and medicine_specialty:
             from world.chargen_constants import MEDICINE_PHARMA_MAX, MEDICINE_CRYO_MAX
             s = getattr(char.db, "medicine_surgery", 0) or 0
             p = getattr(char.db, "medicine_pharma", 0) or 0
             c = getattr(char.db, "medicine_cryo", 0) or 0
-            if medicine_specialty == "surgery":
-                pass  # no cap
-            elif medicine_specialty == "pharma":
-                if p >= MEDICINE_PHARMA_MAX:
-                    self.caller.msg(f"Pharmaceuticals is already at maximum ({MEDICINE_PHARMA_MAX}).")
-                    return
-            elif medicine_specialty == "cryo":
-                if c >= MEDICINE_CRYO_MAX:
-                    self.caller.msg(f"Cryosystem is already at maximum ({MEDICINE_CRYO_MAX}).")
-                    return
+            if medicine_specialty == "pharma" and p >= MEDICINE_PHARMA_MAX:
+                self.caller.msg(f"Pharmaceuticals is already at maximum ({MEDICINE_PHARMA_MAX}).")
+                return
+            if medicine_specialty == "cryo" and c >= MEDICINE_CRYO_MAX:
+                self.caller.msg(f"Cryosystem is already at maximum ({MEDICINE_CRYO_MAX}).")
+                return
 
-        # Perform purchase
-        set_character_stat_value(char, "medicine" if stat_key == "medicine" else stat_name, next_level)
+        # Perform purchase (normal flow)
+        set_character_stat_value(char, purchase_stat if purchase_stat in ("medicine", "maker") else stat_name, next_level)
         if stat_key == "medicine" and medicine_specialty and hasattr(char, "set_medicine_specialty"):
-            key = f"medicine_{medicine_specialty}"
-            current_spec = getattr(char.db, key, 0) or 0
+            current_spec = getattr(char.db, f"medicine_{medicine_specialty}", 0) or 0
             char.set_medicine_specialty(medicine_specialty, current_spec + 1)
         new_ip = ip_current - cost
         char.attributes.add("improvement_points", new_ip)
@@ -342,7 +429,6 @@ class CmdIP(MuxCommand):
             details += f" (+1 {medicine_specialty})"
         add_ip_log_entry(char, -cost, get_stat_display_name(stat_name), details)
 
-        # Store for refund (use first_word for skill instances to preserve instance key)
         refund_stat = (
             "medicine" if stat_key == "medicine"
             else (first_word if base_skill in SKILLS_REQUIRING_INSTANCE and instance else stat_key)
@@ -395,6 +481,14 @@ class CmdIP(MuxCommand):
             key = f"medicine_{spec}"
             current = getattr(char.db, key, 0) or 0
             setattr(char.db, key, max(0, current - 1))
+
+        # Maker: revert the 2 specialty points that were added
+        if stat_key == "maker" and last.get("maker_specialties") and hasattr(char, "set_maker_specialty"):
+            added = last["maker_specialties"]  # points we added
+            for spec in ("field", "upgrade", "fabrication", "invention"):
+                cur = getattr(char.db, f"maker_{spec}", 0) or 0
+                char.set_maker_specialty(spec, max(0, cur - added.get(spec, 0)))
+
         ip_current, ip_spent, _, _, _ = get_character_ip(char)
         char.attributes.add("improvement_points", ip_current + cost)
         char.attributes.add("ip_spent", ip_spent - cost)

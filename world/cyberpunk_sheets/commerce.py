@@ -33,7 +33,11 @@ from world.commerce.vendor_tags import (
 from typeclasses.chargen import ChargenRoom
 from commands.list_commands import _find_item_info, format_item_info
 from commands.equipment_commands import format_search_equipment
-from world.chargen_constants import FASHION_ITEM_NAMES
+from world.chargen_constants import (
+    FASHION_ITEM_NAMES,
+    CHARGEN_EURODOLLARS_EDGERUNNER,
+    CHARGEN_EURODOLLARS_COMPLETE_PACKAGE,
+)
 
 
 class Merchant:
@@ -503,7 +507,7 @@ class CmdBuy(MuxCommand):
 
         if item_type == "cyberware_implant":
             stash = "stash" in (self.switches or [])
-            self._buy_cyberware_from_chargen(item, stash=stash)
+            self._buy_cyberware_from_chargen(item, stash=stash, chargen_purchase=True)
             return
 
         merchant_type_map = {"weapon": "arms_dealer", "armor": "clothier", "gear": "gear_merchant", "cyberdeck": "cyberdeck_merchant"}
@@ -561,7 +565,8 @@ class CmdBuy(MuxCommand):
             )
             return
 
-        self._add_item_to_inventory(self.caller, item, merchant_type)
+        in_chargen = isinstance(self.caller.location, ChargenRoom)
+        self._add_item_to_inventory(self.caller, item, merchant_type, chargen_purchase=in_chargen)
         if discount > 0:
             self.caller.msg(
                 f"You have purchased {item['name']} for {price} eb "
@@ -575,9 +580,17 @@ class CmdBuy(MuxCommand):
         else:
             self.caller.msg(f"You have purchased {item['name']} for {price} eb.")
 
-    def _buy_cyberware_from_chargen(self, item, stash=False):
+    def _buy_cyberware_from_chargen(self, item, stash=False, chargen_purchase=False):
         """Handle chargen purchase of body cyberware (from Cyberware model). stash=True = buy without installing."""
         cyberware = item["_cyberware"]
+        # Popup Melee/Ranged require weapon selection at install - must stash
+        cw_lower = cyberware.name.lower()
+        if not stash and cw_lower in ("popup melee weapon", "popup ranged weapon"):
+            stash = True
+            self.caller.msg(
+                f"{cyberware.name} requires selecting a weapon when installing. "
+                f"Use: cyberware/install \"{cyberware.name}\" = \"<weapon>\""
+            )
         base_cost = cyberware.cost
         discount = get_purchase_discount_percent(self.caller, "cyberware", None)
         final_cost = calculate_final_price(base_cost, discount)
@@ -655,6 +668,11 @@ class CmdBuy(MuxCommand):
                 installed=not stash,
             )
             inventory.cyberware.add(instance)
+            if chargen_purchase:
+                purchased = inventory.chargen_purchased or []
+                purchased.append({"type": "cyberware", "name": cyberware.name})
+                inventory.chargen_purchased = purchased
+                inventory.save()
         except Exception as e:
             if is_fashionware:
                 if fashion_to_spend > 0:
@@ -812,7 +830,7 @@ class CmdBuy(MuxCommand):
         
         return False
 
-    def _add_item_to_inventory(self, character, item, merchant_type):
+    def _add_item_to_inventory(self, character, item, merchant_type, chargen_purchase=False):
         # Get or create character's inventory (creates if missing, e.g. during chargen)
         inventory, _ = Inventory.get_or_create_for_character(character)
         
@@ -878,6 +896,150 @@ class CmdBuy(MuxCommand):
                 }
             )
             inventory.add_gear(gear)
+
+        if chargen_purchase:
+            type_map = {
+                "arms_dealer": "weapon",
+                "clothier": "armor",
+                "gear_merchant": "gear",
+                "cyberdeck_merchant": "gear",
+                "vehicle_dealer": "vehicle",
+            }
+            item_type = type_map.get(merchant_type, "gear")
+            purchased = inventory.chargen_purchased or []
+            purchased.append({"type": item_type, "name": item["name"]})
+            inventory.chargen_purchased = purchased
+            inventory.save()
+
+
+class CmdRefund(MuxCommand):
+    """
+    Refund a gear purchase made during character generation.
+
+    Usage:
+      refund <item name>           - Refund a purchased weapon, armor, or gear
+      refund/cyberware <name>     - Refund purchased cyberware
+
+    Only works in the chargen room. You can refund items you bought with 'buy'
+    during chargen and receive eurodollars back (up to your allotment: 500 eb
+    for edgerunner, 2550 eb for complete package). Items provided by your role
+    package (edgerunner chargen) cannot be refunded.
+    """
+
+    key = "refund"
+    switches = [("cyberware", "cyberware")]
+    locks = "cmd:all()"
+    help_category = "Economy"
+
+    def func(self):
+        if not isinstance(self.caller.location, ChargenRoom):
+            self.caller.msg("Refunds are only available in the character generation room.")
+            return
+
+        if self.caller.tags.has("approved", category="approval"):
+            self.caller.msg("Your character is already approved. Refunds are only during chargen.")
+            return
+
+        item_name = (self.args or "").strip()
+        if not item_name:
+            self.caller.msg("Usage: refund <item name> or refund/cyberware <name>")
+            return
+
+        cyberware_only = "cyberware" in (self.switches or [])
+        inventory, _ = Inventory.get_or_create_for_character(self.caller)
+        purchased = list(inventory.chargen_purchased or [])
+
+        # Find a matching chargen purchase
+        item_name_lower = item_name.lower()
+        match_idx = None
+        match_type = None
+        for i, entry in enumerate(purchased):
+            if entry.get("name", "").lower() == item_name_lower:
+                etype = entry.get("type", "")
+                if cyberware_only and etype == "cyberware":
+                    match_idx = i
+                    match_type = "cyberware"
+                    break
+                if not cyberware_only and etype in ("weapon", "armor", "gear", "vehicle"):
+                    match_idx = i
+                    match_type = etype
+                    break
+        if cyberware_only and match_type != "cyberware":
+            match_idx = None
+        elif not cyberware_only and match_type == "cyberware":
+            match_idx = None
+
+        if match_idx is None:
+            hint = "Use refund/cyberware <name> for cyberware." if not cyberware_only else ""
+            self.caller.msg(
+                f"'{item_name}' was not purchased during chargen, or you don't have it. "
+                f"Only items you bought with 'buy' can be refunded; role package items cannot. " + hint
+            )
+            return
+
+        # Remove from chargen_purchased
+        purchased.pop(match_idx)
+        inventory.chargen_purchased = purchased
+        inventory.save()
+
+        # Get refund value and remove item from inventory
+        refund_value = 0
+        if match_type == "weapon":
+            weapon = inventory.weapons.filter(name__iexact=item_name).first()
+            if weapon:
+                refund_value = weapon.value
+                inventory.weapons.remove(weapon)
+        elif match_type == "armor":
+            armor = inventory.armor.filter(name__iexact=item_name).first()
+            if armor:
+                refund_value = armor.value
+                inventory.armor.remove(armor)
+        elif match_type == "gear":
+            gear = inventory.gear.filter(name__iexact=item_name).first()
+            if gear:
+                refund_value = gear.value
+                inventory.gear.remove(gear)
+        elif match_type == "vehicle":
+            vehicle = inventory.vehicles.filter(name__iexact=item_name).first()
+            if vehicle:
+                refund_value = vehicle.value
+                inventory.vehicles.remove(vehicle)
+        elif match_type == "cyberware":
+            instance = inventory.cyberware.filter(cyberware__name__iexact=item_name).first()
+            if instance:
+                refund_value = instance.cyberware.cost
+                inventory.cyberware.remove(instance)
+                instance.delete()
+
+        if refund_value == 0:
+            # Item wasn't in inventory (shouldn't happen) - restore the purchase record
+            purchased.append({"type": match_type, "name": item_name})
+            inventory.chargen_purchased = purchased
+            inventory.save()
+            self.caller.msg(f"Could not find '{item_name}' in your inventory.")
+            return
+
+        # Cap refund at allotment (500 edgerunner, 2550 complete package)
+        method = (getattr(self.caller.db, "chargen_method", None) or "").strip().lower()
+        allotment = (
+            CHARGEN_EURODOLLARS_EDGERUNNER
+            if method == "edgerunner"
+            else CHARGEN_EURODOLLARS_COMPLETE_PACKAGE
+        )
+        current = CharacterMoneyService.get_balance(self.caller)
+        refund_amount = min(refund_value, allotment - current)
+        if refund_amount <= 0:
+            self.caller.msg(
+                f"You have reached your eurodollar allotment ({allotment} eb). "
+                f"No refund added, but '{item_name}' has been removed from your inventory."
+            )
+        else:
+            CharacterMoneyService.add_money(self.caller, refund_amount)
+            self.caller.msg(
+                f"You have refunded {item_name} and received {refund_amount} eb. "
+                f"Your balance is now {current + refund_amount} eb."
+            )
+
 
 class CmdListItems(MuxCommand):
     """
@@ -1473,7 +1635,7 @@ class CmdGive(Command):
     Give equipment, uninstalled cyberware, or vouchers to another player.
 
     Usage:
-      give <item> to <player>
+      give <item>=<character>
     """
 
     key = "give"
@@ -1485,11 +1647,11 @@ class CmdGive(Command):
         if is_npc(self.caller):
             self.caller.msg("NPCs cannot give money, gear, or vouchers to people.")
             return
-        if not self.args or " to " not in self.args:
-            self.caller.msg("Usage: give <item name> to <player>")
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: give <item>=<character>")
             return
 
-        item_name, target_name = self.args.split(" to ", 1)
+        item_name, target_name = self.args.split("=", 1)
         item_name = item_name.strip()
         target_name = target_name.strip()
 

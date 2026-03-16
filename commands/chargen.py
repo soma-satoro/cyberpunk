@@ -10,6 +10,7 @@ from world.utils.character_utils import (
     STAT_MAPPING,
     get_full_attribute_name,
     MEDICINE_SPECIALTY_ATTRIBUTES,
+    MAKER_SPECIALTY_ATTRIBUTES,
 )
 from world.cyberpunk_sheets.models import CharacterSheet
 from evennia.utils import evmenu
@@ -18,6 +19,7 @@ from world.cyberpunk_sheets.edgerunner import EdgerunnerChargen
 from world.cyberpunk_constants import EQUIPMENT_OR_CHOICES
 from commands.edgerunner_gear_menu import start_edgerunner_gear_menu
 from world.medtech_medicine_menu import start_medtech_medicine_menu
+from world.tech_maker_menu import start_tech_maker_menu
 from world.edgerunner_skill_instances_menu import start_edgerunner_skill_instances_menu
 from world.cyberpunk_sheets.services import CharacterMoneyService
 from evennia.commands.default.muxcommand import MuxCommand
@@ -35,6 +37,7 @@ from world.chargen_constants import (
     COMPLETE_PACKAGE_SKILL_POOL,
     EDGERUNNER_SKILL_POOL,
     validate_medicine_specialties,
+    validate_maker_specialties,
 )
 
 def get_character_model():
@@ -197,19 +200,25 @@ class CmdChargen(MuxCommand):
         except Exception as e:
             logger.error(f"Error checking for existing sheets: {str(e)}")
 
-        # No existing character data found - chain menus: gear (if needed) -> medicine (Medtech) -> skill instances -> create
+        # No existing character data found - chain menus: gear (if needed) -> medicine (Medtech) / maker (Tech) -> skill instances -> create
         if method == "edgerunner" and EQUIPMENT_OR_CHOICES.get(role):
             if start_edgerunner_gear_menu(
                 self.caller, method, role, full_name,
                 on_complete=self._on_gear_menu_complete
             ):
-                return  # Gear menu running; on exit -> medicine (Medtech) or skill instances
+                return  # Gear menu running; on exit -> medicine (Medtech) / maker (Tech) or skill instances
         if method == "edgerunner" and role == "Medtech":
             if start_medtech_medicine_menu(
                 self.caller, method, role, full_name,
                 on_complete=self._on_medicine_menu_complete
             ):
                 return  # Medicine menu running; on exit -> skill instances
+        if method == "edgerunner" and role == "Tech":
+            if start_tech_maker_menu(
+                self.caller, method, role, full_name,
+                on_complete=self._on_maker_menu_complete
+            ):
+                return  # Maker menu running; on exit -> skill instances
         if method == "edgerunner":
             if start_edgerunner_skill_instances_menu(
                 self.caller, method, role, full_name,
@@ -222,6 +231,12 @@ class CmdChargen(MuxCommand):
                 on_complete=self._on_complete_package_medicine_menu_complete
             ):
                 return  # Medicine menu running; on exit -> skill instances -> create_character
+        if method == "complete_package" and role == "Tech":
+            if start_tech_maker_menu(
+                self.caller, method, role, full_name,
+                on_complete=self._on_complete_package_maker_menu_complete
+            ):
+                return  # Maker menu running; on exit -> skill instances -> create_character
         if method == "complete_package":
             if start_edgerunner_skill_instances_menu(
                 self.caller, method, role, full_name,
@@ -231,13 +246,18 @@ class CmdChargen(MuxCommand):
         self.create_character(method, role, full_name)
 
     def _on_gear_menu_complete(self, caller, menu=None):
-        """Called when gear menu exits. Chain to medicine (Medtech) or skill instances menu."""
+        """Called when gear menu exits. Chain to medicine (Medtech), maker (Tech), or skill instances menu."""
         if hasattr(caller.ndb, "_chargen_params") and hasattr(caller.ndb, "_chargen_gear_choices"):
             method, role, full_name = caller.ndb._chargen_params
             if role == "Medtech":
                 start_medtech_medicine_menu(
                     caller, method, role, full_name,
                     on_complete=self._on_medicine_menu_complete
+                )
+            elif role == "Tech":
+                start_tech_maker_menu(
+                    caller, method, role, full_name,
+                    on_complete=self._on_maker_menu_complete
                 )
             else:
                 start_edgerunner_skill_instances_menu(
@@ -256,12 +276,32 @@ class CmdChargen(MuxCommand):
             )
         # If no params (menu was aborted?), do nothing
 
+    def _on_maker_menu_complete(self, caller, menu=None):
+        """Called when Tech Maker specialty menu exits. Chain to skill instances menu."""
+        if hasattr(caller.ndb, "_chargen_params") and hasattr(caller.ndb, "_chargen_maker_specialties"):
+            method, role, full_name = caller.ndb._chargen_params
+            start_edgerunner_skill_instances_menu(
+                caller, method, role, full_name,
+                on_complete=self._on_skill_instances_menu_complete
+            )
+        # If no params (menu was aborted?), do nothing
+
     def _on_complete_package_medicine_menu_complete(self, caller, menu=None):
         """Called when Complete Package Medtech medicine menu exits. Chain to skill instances menu."""
         if not hasattr(caller.ndb, "_chargen_params") or not hasattr(caller.ndb, "_chargen_medicine_specialties"):
             return  # User aborted - don't create character
         method, role, full_name = caller.ndb._chargen_params
         # Do NOT clear ndb - skill instances menu's on_complete will use both
+        start_edgerunner_skill_instances_menu(
+            caller, method, role, full_name,
+            on_complete=self._on_skill_instances_menu_complete
+        )
+
+    def _on_complete_package_maker_menu_complete(self, caller, menu=None):
+        """Called when Complete Package Tech Maker menu exits. Chain to skill instances menu."""
+        if not hasattr(caller.ndb, "_chargen_params") or not hasattr(caller.ndb, "_chargen_maker_specialties"):
+            return  # User aborted - don't create character
+        method, role, full_name = caller.ndb._chargen_params
         start_edgerunner_skill_instances_menu(
             caller, method, role, full_name,
             on_complete=self._on_skill_instances_menu_complete
@@ -276,18 +316,20 @@ class CmdChargen(MuxCommand):
         skill_instances = caller.ndb._chargen_skill_instances
         gear_choices = getattr(caller.ndb, "_chargen_gear_choices", None)
         medicine_specialties = getattr(caller.ndb, "_chargen_medicine_specialties", None)
+        maker_specialties = getattr(caller.ndb, "_chargen_maker_specialties", None)
         # Clear ndb
-        for key in ("_chargen_params", "_chargen_skill_instances", "_chargen_gear_choices", "_chargen_medicine_specialties"):
+        for key in ("_chargen_params", "_chargen_skill_instances", "_chargen_gear_choices", "_chargen_medicine_specialties", "_chargen_maker_specialties"):
             if hasattr(caller.ndb, key):
                 delattr(caller.ndb, key)
         self.create_character(
             method, role, full_name,
             gear_choices=gear_choices,
             medicine_specialties=medicine_specialties,
+            maker_specialties=maker_specialties,
             skill_instance_choices=skill_instances,
         )
 
-    def create_character(self, method, role, full_name, gear_choices=None, medicine_specialties=None, skill_instance_choices=None):
+    def create_character(self, method, role, full_name, gear_choices=None, medicine_specialties=None, maker_specialties=None, skill_instance_choices=None):
         logger.info(f"Creating character with method: {method}, role: {role}, full_name: {full_name}")
         try:
             char = self.caller
@@ -335,12 +377,14 @@ class CmdChargen(MuxCommand):
                     char, sheet, role,
                     gear_choices=gear_choices,
                     medicine_specialties=medicine_specialties,
+                    maker_specialties=maker_specialties,
                     skill_instance_choices=skill_instance_choices,
                 )
             else:  # complete_package
                 result = self.complete_package_chargen(
                     char, sheet,
                     medicine_specialties=medicine_specialties,
+                    maker_specialties=maker_specialties,
                     skill_instance_choices=skill_instance_choices,
                 )
             
@@ -353,7 +397,7 @@ class CmdChargen(MuxCommand):
             self.caller.msg(f"An error occurred during character creation: {str(e)}")
             return False
 
-    def edgerunner_chargen(self, char, sheet, role, gear_choices=None, medicine_specialties=None, skill_instance_choices=None):
+    def edgerunner_chargen(self, char, sheet, role, gear_choices=None, medicine_specialties=None, maker_specialties=None, skill_instance_choices=None):
         """Create character using edgerunner method, storing data in DB attributes."""
         # Generate stat table
         stat_templates = EdgerunnerChargen.generate_stat_table(role)
@@ -416,6 +460,19 @@ class CmdChargen(MuxCommand):
                 char.db.medicine_surgery = 2
                 char.db.medicine_pharma = 1
                 char.db.medicine_cryo = 1
+
+        # Tech: set Maker specialties from menu or defaults (2,2,2,2 = 8 total for Maker 4)
+        if role == "Tech":
+            if maker_specialties:
+                char.db.maker_field = maker_specialties.get("field", 2)
+                char.db.maker_upgrade = maker_specialties.get("upgrade", 2)
+                char.db.maker_fabrication = maker_specialties.get("fabrication", 2)
+                char.db.maker_invention = maker_specialties.get("invention", 2)
+            else:
+                char.db.maker_field = 2
+                char.db.maker_upgrade = 2
+                char.db.maker_fabrication = 2
+                char.db.maker_invention = 2
         
         # Assign gear and cyberware
         EdgerunnerChargen.assign_gear(sheet, role, gear_choices=gear_choices or {})
@@ -438,7 +495,12 @@ class CmdChargen(MuxCommand):
         
         # Recalculate derived stats using Character's method
         char.recalculate_derived_stats()
-        
+        # HP is always full after edgerunner chargen
+        char.db.current_hp = char.db.max_hp
+        sheet._current_hp = char.db.current_hp
+        sheet._max_hp = char.db.max_hp
+        sheet.save(skip_recalculation=True)
+
         # Prepare stat display for user feedback
         stat_display = " | ".join(f"{name.upper()}: {value}" for name, value in zip(stat_names, final_stats))
         
@@ -458,7 +520,7 @@ class CmdChargen(MuxCommand):
             f"Use 'sheet' to view your full character details, 'inv' to view inventory, and 'inv/balance' to check your money."
         )
 
-    def complete_package_chargen(self, char, sheet, medicine_specialties=None, skill_instance_choices=None):
+    def complete_package_chargen(self, char, sheet, medicine_specialties=None, maker_specialties=None, skill_instance_choices=None):
         """Create character using complete package method."""
         # Set default stats (all 1's, already handled at character creation)
         
@@ -506,6 +568,18 @@ class CmdChargen(MuxCommand):
                     char.db.medicine_surgery = 2
                     char.db.medicine_pharma = 1
                     char.db.medicine_cryo = 1
+            # Tech: set Maker specialties from EvMenu or defaults (2,2,2,2 = 8 total for Maker 4)
+            if role == "Tech":
+                if maker_specialties:
+                    char.db.maker_field = maker_specialties.get("field", 2)
+                    char.db.maker_upgrade = maker_specialties.get("upgrade", 2)
+                    char.db.maker_fabrication = maker_specialties.get("fabrication", 2)
+                    char.db.maker_invention = maker_specialties.get("invention", 2)
+                else:
+                    char.db.maker_field = 2
+                    char.db.maker_upgrade = 2
+                    char.db.maker_fabrication = 2
+                    char.db.maker_invention = 2
         
         # Streetslang 4 only at start - other languages come from lifepath (Cultural Origin)
         char.add_language("Streetslang", 4)
@@ -606,6 +680,10 @@ class CmdChargen(MuxCommand):
         char.db.medicine_surgery = 0
         char.db.medicine_pharma = 0
         char.db.medicine_cryo = 0
+        char.db.maker_field = 0
+        char.db.maker_upgrade = 0
+        char.db.maker_fabrication = 0
+        char.db.maker_invention = 0
 
         # --- Faction ---
         char.db.faction = None
@@ -1083,6 +1161,42 @@ class CmdSelfStat(MuxCommand):
             )
             return
 
+        # Maker specialties (Tech only, chargen only) - allocate Maker rank × 2
+        elif full_attr_name in MAKER_SPECIALTY_ATTRIBUTES:
+            if (char.db.role or "").strip() != "Tech":
+                self.caller.msg("Maker specialties are only for Techs.")
+                return
+            try:
+                value = int(value)
+            except ValueError:
+                self.caller.msg("You must specify an integer value.")
+                return
+            maker = char.get_skill("maker") or 0
+            f = getattr(char.db, "maker_field", 0) or 0
+            u = getattr(char.db, "maker_upgrade", 0) or 0
+            fab = getattr(char.db, "maker_fabrication", 0) or 0
+            inv = getattr(char.db, "maker_invention", 0) or 0
+            if full_attr_name == "maker_field":
+                f = value
+            elif full_attr_name == "maker_upgrade":
+                u = value
+            elif full_attr_name == "maker_fabrication":
+                fab = value
+            else:
+                inv = value
+            ok, err = validate_maker_specialties(maker, f, u, fab, inv)
+            if not ok:
+                self.caller.msg(err)
+                return
+            spec = "field" if full_attr_name == "maker_field" else "upgrade" if full_attr_name == "maker_upgrade" else "fabrication" if full_attr_name == "maker_fabrication" else "invention"
+            char.set_maker_specialty(spec, value)
+            f, u, fab, inv = char.get_maker_specialties()
+            self.caller.msg(
+                f"Set {full_attr_name.replace('_', ' ').title()} to {value}. "
+                f"Maker allocation: Field {f}, Upgrade {u}, Fabrication {fab}, Invention {inv} (must sum to {maker * 2})."
+            )
+            return
+
         # For role attribute specifically, validate against allowed values
         elif full_attr_name == 'role':
             valid_roles = ['Rockerboy', 'Solo', 'Netrunner', 'Tech', 'Medtech', 'Media', 'Exec', 'Lawman', 'Fixer', 'Nomad']
@@ -1114,6 +1228,26 @@ class CmdSelfStat(MuxCommand):
 
         # For other attributes (non-stat, non-skill)
         else:
+            # Weight and height accept decimals (e.g. 70.5 kg, 1.75 m)
+            if full_attr_name in ('weight', 'height'):
+                try:
+                    value = float(value)
+                    if value < 0:
+                        self.caller.msg(f"{full_attr_name.title()} must be a positive number.")
+                        return
+                except ValueError:
+                    self.caller.msg(f"Please specify a valid number for {full_attr_name} (e.g. 70.5 for kg, 1.75 for meters).")
+                    return
+            # Age must be integer
+            elif full_attr_name == 'age':
+                try:
+                    value = int(value)
+                    if value < 0 or value > 150:
+                        self.caller.msg("Age must be between 0 and 150.")
+                        return
+                except ValueError:
+                    self.caller.msg("Please specify an integer for age.")
+                    return
             # Set the attribute directly on the character's DB
             setattr(char.db, full_attr_name, value)
 
@@ -1128,7 +1262,13 @@ class CmdSelfStat(MuxCommand):
             sheet = char.character_sheet
             if hasattr(sheet, full_attr_name):
                 setattr(sheet, full_attr_name, value)
-                sheet.save(skip_recalculation=True)  # Skip recalculation to avoid circular updates
+                # Recalculate when body or has_cyberarm changes (affects unarmed damage)
+                if full_attr_name in ('body', 'has_cyberarm'):
+                    sheet.recalculate_derived_stats()
+                    char.db.unarmed_damage_dice = sheet.unarmed_damage_dice
+                    char.db.unarmed_damage_die_type = sheet.unarmed_damage_die_type
+                else:
+                    sheet.save(skip_recalculation=True)  # Skip recalculation to avoid circular updates
 
         # Display success message (for non-instance skills)
         if not instance or full_attr_name not in SKILL_MAPPING.values():

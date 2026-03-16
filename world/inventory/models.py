@@ -90,6 +90,8 @@ class CyberwareInstance(SharedMemoryModel):
     )
     installed = models.BooleanField(default=False)
     active = models.BooleanField(default=False)
+    # For Popup Melee/Ranged Weapon: stores weapon name from equipment_data when installed
+    popup_weapon_name = models.CharField(max_length=100, blank=True)
     
     class Meta:
         # Ensure at least one character field is populated
@@ -208,6 +210,32 @@ class Armor(Item):
     locations = models.CharField(max_length=255)
 
 
+class InventoryArmor(SharedMemoryModel):
+    """Through model for per-inventory armor state: current SP (after ablation), juryrig status."""
+    inventory = models.ForeignKey(
+        'Inventory',
+        on_delete=models.CASCADE,
+        related_name='inventory_armor_instances'
+    )
+    armor = models.ForeignKey(
+        'Armor',
+        on_delete=models.CASCADE,
+        related_name='inventory_instances'
+    )
+    current_sp = models.IntegerField(null=True, blank=True)  # None = use armor.sp (no ablation)
+    original_sp = models.IntegerField(null=True, blank=True)  # None = use armor.sp
+    juryrigged = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = [['inventory', 'armor']]
+
+    def get_effective_sp(self):
+        """SP to use: if juryrigged, use original; else use current or base."""
+        if self.juryrigged:
+            return self.original_sp if self.original_sp is not None else self.armor.sp
+        return self.current_sp if self.current_sp is not None else self.armor.sp
+
+
 class Gear(SharedMemoryModel):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True)
@@ -288,6 +316,10 @@ class Inventory(SharedMemoryModel):
     vehicles = models.ManyToManyField('Vehicle', blank=True)
     cyberware = models.ManyToManyField(CyberwareInstance, blank=True)
     ammunition = models.ManyToManyField(Ammunition, blank=True)
+    # Tracks items purchased during chargen (buy command in ChargenRoom) for refund eligibility.
+    # Format: [{"type": "weapon"|"armor"|"gear"|"cyberware", "name": "Item Name"}, ...]
+    # Items from edgerunner role package are NOT recorded here and cannot be refunded.
+    chargen_purchased = models.JSONField(default=list, blank=True)
 
     class Meta:
         # Ensure at least one character field is populated

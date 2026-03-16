@@ -4,6 +4,9 @@ Custom help command with /search switch for finding help topics by keyword.
 CmdHelp overrides parse() and does not call MuxCommand.parse(), so switches
 are never extracted. We override parse() to run MuxCommand.parse() first,
 then CmdHelp.parse() when not using /search, so that help/search works.
+
+Help text has ANSI stripped so that pipes (e.g. add|remove) in usage examples
+display correctly instead of being interpreted as color codes.
 """
 from evennia.commands.default.help import CmdHelp
 from evennia.commands.default.muxcommand import MuxCommand
@@ -23,6 +26,27 @@ class CmdHelpSearch(CmdHelp):
 
     # Allow "/" after "help" so help/search matches (parent uses r"\s|$" which rejects slash)
     arg_regex = r"[\s/]|$"
+
+    def format_help_entry(
+        self,
+        topic="",
+        help_text="",
+        aliases=None,
+        suggested=None,
+        subtopics=None,
+        click_topics=True,
+    ):
+        """Format help entry with pipes escaped so pipes (e.g. add|remove) display correctly."""
+        if help_text:
+            help_text = help_text.replace("|", "||")
+        return super().format_help_entry(
+            topic=topic,
+            help_text=help_text,
+            aliases=aliases,
+            suggested=suggested,
+            subtopics=subtopics,
+            click_topics=click_topics,
+        )
 
     def parse(self):
         """Run MuxCommand parse first to extract switches, then CmdHelp parse for topic/subtopics."""

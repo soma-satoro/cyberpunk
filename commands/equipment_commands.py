@@ -16,128 +16,86 @@ from evennia.utils.ansi import ANSIString
 from evennia.utils import evtable
 from math import ceil
 
-class CmdAddWeapon(Command):
+class CmdAddItem(Command):
     """
-    Add a weapon to a player's inventory.
+    Add an item to a player's inventory (staff only).
+    Auto-detects item type: weapon, armor, gear, or vehicle.
 
     Usage:
-      addweapon <player> <weapon_name>
+      additem <player>=<item name>
 
-    Example:
-      addweapon Bob "Medium Pistol"
+    Examples:
+      additem Bob=Medium Pistol
+      additem Alice="Light Armorjack"
+      additem Charlie=Agent
+      additem Bob=Roadbike
     """
-    key = "addweapon"
+    key = "additem"
     locks = "cmd:perm(Admin)"
     help_category = "Admin"
 
     def func(self):
-        if not self.args or len(self.args.split()) < 2:
-            self.caller.msg("Usage: addweapon <player> <weapon_name>")
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: additem <player>=<item name>")
             return
 
-        player_name, weapon_name = self.args.split(None, 1)
+        player_name, item_name = self.args.split("=", 1)
+        player_name = player_name.strip()
+        item_name = item_name.strip().strip('"')
+
         player = self.caller.search(player_name, global_search=True)
         if not player:
             return
 
         try:
-            weapon = Weapon.objects.get(name__iexact=weapon_name.strip('"'))
+            character_sheet = CharacterSheet.objects.get(account=player.account)
+        except (CharacterSheet.DoesNotExist, AttributeError):
+            self.caller.msg(f"{player.name} doesn't have a character sheet.")
+            return
+
+        inventory, _ = Inventory.objects.get_or_create(character=character_sheet)
+
+        # Try weapon, armor, gear, vehicle in order
+        try:
+            weapon = Weapon.objects.get(name__iexact=item_name)
+            inventory.weapons.add(weapon)
+            self.caller.msg(f"Added {weapon.name} to {player.name}'s inventory.")
+            player.msg(f"A {weapon.name} has been added to your inventory.")
+            return
         except Weapon.DoesNotExist:
-            self.caller.msg(f"Weapon '{weapon_name}' does not exist.")
-            return
+            pass
 
         try:
-            character_sheet = CharacterSheet.objects.get(account=player.account)
-        except CharacterSheet.DoesNotExist:
-            self.caller.msg(f"{player.name} doesn't have a character sheet.")
+            armor = Armor.objects.get(name__iexact=item_name)
+            inventory.armor.add(armor)
+            self.caller.msg(f"Added {armor.name} to {player.name}'s inventory.")
+            player.msg(f"A {armor.name} has been added to your inventory.")
             return
-
-        inventory, created = Inventory.objects.get_or_create(character=character_sheet)
-        inventory.weapons.add(weapon)
-        self.caller.msg(f"Added {weapon.name} to {player.name}'s inventory.")
-        player.msg(f"A {weapon.name} has been added to your inventory.")
-
-class CmdAddArmor(Command):
-    """
-    Add armor to a player's inventory.
-
-    Usage:
-      addarmor <player> <armor_name>
-
-    Example:
-      addarmor Alice "Leather Jacket"
-    """
-    key = "addarmor"
-    locks = "cmd:perm(Admin)"
-    help_category = "Admin"
-
-    def func(self):
-        if not self.args or len(self.args.split()) < 2:
-            self.caller.msg("Usage: addarmor <player> <armor_name>")
-            return
-
-        player_name, armor_name = self.args.split(None, 1)
-        player = self.caller.search(player_name, global_search=True)
-        if not player:
-            return
-
-        try:
-            armor = Armor.objects.get(name__iexact=armor_name.strip('"'))
         except Armor.DoesNotExist:
-            self.caller.msg(f"Armor '{armor_name}' does not exist.")
-            return
+            pass
 
         try:
-            character_sheet = CharacterSheet.objects.get(account=player.account)
-        except CharacterSheet.DoesNotExist:
-            self.caller.msg(f"{player.name} doesn't have a character sheet.")
+            gear = Gear.objects.get(name__iexact=item_name)
+            inventory.add_gear(gear)
+            self.caller.msg(f"Added {gear.name} to {player.name}'s inventory.")
+            player.msg(f"A {gear.name} has been added to your inventory.")
             return
-
-        inventory, created = Inventory.objects.get_or_create(character=character_sheet)
-        inventory.armor.add(armor)
-        self.caller.msg(f"Added {armor.name} to {player.name}'s inventory.")
-        player.msg(f"A {armor.name} has been added to your inventory.")
-
-class CmdAddGear(Command):
-    """
-    Add gear to a player's inventory.
-
-    Usage:
-      addgear <player> <gear_name>
-
-    Example:
-      addgear Charlie "Agent"
-    """
-    key = "addgear"
-    locks = "cmd:perm(Admin)"
-    help_category = "Admin"
-
-    def func(self):
-        if not self.args or len(self.args.split()) < 2:
-            self.caller.msg("Usage: addgear <player> <gear_name>")
-            return
-
-        player_name, gear_name = self.args.split(None, 1)
-        player = self.caller.search(player_name, global_search=True)
-        if not player:
-            return
-
-        try:
-            gear = Gear.objects.get(name__iexact=gear_name.strip('"'))
         except Gear.DoesNotExist:
-            self.caller.msg(f"Gear '{gear_name}' does not exist.")
-            return
+            pass
 
         try:
-            character_sheet = CharacterSheet.objects.get(account=player.account)
-        except CharacterSheet.DoesNotExist:
-            self.caller.msg(f"{player.name} doesn't have a character sheet.")
+            vehicle = VehicleModel.objects.get(name__iexact=item_name)
+            if inventory.vehicles.filter(id=vehicle.id).exists():
+                self.caller.msg(f"{player.name} already has a {vehicle.name}.")
+                return
+            inventory.vehicles.add(vehicle)
+            self.caller.msg(f"Added {vehicle.name} to {player.name}'s inventory.")
+            player.msg(f"A {vehicle.name} has been added to your inventory.")
             return
+        except VehicleModel.DoesNotExist:
+            pass
 
-        inventory, created = Inventory.objects.get_or_create(character=character_sheet)
-        inventory.add_gear(gear)
-        self.caller.msg(f"Added {gear.name} to {player.name}'s inventory.")
-        player.msg(f"A {gear.name} has been added to your inventory.")
+        self.caller.msg(f"Item '{item_name}' not found. Check weapon, armor, gear, and vehicle names (e.g. equipdb weapons).")
 
 class CmdAddVehicle(Command):
     """
