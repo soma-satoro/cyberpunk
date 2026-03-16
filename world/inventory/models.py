@@ -319,7 +319,8 @@ class Inventory(SharedMemoryModel):
     # Tracks items purchased during chargen (buy command in ChargenRoom) for refund eligibility.
     # Format: [{"type": "weapon"|"armor"|"gear"|"cyberware", "name": "Item Name"}, ...]
     # Items from edgerunner role package are NOT recorded here and cannot be refunded.
-    chargen_purchased = models.JSONField(default=list, blank=True)
+    # null=True allows legacy/create paths that don't set it; code uses "or []" when reading.
+    chargen_purchased = models.JSONField(default=list, blank=True, null=True)
 
     class Meta:
         # Ensure at least one character field is populated
