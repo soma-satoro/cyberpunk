@@ -62,11 +62,11 @@ class CmdOOCChat(MuxCommand):
 
             # Format as pose
             name = caller.attributes.get('gradient_name', default=caller.key)
-            formatted_message = f"|y<OOC>|n {name} {action}"
+            formatted_message = f"<|mOOC|n> {name} {action}"
         else:
             # Format as say
             name = caller.attributes.get('gradient_name', default=caller.key)
-            formatted_message = f"|y<OOC>|n {name} says, \"{message}\""
+            formatted_message = f"<|mOOC|n> {name} says, \"{message}\""
 
         # Get all objects in the room that can receive messages
         # OOC bypasses reality layer filtering - everyone can see it

@@ -179,7 +179,11 @@ class Room(DefaultRoom):
         # Area code footer (District - Area Code)
         area_code = self.db.area_code or "XX00"
         area_name = self.db.area_name or "Unknown Area"
-        is_ooc = self.tags.get("ooc", category=None) if hasattr(self, 'tags') else False
+        is_ooc = (
+            (hasattr(self, 'tags') and self.tags.get("ooc", category=None))
+            or getattr(self.db, 'roomtype', None) == 'OOC Area'
+            or any(str(t).lower() == 'ooc' for t in (getattr(self.db, 'tags', []) or []))
+        )
         area_type = "OOC Area" if is_ooc else "IC Area"
         area_footer = f"|m{area_type} - {area_code}|n"
         string += divider(area_footer, width=78, fillchar=ANSIString("|m-|n")) + "\n"

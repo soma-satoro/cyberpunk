@@ -13,9 +13,9 @@ class PoseBreakMixin:
         # Check if the room is an OOC Area (by tag or roomtype)
         if hasattr(caller.location, 'db'):
             room_tags = getattr(caller.location.db, 'tags', []) or []
-            if 'ooc' in room_tags or caller.location.db.roomtype == 'OOC Area':
+            if any(str(t).lower() == 'ooc' for t in room_tags) or getattr(caller.location.db, 'roomtype', None) == 'OOC Area':
                 return  # Don't send pose breaks in OOC Areas
-            
+
         pose_break = f"\n|y{'=' * 30}> |w{caller.name}|n |y<{'=' * 30}|n"
         
         # Filter receivers based on reality layers
@@ -56,7 +56,7 @@ class PoseBreakMixin:
         # Check if the room is an OOC Area (by tag or roomtype)
         if hasattr(self.caller.location, 'db'):
             room_tags = getattr(self.caller.location.db, 'tags', []) or []
-            if 'ooc' in room_tags or self.caller.location.db.roomtype == 'OOC Area':
+            if any(str(t).lower() == 'ooc' for t in room_tags) or getattr(self.caller.location.db, 'roomtype', None) == 'OOC Area':
                 # Call the original msg_contents without pose break
                 super().msg_contents(message, exclude=exclude, from_obj=from_obj, **kwargs)
                 return

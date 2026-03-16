@@ -21,6 +21,10 @@ def _is_ooc_room(room):
         return True
     if hasattr(room, "tags") and room.tags.has("ooc", category=None):
         return True
+    # Check room.db.tags (list from +room/tag) - case-insensitive
+    tags_list = getattr(room.db, "tags", []) or []
+    if any(str(t).lower() == "ooc" for t in tags_list):
+        return True
     return False
 
 

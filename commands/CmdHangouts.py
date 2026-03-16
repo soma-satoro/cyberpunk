@@ -282,7 +282,13 @@ class CmdHangout(MuxCommand):
             try:
                 # Check if player is in an OOC area
                 current_location = self.caller.location
-                if current_location and hasattr(current_location, 'db') and current_location.db.roomtype == "OOC Area":
+                is_ooc = False
+                if current_location and hasattr(current_location, 'db'):
+                    is_ooc = (
+                        current_location.db.roomtype == "OOC Area"
+                        or any(str(t).lower() == 'ooc' for t in (getattr(current_location.db, 'tags', []) or []))
+                    )
+                if current_location and is_ooc:
                     self.caller.msg("You cannot teleport directly from the OOC area. Use +ic first to return to IC areas.")
                     return
                     

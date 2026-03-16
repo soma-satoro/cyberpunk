@@ -50,7 +50,7 @@ class PoseBreakMixin:
         # Check if the room is an OOC Area (by roomtype, db.tags, or Evennia tags from +room/tag)
         if hasattr(caller.location, 'db'):
             room_tags = getattr(caller.location.db, 'tags', []) or []
-            if 'ooc' in room_tags or getattr(caller.location.db, 'roomtype', None) == 'OOC Area':
+            if any(str(t).lower() == 'ooc' for t in room_tags) or getattr(caller.location.db, 'roomtype', None) == 'OOC Area':
                 return  # Don't send pose breaks in OOC Areas
         if hasattr(caller.location, 'tags') and getattr(caller.location.tags, 'has', lambda *a, **k: False)('ooc'):
             return  # Don't send pose breaks in OOC Areas (Evennia tag system)
@@ -73,7 +73,7 @@ class PoseBreakMixin:
         # Check if the room is an OOC Area (by roomtype or 'ooc' tag from +room/tag)
         if hasattr(self.caller.location, 'db'):
             room_tags = getattr(self.caller.location.db, 'tags', []) or []
-            if 'ooc' in room_tags or getattr(self.caller.location.db, 'roomtype', None) == 'OOC Area':
+            if any(str(t).lower() == 'ooc' for t in room_tags) or getattr(self.caller.location.db, 'roomtype', None) == 'OOC Area':
                 super().msg_contents(message, exclude=exclude, from_obj=from_obj, **kwargs)
                 return
         # Also check Evennia's tag system

@@ -1,4 +1,5 @@
 from evennia import default_cmds, CmdSet
+
 """
 Command sets
 
@@ -16,7 +17,7 @@ own cmdsets by inheriting from them or directly from `evennia.CmdSet`.
 """
 
 from evennia import default_cmds, CmdSet
-from .character_commands import CmdSheet, CmdRoll, CmdLuck, CmdShortDesc, CmdOOC, CmdPlusOoc, CmdPlusIc, CmdMeet
+from .character_commands import CmdSheet, CmdRoll, CmdLuck, CmdShortDesc, CmdPlusOoc, CmdPlusIc, CmdMeet
 from .chargen import CmdChargen, CmdListCharacterSheets, CmdLifepath, CmdSelfStat, CmdSetLanguage, CmdSellYourSoul
 from .admin_commands import CmdStat, CmdHeal, CmdApprove, CmdUnapprove, CmdSpawnRipperdoc, CmdGradientName, CmdClearAllStates, CmdClearRental, CmdCleanupDuplicates, CmdExamine, CmdAssociateAllCharacterSheets, CmdViewCharacterSheetID, CmdSetCharacterSheetID, CmdAllSheets, CmdViewSheetAttributes, CmdSyncLanguages, CmdJoin, CmdSummon
 from .inventory_commands import CmdInventory
@@ -57,6 +58,7 @@ from .language_commands import CmdLanguage
 from .building import CmdManageBuilding, CmdRoom, CmdAreaManage
 from .notes import CmdNote
 from evennia.contrib.base_systems.mux_comms_cmds import CmdSetLegacyComms
+from commands.commonmux.CmdOOCChat import CmdOOCChat
 
 from .CmdAlts import CmdAlts
 from .CmdEmit import CmdEmit
@@ -178,7 +180,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdRent())
         self.add(CmdHome())
         self.add(CmdLeaveRental())
-        self.add(CmdOOC())
+        self.add(CmdOOCChat())
         self.add(CmdPlusOoc())
         self.add(CmdPlusIc())
         self.add(CmdMeet())
