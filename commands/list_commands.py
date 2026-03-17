@@ -59,6 +59,7 @@ def _find_item_info(name):
             "name": w.name, "description": getattr(w, "description", ""), "damage": w.damage,
             "rof": w.rof, "hands": w.hands, "concealable": w.concealable, "category": w.category,
             "value": w.value, "weight": w.weight, "clip": getattr(w, "clip", 0),
+            "weapon_type": getattr(w, "weapon_type", "") or "", "quality": getattr(w, "quality", "standard") or "standard",
         })
 
     # Armor
@@ -186,7 +187,9 @@ def format_item_info(source, data):
 
     if source == "Weapon":
         out.append(f"  |gDamage:|n {data.get('damage', '—')}  |gROF:|n {data.get('rof', '—')}  |gHands:|n {data.get('hands', '—')}")
-        out.append(f"  |gCategory:|n {data.get('category', '—')}  |gValue:|n {data.get('value', 0)} eb  |gConceal:|n {'Yes' if data.get('concealable') else 'No'}")
+        wt = data.get('weapon_type', '') or data.get('category', '—')
+        qual = data.get('quality', 'standard') or 'standard'
+        out.append(f"  |gCategory:|n {data.get('category', '—')}  |gType:|n {wt}  |gQuality:|n {qual}  |gValue:|n {data.get('value', 0)} eb  |gConceal:|n {'Yes' if data.get('concealable') else 'No'}")
         if data.get("description"):
             out.append(f"  {wrap_ansi(data['description'], 74)}")
     elif source == "Armor":

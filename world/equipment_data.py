@@ -348,6 +348,8 @@ ammunition = [
     {"name": "Tracer Ammo", "ammo_type": "TRACER", "weapon_type": "Generic", "damage_modifier": 0, "armor_piercing": 0, "description": "Tracer rounds for visibility. Solo of Fortune 2045.", "cost": 50},
     # Danger Gal Dossier
     {"name": "Junk Ammunition", "ammo_type": "JUNK", "weapon_type": "Generic", "damage_modifier": 0, "armor_piercing": 0, "description": "Poor quality rounds. -1d6 vs SP 1+, Autofire -1. Arrows, Bullets, Slugs. 50 rounds.", "cost": 10},
+    {"name": "Arrowhypo Ammunition", "ammo_type": "ARROWHYPO", "weapon_type": "Archery", "damage_modifier": 0, "armor_piercing": 0, "description": "Reinforced airhypo on arrow. Load 1 dose Street Drug. Hit = inject drug, no damage. Recoverable like Basic Arrow. 1 unit.", "cost": 100},
+    {"name": "Airburst Ammunition", "ammo_type": "AIRBURST", "weapon_type": "Heavy Weapons", "damage_modifier": 0, "armor_piercing": 0, "description": "Gas-dispersal munition for Grenades/Rockets. Load 3 doses of single Street Drug. Hit = gas dose. Nasal filters/gas masks prevent. 1 unit.", "cost": 125},
 ]
 
 weapons = [
@@ -360,7 +362,9 @@ weapons = [
         "weight": 1,
         "value": 50,
         "category": "handgun",
-        "clip": 12
+        "clip": 12,
+        "weapon_type": "medium pistol",
+        "quality": "standard"
     },
     {
         "name": "Heavy Pistol",
@@ -371,10 +375,11 @@ weapons = [
         "weight": 1,
         "value": 100,
         "category": "handgun",
-        "clip": 8
+        "clip": 8,
+        "weapon_type": "heavy pistol",
+        "quality": "standard"
     },
     {
-
         "name": "Very Heavy Pistol",
         "damage": "4d6",
         "rof": "1",
@@ -383,7 +388,9 @@ weapons = [
         "weight": 1,
         "value": 100,
         "category": "handgun",
-        "clip": 8
+        "clip": 8,
+        "weapon_type": "very heavy pistol",
+        "quality": "standard"
     },
     {
         "name": "SMG",
@@ -394,10 +401,11 @@ weapons = [
         "weight": 1,
         "value": 100,
         "category": "handgun",
-        "clip": 30
+        "clip": 30,
+        "weapon_type": "SMG",
+        "quality": "standard"
     },
     {
-
         "name": "Heavy SMG",
         "damage": "3d6",
         "rof": "3",
@@ -406,7 +414,9 @@ weapons = [
         "weight": 2,
         "value": 100,
         "category": "handgun",
-        "clip": 40
+        "clip": 40,
+        "weapon_type": "heavy SMG",
+        "quality": "standard"
     },
     {
         "name": "Shotgun",
@@ -417,7 +427,9 @@ weapons = [
         "weight": 2,
         "value": 500,
         "category": "shoulder_arms",
-        "clip": 4
+        "clip": 4,
+        "weapon_type": "shotgun",
+        "quality": "standard"
     },
     {
         "name": "Assault Rifle",
@@ -428,7 +440,9 @@ weapons = [
         "weight": 2,
         "value": 500,
         "category": "shoulder_arms",
-        "clip": 25
+        "clip": 25,
+        "weapon_type": "assault rifle",
+        "quality": "standard"
     },
     {
         "name": "Sniper Rifle",
@@ -439,7 +453,9 @@ weapons = [
         "weight": 2,
         "value": 500,
         "category": "shoulder_arms",
-        "clip": 4
+        "clip": 4,
+        "weapon_type": "sniper rifle",
+        "quality": "standard"
     },
     {
         "name": "Bow",
@@ -449,7 +465,9 @@ weapons = [
         "concealable": False,
         "weight": 2,
         "value": 100,
-        "category": "archery"
+        "category": "archery",
+        "weapon_type": "bow",
+        "quality": "standard"
     },
     {
         "name": "Crossbow",
@@ -459,7 +477,9 @@ weapons = [
         "concealable": False,
         "weight": 2,
         "value": 100,
-        "category": "archery"
+        "category": "archery",
+        "weapon_type": "crossbow",
+        "quality": "standard"
     },
     {
         "name": "Grenade Launcher",
@@ -470,7 +490,9 @@ weapons = [
         "weight": 2,
         "value": 500,
         "category": "heavy_weapons",
-        "clip": 2
+        "clip": 2,
+        "weapon_type": "grenade launcher",
+        "quality": "standard"
     },
     {
         "name": "Rocket Launcher",
@@ -481,7 +503,9 @@ weapons = [
         "weight": 3,
         "value": 500,
         "category": "heavy_weapons",
-        "clip": 1
+        "clip": 1,
+        "weapon_type": "rocket launcher",
+        "quality": "standard"
     },
     {
         "name": "Flamethrower",
@@ -492,7 +516,9 @@ weapons = [
         "weight": 3,
         "value": 500,
         "category": "heavy_weapons",
-        "clip": 4
+        "clip": 4,
+        "weapon_type": "flamethrower",
+        "quality": "standard"
     },
     {
         "name": "Light Melee Weapon",
@@ -502,9 +528,10 @@ weapons = [
         "concealable": True,
         "weight": 1,
         "value": 50,
-        "category": "melee"
+        "category": "melee",
+        "weapon_type": "light melee",
+        "quality": "standard"
     },
-
     {
         "name": "Medium Melee Weapon",
         "damage": "2d6",
@@ -513,7 +540,9 @@ weapons = [
         "concealable": False,
         "weight": 1,
         "value": 50,
-        "category": "melee"
+        "category": "melee",
+        "weapon_type": "medium melee",
+        "quality": "standard"
     },
     {
         "name": "Heavy Melee Weapon",
@@ -523,7 +552,9 @@ weapons = [
         "concealable": False,
         "weight": 2,
         "value": 100,
-        "category": "melee"
+        "category": "melee",
+        "weapon_type": "heavy melee",
+        "quality": "standard"
     },
     {
         "name": "Very Heavy Melee Weapon",
@@ -533,7 +564,9 @@ weapons = [
         "concealable": False,
         "weight": 3,
         "value": 100,
-        "category": "melee"
+        "category": "melee",
+        "weapon_type": "very heavy melee",
+        "quality": "standard"
     },
     # Black Chrome weapons
     {
@@ -546,6 +579,8 @@ weapons = [
         "value": 1000,
         "category": "handgun",
         "clip": 10,
+        "weapon_type": "heavy pistol",
+        "quality": "excellent",
         "description": "Exotic Heavy Pistol with twin helical magazines. Each magazine can hold different ammo types. Reload each magazine separately."
     },
     {
@@ -558,6 +593,8 @@ weapons = [
         "value": 1000,
         "category": "handgun",
         "clip": 30,
+        "weapon_type": "SMG",
+        "quality": "excellent",
         "description": "Exotic Combination SMG and Shotgun. Shotgun has 3 shots. Both modes use separate magazines."
     },
     {
@@ -570,6 +607,8 @@ weapons = [
         "value": 1000,
         "category": "handgun",
         "clip": 8,
+        "weapon_type": "heavy pistol",
+        "quality": "excellent",
         "description": "Exotic Heavy Pistol that transforms into SMG or Assault Rifle with modular parts. 1 minute to convert."
     },
     {
@@ -582,10 +621,12 @@ weapons = [
         "value": 500,
         "category": "handgun",
         "clip": 6,
-        "description": "Chrome .44 magnum from Nova Arms Classic Guns of Film series. Incompatible with magazine attachments."
+        "weapon_type": "very heavy pistol",
+        "quality": "standard",
+        "description": "Nova Arms Classic Guns of Film. Chrome .44 magnum. 6 shots. Incompatible with magazine attachments. Barrel: 4\", 6.5\", or 8.375\"."
     },
     {
-        "name": "Sanroo HelloCutie Ultra-K8",
+        "name": "Sanroo Hello Cutie Ultra-K8",
         "damage": "4d6",
         "rof": "1",
         "hands": 1,
@@ -594,7 +635,9 @@ weapons = [
         "value": 5000,
         "category": "handgun",
         "clip": 30,
-        "description": "Excellent Quality Exotic Very Heavy Pistol reconfigurable to Heavy SMG. 2 attachment slots."
+        "weapon_type": "very heavy pistol",
+        "quality": "excellent",
+        "description": "Excellent Quality Exotic Very Heavy Pistol. Action: reconfigure to Excellent Heavy SMG. Same 30-round mag. 3+ Asia Pop Fashion worn openly: +2 Wardrobe and Style. 2 attachment slots, compatible with VHP and Heavy SMG attachments except magazine."
     },
     {
         "name": "Superchrome Sidearm",
@@ -606,7 +649,9 @@ weapons = [
         "value": 1000,
         "category": "handgun",
         "clip": 8,
-        "description": "Exotic Very Heavy Pistol. +2 Wardrobe and Style when worn openly."
+        "weapon_type": "very heavy pistol",
+        "quality": "standard",
+        "description": "Exotic Very Heavy Pistol. Non-Basic Ammunition. +2 Wardrobe and Style when worn openly."
     },
     {
         "name": "Sternmeyer M-04 Variable Assault",
@@ -617,8 +662,10 @@ weapons = [
         "weight": 2,
         "value": 500,
         "category": "shoulder_arms",
-        "clip": 25,
-        "description": "Exotic Combination Assault Rifle and Grenade Launcher. Rifle: 20 rounds, GL: 2 grenades. Poor Quality."
+        "clip": 20,
+        "weapon_type": "assault rifle",
+        "quality": "poor",
+        "description": "Poor Quality Exotic Combination Assault Rifle and Grenade Launcher. Rifle: 20 rounds, GL: 2 grenades. Separate magazines, reload each with Action. Jam in one mode disables both until Action to fix. GL loads Non-Basic grenades."
     },
     {
         "name": "Superchrome Glam Rifle",
@@ -630,7 +677,9 @@ weapons = [
         "value": 1000,
         "category": "shoulder_arms",
         "clip": 25,
-        "description": "Exotic Assault Rifle. +2 Wardrobe and Style when worn openly."
+        "weapon_type": "assault rifle",
+        "quality": "standard",
+        "description": "Exotic Assault Rifle. Non-Basic Ammunition. +2 Wardrobe and Style when worn openly."
     },
     {
         "name": "Tommyknocker",
@@ -642,7 +691,10 @@ weapons = [
         "value": 1000,
         "category": "handgun",
         "clip": 8,
-        "description": "Exotic Combination Very Heavy Pistol and Poor Quality Shotgun. BODY 10+ or two hands or it flies from grip."
+        "attachment_slots": 1,
+        "weapon_type": "very heavy pistol",
+        "quality": "standard",
+        "description": "Centurion Essentials. Exotic Combination Very Heavy Pistol (8 shots) and Poor Quality Shotgun (2 shots). Separate magazines. BODY 10+ or two hands or weapon flies 6m/yds away. 1 attachment slot: scope compatible with VHP and Shotgun only. Cannot conceal or popup."
     },
     {
         "name": "E-TACK Public Defender",
@@ -654,7 +706,9 @@ weapons = [
         "value": 500,
         "category": "handgun",
         "clip": 8,
-        "description": "Exotic Heavy Pistol with Smartgun Link and stun setting. Requires Subdermal Grip. Less-than-lethal mode available."
+        "weapon_type": "heavy pistol",
+        "quality": "poor",
+        "description": "Poor Quality Exotic Heavy Pistol. No trigger. Permanent Smartgun Link, Subdermal Grip required. Lethal: 8-shot mag. Less-than-lethal: 8-shot battery, no Critical Injury, no armor ablation, reduces to 1 HP Unconscious if would kill."
     },
     {
         "name": "Kendachi Mono-Katana",
@@ -663,20 +717,181 @@ weapons = [
         "hands": 2,
         "concealable": False,
         "weight": 2,
-        "value": 500,
+        "value": 1000,
         "category": "melee",
-        "description": "Monofilament katana. Very Heavy Melee Weapon."
+        "weapon_type": "very heavy melee",
+        "quality": "standard",
+        "description": "Two-Handed Exotic Very Heavy Melee Weapon (sword). With correct biometric key, damage ignores armor below SP7. Without key, weapon won't vibrate—just a standard Two-Handed Exotic Very Heavy Melee Weapon."
     },
     {
         "name": "Zhirafa Rhinocefist",
+        "damage": "4d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "melee",
+        "weapon_type": "very heavy melee",
+        "quality": "excellent",
+        "description": "Exoskeleton arm with Interface Plugs. Brawling: 4d6 always. Action: convert to Excellent Quality Exotic Very Heavy Melee Weapon (that hand can't hold anything). Put on/take off: Action. DV13 Weaponstech or Land Vehicle Tech to repair (6 hrs)."
+    },
+    # Black Chrome - additional melee weapons
+    {
+        "name": "Solo Wolf and Bot Mono-Katana",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 100,
+        "category": "melee",
+        "weapon_type": "very heavy melee",
+        "quality": "poor",
+        "description": "Poor Quality Two-Handed Exotic Very Heavy Melee Weapon (sword). Replica of Kendachi Mono-Katana. DV13 Perception or Weaponstech to spot fake. No biometric/armor-bypass."
+    },
+    {
+        "name": "Kendachi Mono-Wakizashi",
         "damage": "3d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 1000,
+        "category": "melee",
+        "weapon_type": "heavy melee",
+        "quality": "standard",
+        "description": "One-Handed Exotic Heavy Melee Weapon (sword). With biometric key, damage ignores armor below SP7. Without key: standard One-Handed Exotic Heavy Melee Weapon."
+    },
+    {
+        "name": "White Hornet Tanto",
+        "damage": "2d6",
         "rof": "2",
         "hands": 1,
         "concealable": True,
         "weight": 1,
         "value": 500,
         "category": "melee",
-        "description": "Heavy Melee Weapon. Carbo-glass knuckle dusters. Concealable."
+        "weapon_type": "medium melee",
+        "quality": "standard",
+        "description": "One-Handed Exotic Medium Melee Weapon (knife). Concealable. Solar-cell shock. If damage would reduce target below 1 HP, wielder may leave them Unconscious at 1 HP."
+    },
+    {
+        "name": "Rostovic Kleaver",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 1000,
+        "category": "melee",
+        "weapon_type": "very heavy melee",
+        "quality": "standard",
+        "description": "Two-Handed Exotic Very Heavy Melee Weapon (axe). BODY 11+ to wield. Action + 3x 50eb battery packs to charge (1 min heat). Charged: 5d6, ignores armor below SP11, targets Mildly On Fire. Charged 5 min. Uncharged: Action to reload batteries."
+    },
+    {
+        "name": "Kendachi Mono-Guard",
+        "damage": "3d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 1000,
+        "category": "melee",
+        "weapon_type": "heavy melee",
+        "quality": "standard",
+        "description": "One-Handed Exotic Heavy Melee Weapon (monowhip). Concealable. Foreign Object Critical: victim rerolls until non-Foreign Object, suffers that instead."
+    },
+    {
+        "name": "Faisal's Magna Knuckles",
+        "damage": "2d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 1000,
+        "category": "melee",
+        "weapon_type": "medium melee",
+        "quality": "standard",
+        "description": "One-Handed Exotic Medium Melee Weapon. Hit twice in one Turn: target DV15 Cybertech or GM picks 2 cyberware inoperable 1 min. 8 charges, 50eb battery, 1hr recharge. No charges: still functions as Medium Melee."
+    },
+    {
+        "name": "Pursuit Security Bouncer",
+        "damage": "2d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 500,
+        "category": "melee",
+        "weapon_type": "medium melee",
+        "quality": "standard",
+        "description": "Exotic Combination Stun Baton and Microwaver. 8-shot 50eb battery. Put on/take off: Action. Cannot conceal. Options in that hand inaccessible."
+    },
+    {
+        "name": "SlamDance FangFist",
+        "damage": "2d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 1000,
+        "category": "melee",
+        "weapon_type": "medium melee",
+        "quality": "excellent",
+        "description": "Excellent Quality One-Handed Exotic Medium Melee Weapon (glove). Turn drawn: Excellent Very Heavy Melee (4d6), ROF 1. Blade extended: hand unusable. Retract/equip: Action. Concealable when retracted (Conceal/Reveal Object)."
+    },
+    {
+        "name": "SlamDance Tasmanskiy Klo",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": False,
+        "weight": 2,
+        "value": 5000,
+        "category": "melee",
+        "weapon_type": "very heavy melee",
+        "quality": "excellent",
+        "description": "Excellent Quality Exotic Very Heavy Melee Weapon (claw). In Battleglove, draw/stow no Action. +2 Interrogation when threatening. Battleglove has 1 Option Slot. Options in that arm inaccessible."
+    },
+    {
+        "name": "Ranger Combat Boomerang",
+        "damage": "3d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 1000,
+        "category": "melee",
+        "weapon_type": "heavy melee",
+        "quality": "standard",
+        "description": "One-Handed Exotic Heavy Melee Weapon. No melee attacks. Thrown: halves SP. Throwing = half of 2 ROF. With Targeting Scope: returns start of next Turn. Catch free if hand free."
+    },
+    {
+        "name": "Utility Tomahawk",
+        "damage": "3d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 100,
+        "category": "melee",
+        "weapon_type": "heavy melee",
+        "quality": "standard",
+        "description": "One-Handed Exotic Heavy Melee Weapon (axe). Ice tool, crowbar, throwing axe, machete. Thrown: halves SP."
+    },
+    {
+        "name": "Kendachi Mono-Star",
+        "damage": "2d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 500,
+        "category": "melee",
+        "weapon_type": "medium melee",
+        "quality": "standard",
+        "description": "One-Handed Exotic Medium Melee Weapon (shuriken). Concealable. Thrown: halves SP, counts as half of 2 ROF. Foreign Object: victim also rolls until non-Foreign Object, suffers both."
     },
     # Edgerunners Mission Kit weapons (2070s)
     {
@@ -1209,76 +1424,341 @@ weapons = [
         "hands": 2,
         "concealable": False,
         "weight": 2,
-        "value": 500,
+        "value": 1550,
         "category": "shoulder_arms",
-        "clip": 5,
-        "attachment_slots": 1,
-        "description": "Sniper Rifle. Portable."
+        "clip": 25,
+        "attachment_slots": 0,
+        "weapon_type": "assault rifle",
+        "quality": "excellent",
+        "description": "Excellent Quality Assault Rifle. Autofire (Assault Rifle 4), Suppressive Fire. Smartgun Link, Sniping Scope. Battle Rifle range table."
     },
     {
-        "name": "Techtronika Russia BMG-500",
-        "damage": "6d6",
+        "name": "Techtronika BMG-500",
+        "damage": "5d6",
         "rof": "1",
         "hands": 2,
         "concealable": False,
         "weight": 4,
-        "value": 10000,
+        "value": 1000,
         "category": "heavy_weapons",
-        "clip": 10,
+        "clip": 500,
         "attachment_slots": 0,
-        "description": "Exotic Heavy Sniper. .50 BMG."
+        "weapon_type": "assault rifle",
+        "quality": "standard",
+        "description": "Exotic Assault Rifle. Heavy Weapons Skill. 500-round box magazine. Magnetic feed start. BODY 11+ unless mounted. Action: deploy bipod on surface = mounted until moved."
     },
     {
         "name": "Tsunami Arms Helix (Citrus Edition)",
         "damage": "3d6",
-        "rof": "4",
-        "hands": 1,
-        "concealable": True,
-        "weight": 1,
-        "value": 500,
-        "category": "handgun",
-        "clip": 25,
-        "attachment_slots": 0,
-        "description": "Exotic Heavy SMG. Autofire (4)."
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 5000,
+        "category": "heavy_weapons",
+        "clip": 40,
+        "attachment_slots": 3,
+        "weapon_type": "machine gun",
+        "quality": "excellent",
+        "description": "Excellent Quality Machine Gun. Hex-barreled gatling. Autofire (Machine Pistol 5), Suppressive Fire only. 2 Reload Actions. BODY 11+ unless mounted."
     },
     {
         "name": "Scatter Ratter",
         "damage": "4d6",
-        "rof": "4",
+        "rof": "2",
         "hands": 2,
         "concealable": False,
         "weight": 2,
-        "value": 500,
-        "category": "handgun",
-        "clip": 20,
-        "attachment_slots": 0,
-        "description": "Exotic Heavy SMG. Autofire (Machine Pistol 4)."
+        "value": 2552,
+        "category": "heavy_weapons",
+        "clip": 56,
+        "attachment_slots": 3,
+        "weapon_type": "machine gun",
+        "quality": "poor",
+        "description": "Poor Quality Machine Gun. Autofire (SMG 5), Suppressive Fire. Cannot Single Shot if Autofired previous Turn; if Single Shot previous Turn, treat as Excellent Quality. BODY 8+ unless mounted."
     },
     {
         "name": "Tsunami Arms Deathwind Railgun",
-        "damage": "5d6",
+        "damage": "6d6",
         "rof": "1",
         "hands": 2,
         "concealable": False,
         "weight": 4,
         "value": 12000,
         "category": "heavy_weapons",
-        "clip": 1,
-        "attachment_slots": 0,
-        "description": "Exotic Railgun. Ignores armor below SP12. Single shot."
+        "clip": 30,
+        "attachment_slots": 1,
+        "weapon_type": "sniper rifle",
+        "quality": "excellent",
+        "description": "Excellent Quality Sniper Rifle. Heavy Weapons, Scout Rifle range. Ignores armor below SP12. No Aimed Shots. Every 3rd shot in 30 sec: Quality drops to Poor until vented (Action). 2 Reload Actions. BODY 14 (12 if Prone). Incompatible with capacity attachments. Smartgun Link non-removable, requires 2x Interface Plugs/Subdermal Grip."
     },
     {
         "name": "Highland Defense Stickybomb Launcher",
+        "damage": "6d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": False,
+        "weight": 3,
+        "value": 1300,
+        "category": "heavy_weapons",
+        "clip": 8,
+        "attachment_slots": 3,
+        "weapon_type": "grenade launcher",
+        "quality": "standard",
+        "description": "Grenade Launcher. Fires sticky Mini C9 Charges. Hit = charge planted per Mini C9 rules; remote detonate only, 30 sec arm. Moving planted charges does not explode. Incompatible with Ammunition Compatibility Internals, range/capacity attachments."
+    },
+    # Black Chrome - additional ranged weapons
+    {
+        "name": "Arasaka Prototype Variable Assault Rifle",
+        "damage": "5d6",
+        "rof": "4",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 15000,
+        "category": "shoulder_arms",
+        "clip": 25,
+        "weapon_type": "assault rifle",
+        "quality": "excellent",
+        "description": "Excellent Quality Exotic Assault Rifle. Railgun mode: switch before Initiative or with Action. Railgun: no Autofire/Aimed Shots, ignores armor below SP7, drains 8-shot 50eb battery + 1 bullet per shot. No battery: fires as standard. 15keb with both conversion parts; -5keb per missing part."
+    },
+    {
+        "name": "Eagletech Survivalist",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 500,
+        "category": "shoulder_arms",
+        "clip": 10,
+        "weapon_type": "assault rifle",
+        "quality": "standard",
+        "description": "Exotic Combination Crossbow and Assault Rifle. Rifle: 10 shots, no Autofire, Archery Skill. Crossbow: arrows. Both modes: integrated Sniping Scope, Non-Basic Ammunition."
+    },
+    {
+        "name": "Faisal's Dead or Alive",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 500,
+        "category": "shoulder_arms",
+        "clip": 4,
+        "weapon_type": "shotgun",
+        "quality": "poor",
+        "description": "Poor Quality Exotic Shotgun with integrated Poor Quality Net Launcher. Net: 2 nets, 1 ROF, Shoulder Arms, Shotgun Slug range, max 25m. Hit: grapple, no Move Action, -2 physical Actions, 15 HP. Escape: DV13 Contortionist (target) or Brawling (anyone). Nets 50eb each."
+    },
+    {
+        "name": "Federated Arms Pepper Shaker",
+        "damage": "2d6",
+        "rof": "4",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 500,
+        "category": "handgun",
+        "clip": 30,
+        "weapon_type": "SMG",
+        "quality": "standard",
+        "description": "Exotic SMG. Autofire only, no Aimed Shots or Single Shot. Non-Basic Ammunition. Autofire uses 6 bullets instead of 10."
+    },
+    {
+        "name": "Georgia Arms Matchmaker",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 20,
+        "category": "shoulder_arms",
+        "clip": 1,
+        "weapon_type": "shotgun",
+        "quality": "poor",
+        "description": "Poor Quality Exotic Shotgun. 1 shot. Plumbing supplies. Non-Basic Ammunition."
+    },
+    {
+        "name": "GunMart Bubba Buster",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 50,
+        "category": "shoulder_arms",
+        "clip": 4,
+        "weapon_type": "shotgun",
+        "quality": "poor",
+        "description": "Poor Quality Exotic Shotgun. Non-Basic Ammunition. 3 shots in 1 min (20 rounds): barrel warps, weapon destroyed."
+    },
+    {
+        "name": "Overlord Handcannon",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 100,
+        "category": "handgun",
+        "clip": 8,
+        "weapon_type": "heavy pistol",
+        "quality": "poor",
+        "description": "Poor Quality Exotic Heavy Pistol. 1 ROF (unlike other Heavy Pistols). +1 Facedown when threatening violence unless target knows it's crap."
+    },
+    {
+        "name": "GunMart Engage Rocket Launcher",
         "damage": "8d6",
         "rof": "1",
         "hands": 2,
         "concealable": False,
         "weight": 3,
-        "value": 2000,
+        "value": 100,
+        "category": "heavy_weapons",
+        "clip": 1,
+        "weapon_type": "rocket launcher",
+        "quality": "poor",
+        "description": "Poor Quality Exotic Rocket Launcher. Armor Piercing Rockets only. Includes 1 AP Rocket. Critical Failure or removing loaded rocket: detonation, weapon (and sometimes user) destroyed."
+    },
+    {
+        "name": "GunMart Special",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 20,
+        "category": "handgun",
+        "clip": 1,
+        "weapon_type": "heavy pistol",
+        "quality": "poor",
+        "description": "Poor Quality Exotic Heavy Pistol. Critical Failure when firing: weapon destroyed."
+    },
+    {
+        "name": "GunMart Smart Special",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 100,
+        "category": "handgun",
+        "clip": 8,
+        "weapon_type": "heavy pistol",
+        "quality": "poor",
+        "description": "Poor Quality Exotic Heavy Pistol. Permanent Smartgun Link (removal destroys both). No Subdermal Grip support. Disarmed while plugged: weapon destroyed. Critical Failure: weapon destroyed."
+    },
+    {
+        "name": "Hades Multipurpose Assault Shotgun",
+        "damage": "5d6",
+        "rof": "4",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 5000,
+        "category": "shoulder_arms",
+        "clip": 16,
+        "weapon_type": "shotgun",
+        "quality": "standard",
+        "description": "Exotic Shotgun. 16 shots. Non-Basic Ammunition. Load mix of up to 5 shotgun ammo types, select per shot via thumb controls."
+    },
+    {
+        "name": "KTech TechHammer",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 1000,
         "category": "heavy_weapons",
         "clip": 4,
-        "attachment_slots": 0,
-        "description": "Exotic Grenade Launcher. Fires Mini C9 sticky charges."
+        "weapon_type": "shotgun",
+        "quality": "standard",
+        "description": "Exotic Shotgun or Rocket Launcher. Magazine: 4 Basic Shotgun Slugs/Shells OR 2 Smart Rockets. Shotgun: Shoulder Arms. Rockets: Heavy Weapons, no Targeting Scope needed. Laser targeting for Smart Rockets."
+    },
+    {
+        "name": "Midnight Arms Beast Shotgun",
+        "damage": "5d6",
+        "rof": "4",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 1000,
+        "category": "shoulder_arms",
+        "clip": 40,
+        "weapon_type": "shotgun",
+        "quality": "standard",
+        "description": "Exotic Shotgun. 40 rounds. Non-Basic Ammunition. BODY 10+ or Broken Arm unless mounted. 2 Actions to reload."
+    },
+    {
+        "name": "Militech Perseus",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 5000,
+        "category": "handgun",
+        "clip": 11,
+        "weapon_type": "very heavy pistol",
+        "quality": "excellent",
+        "description": "Excellent Quality Exotic Very Heavy Pistol. 11 shots. If fired previous Round: 2 ROF instead of 1."
+    },
+    {
+        "name": "Nomad Rocker",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 100,
+        "category": "handgun",
+        "clip": 0,
+        "weapon_type": "very heavy pistol",
+        "quality": "poor",
+        "description": "Poor Quality Exotic Very Heavy Pistol. Fires rocks—ammo free. Repair destroyed: 1 hour, no Check."
+    },
+    {
+        "name": "Pursuit Security Inc Crowd Buster",
+        "damage": "5d6",
+        "rof": "4",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 5000,
+        "category": "shoulder_arms",
+        "clip": 25,
+        "weapon_type": "assault rifle",
+        "quality": "standard",
+        "description": "Exotic Assault Rifle with shrieker. Action: single shot, no damage, target DV15 Resist Torture/Drugs or Damaged Ear. User without ear protection: Damaged Ear. Includes Auto Level Dampening Ear Protectors. Shrieker: 8-shot 50eb battery."
+    },
+    {
+        "name": "Rostovic Street Destroyer",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "shoulder_arms",
+        "clip": 3,
+        "weapon_type": "shotgun",
+        "quality": "poor",
+        "description": "Poor Quality Exotic Shotgun. 3 shots. Shotgun Shells only. Action: shove metal into barrels. Next Shotgun Shell: 4d6, clears barrels."
+    },
+    {
+        "name": "Superchrome Javelin",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 1000,
+        "category": "shoulder_arms",
+        "clip": 4,
+        "weapon_type": "sniper rifle",
+        "quality": "standard",
+        "description": "Exotic Sniper Rifle. Non-Basic Ammunition. +2 Wardrobe and Style when worn openly."
     },
     # Danger Gal Dossier
     {
@@ -1291,8 +1771,107 @@ weapons = [
         "value": 1000,
         "category": "handgun",
         "clip": 10,
+        "weapon_type": "medium pistol",
+        "quality": "excellent",
         "description": "Excellent Quality Exotic Medium Pistol. Hypurrburst: Action to toggle; drains mag for 4d6 shot (min 4 rounds). No Aimed Shots. Purrs audibly."
     },
+    # Interface RED 5 - Medium Pistols
+    {"name": "Dai Lung Streetmaster", "damage": "2d6", "rof": "2", "hands": 1, "concealable": True, "weight": 1, "value": 20, "category": "handgun", "clip": 12, "attachment_slots": 3, "weapon_type": "medium pistol", "quality": "poor", "description": "The ultimate in cheap guns, available in vendits and bodegas everywhere. Modeled (loosely) after Towa's Type-12. Poor Quality Medium Pistol."},
+    {"name": "Faisal's Escape Plan", "damage": "2d6", "rof": "2", "hands": 1, "concealable": True, "weight": 1, "value": 60, "category": "handgun", "clip": 12, "attachment_slots": 3, "weapon_type": "medium pistol", "quality": "poor", "description": "Sometimes fighting isn't the answer, and sometimes it is. Poor Quality Medium Pistol. Pull tab (no Action) converts to Smoke Grenade; must throw by end of Turn. Attachments and ammo Destroyed Beyond Repair."},
+    {"name": "Federated Arms X-9mm", "damage": "2d6", "rof": "2", "hands": 1, "concealable": True, "weight": 1, "value": 50, "category": "handgun", "clip": 12, "attachment_slots": 3, "weapon_type": "medium pistol", "quality": "standard", "description": "Sturdy backup firearm. Fits perfectly in ankle holster. Standard Quality Medium Pistol."},
+    {"name": "Militech Avenger", "damage": "2d6", "rof": "2", "hands": 1, "concealable": True, "weight": 1, "value": 100, "category": "handgun", "clip": 12, "attachment_slots": 3, "weapon_type": "medium pistol", "quality": "excellent", "description": "Solid, excellently engineered sidearm. Remains in use in US military. Excellent Quality Medium Pistol."},
+    {"name": "Nomad .357 Magnum", "damage": "2d6", "rof": "2", "hands": 1, "concealable": True, "weight": 1, "value": 150, "category": "handgun", "clip": 12, "attachment_slots": 2, "weapon_type": "medium pistol", "quality": "standard", "description": "Hand-crafted by nomad weaponsmiths. Comes with installed Extended Magazine. Standard Quality Medium Pistol."},
+    {"name": "Towa Type-12 Police Pistol", "damage": "2d6", "rof": "2", "hands": 1, "concealable": True, "weight": 1, "value": 550, "category": "handgun", "clip": 6, "attachment_slots": 1, "weapon_type": "medium pistol", "quality": "excellent", "description": "High-quality revolver with integrated Smartgun Link. 6-shot capacity. Incompatible with magazine Attachments. Excellent Quality Medium Pistol."},
+    # Interface RED 5 - Heavy Pistols
+    {"name": "Dai Lung Magnum", "damage": "3d6", "rof": "2", "hands": 1, "concealable": True, "weight": 1, "value": 50, "category": "handgun", "clip": 8, "attachment_slots": 3, "weapon_type": "heavy pistol", "quality": "poor", "description": "Inferior copy of Mustang Arms Mark III. Poor Quality Heavy Pistol."},
+    {"name": "GunMart Midnight Defender", "damage": "3d6", "rof": "2", "hands": 1, "concealable": True, "weight": 1, "value": 550, "category": "handgun", "clip": 8, "attachment_slots": 2, "weapon_type": "heavy pistol", "quality": "poor", "description": "Comes with installed Infrared Nightvision Scope. Poor Quality Heavy Pistol."},
+    {"name": "Militech Sheriff", "damage": "3d6", "rof": "2", "hands": 1, "concealable": True, "weight": 1, "value": 200, "category": "handgun", "clip": 6, "attachment_slots": 3, "weapon_type": "heavy pistol", "quality": "excellent", "description": "Classic revolver. 6-round capacity. Incompatible with magazine attachments. Excellent Quality Heavy Pistol."},
+    {"name": "Mustang Arms Mark II", "damage": "3d6", "rof": "2", "hands": 1, "concealable": True, "weight": 1, "value": 600, "category": "handgun", "clip": 8, "attachment_slots": 2, "weapon_type": "heavy pistol", "quality": "excellent", "description": "Comes with installed Extended Magazine. Excellent Quality Heavy Pistol."},
+    {"name": "Mustang Arms Mark III", "damage": "3d6", "rof": "2", "hands": 1, "concealable": True, "weight": 1, "value": 100, "category": "handgun", "clip": 8, "attachment_slots": 3, "weapon_type": "heavy pistol", "quality": "standard", "description": "Evolution of Mark II; mass production reduced quality. Standard Quality Heavy Pistol."},
+    {"name": "Nova Cityhunter X", "damage": "3d6", "rof": "2", "hands": 1, "concealable": True, "weight": 1, "value": 500, "category": "handgun", "clip": 8, "attachment_slots": 3, "weapon_type": "heavy pistol", "quality": "excellent", "description": "Well-crafted clip-loading pistol. Excellent Quality Heavy Pistol."},
+    # Interface RED 5 - Very Heavy Pistols
+    {"name": "Faisal's Convenience", "damage": "4d6", "rof": "1", "hands": 1, "concealable": True, "weight": 1, "value": 20, "category": "handgun", "clip": 1, "attachment_slots": 3, "weapon_type": "very heavy pistol", "quality": "standard", "description": "Polymer one-shot. Cost varies by ammo flavor (Basic/Rubber 20eb, AP/Expansive/Incendiary 50eb). Must remove pull-tab to activate. Preloaded, cannot reload. Standard Quality Very Heavy Pistol."},
+    {"name": "Federated Arms Super Chief Plus", "damage": "4d6", "rof": "1", "hands": 1, "concealable": True, "weight": 1, "value": 50, "category": "handgun", "clip": 8, "attachment_slots": 3, "weapon_type": "very heavy pistol", "quality": "poor", "description": "Inferior semi-automatic pistol. Poor Quality Very Heavy Pistol."},
+    {"name": "Militech Boomer Buster", "damage": "4d6", "rof": "1", "hands": 1, "concealable": True, "weight": 1, "value": 500, "category": "handgun", "clip": 8, "attachment_slots": 3, "weapon_type": "very heavy pistol", "quality": "excellent", "description": "High-quality sidearm with increased ammo capacity. Excellent Quality Very Heavy Pistol."},
+    {"name": "Nomad Big Gulp", "damage": "4d6", "rof": "1", "hands": 1, "concealable": True, "weight": 1, "value": 100, "category": "handgun", "clip": 2, "attachment_slots": 3, "weapon_type": "very heavy pistol", "quality": "excellent", "description": "Double-barreled. 2-shot capacity. Can load two ammo types. Incompatible with magazine Attachments. Excellent Quality Very Heavy Pistol."},
+    {"name": "Sternmeyer P-35", "damage": "4d6", "rof": "1", "hands": 1, "concealable": True, "weight": 1, "value": 100, "category": "handgun", "clip": 8, "attachment_slots": 3, "weapon_type": "very heavy pistol", "quality": "standard", "description": "Rugged, reliable. Standard sidearm in European militaries. Standard Quality Very Heavy Pistol."},
+    {"name": "Sternmeyer P-35 Covert", "damage": "4d6", "rof": "1", "hands": 1, "concealable": True, "weight": 1, "value": 200, "category": "handgun", "clip": 8, "attachment_slots": 2, "weapon_type": "very heavy pistol", "quality": "standard", "description": "Comes with installed Silencer. Standard Quality Very Heavy Pistol."},
+    # Interface RED 5 - SMGs
+    {"name": "Arasaka Minami 10", "damage": "2d6", "rof": "4", "hands": 1, "concealable": True, "weight": 1, "value": 500, "category": "handgun", "clip": 30, "attachment_slots": 3, "weapon_type": "SMG", "quality": "excellent", "description": "Best SMG on the market. Excellent Quality SMG."},
+    {"name": "Arasaka Minami 10 P/M/S", "damage": "2d6", "rof": "4", "hands": 1, "concealable": True, "weight": 1, "value": 600, "category": "handgun", "clip": 30, "attachment_slots": 2, "weapon_type": "SMG", "quality": "excellent", "description": "Comes with installed Silencer. Excellent Quality SMG."},
+    {"name": "Dai Lung CyberMag 20", "damage": "2d6", "rof": "4", "hands": 1, "concealable": True, "weight": 1, "value": 550, "category": "handgun", "clip": 40, "attachment_slots": 2, "weapon_type": "SMG", "quality": "poor", "description": "Knock-off of IMI UZ. Comes with installed Drum Magazine. Poor Quality SMG."},
+    {"name": "Federated Arms Tech-Assault III", "damage": "2d6", "rof": "4", "hands": 1, "concealable": True, "weight": 1, "value": 50, "category": "handgun", "clip": 30, "attachment_slots": 3, "weapon_type": "SMG", "quality": "poor", "description": "No longer melts but jams often. Poor Quality SMG."},
+    {"name": "Militech Mini-Gat", "damage": "2d6", "rof": "4", "hands": 1, "concealable": True, "weight": 1, "value": 100, "category": "handgun", "clip": 30, "attachment_slots": 3, "weapon_type": "SMG", "quality": "standard", "description": "Five barrels. Standard Quality SMG."},
+    {"name": "Mustang Arms Rodeo", "damage": "2d6", "rof": "4", "hands": 1, "concealable": True, "weight": 1, "value": 100, "category": "handgun", "clip": 30, "attachment_slots": 3, "weapon_type": "SMG", "quality": "poor", "description": "Single Shot: 3d6. Autofire: DV15 Handgun Check or multiplier drops to x2. Poor Quality SMG."},
+    # Interface RED 5 - Heavy SMGs
+    {"name": "Chadran Arms City Reaper", "damage": "3d6", "rof": "3", "hands": 2, "concealable": True, "weight": 2, "value": 50, "category": "handgun", "clip": 40, "attachment_slots": 3, "weapon_type": "heavy SMG", "quality": "poor", "description": "Dual-barrel over-under. Poor Quality Heavy SMG."},
+    {"name": "IMI UZ 2045 Pro", "damage": "3d6", "rof": "3", "hands": 2, "concealable": True, "weight": 2, "value": 600, "category": "handgun", "clip": 40, "attachment_slots": 1, "weapon_type": "heavy SMG", "quality": "standard", "description": "Comes with installed Smartgun Link. Standard Quality Heavy SMG."},
+    {"name": "Militech Viper", "damage": "3d6", "rof": "3", "hands": 2, "concealable": True, "weight": 2, "value": 500, "category": "handgun", "clip": 40, "attachment_slots": 3, "weapon_type": "heavy SMG", "quality": "excellent", "description": "Light frame. Excellent Quality Heavy SMG."},
+    {"name": "Sternmeyer SMG-21", "damage": "3d6", "rof": "3", "hands": 2, "concealable": True, "weight": 2, "value": 100, "category": "handgun", "clip": 40, "attachment_slots": 3, "weapon_type": "heavy SMG", "quality": "standard", "description": "Anti-terrorism standard. Standard Quality Heavy SMG."},
+    {"name": "Sanroo Hello Cutie Hidden Cougar", "damage": "3d6", "rof": "3", "hands": 2, "concealable": True, "weight": 2, "value": 500, "category": "handgun", "clip": 11, "attachment_slots": 3, "weapon_type": "heavy SMG", "quality": "excellent", "description": "11-round capacity. Concealable. Incompatible with magazine Attachments. Excellent Quality Heavy SMG."},
+    {"name": "Sanroo Hello Cutie Happy Dancer", "damage": "3d6", "rof": "3", "hands": 2, "concealable": True, "weight": 2, "value": 500, "category": "handgun", "clip": 40, "attachment_slots": 3, "weapon_type": "heavy SMG", "quality": "excellent", "description": "Pings with each shot. Excellent Quality Heavy SMG."},
+    # Interface RED 5 - Shotguns
+    {"name": "Arasaka Rapid Assault", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 500, "category": "shoulder_arms", "clip": 4, "attachment_slots": 3, "weapon_type": "shotgun", "quality": "standard", "description": "4th Corporate War cost-cutting model. Standard Quality Shotgun."},
+    {"name": "Faisal's OnlyChance", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 20, "category": "shoulder_arms", "clip": 4, "attachment_slots": 3, "weapon_type": "shotgun", "quality": "poor", "description": "One-time use. Cost varies by ammo flavor. Cannot reload. Poor Quality Shotgun."},
+    {"name": "GunMart Home Defender", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 100, "category": "shoulder_arms", "clip": 4, "attachment_slots": 3, "weapon_type": "shotgun", "quality": "poor", "description": "Jams one in ten. Poor Quality Shotgun."},
+    {"name": "Militech Bulldog", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 1000, "category": "shoulder_arms", "clip": 4, "attachment_slots": 3, "weapon_type": "shotgun", "quality": "excellent", "description": "Downgraded from older models but accurate. Excellent Quality Shotgun."},
+    {"name": "Mustang Arms Deathstalker", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 600, "category": "shoulder_arms", "clip": 4, "attachment_slots": 2, "weapon_type": "shotgun", "quality": "standard", "description": "Comes with installed Airhypo Bayonet. Standard Quality Shotgun."},
+    {"name": "SlamDance ElectroMag", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 500, "category": "shoulder_arms", "clip": 4, "attachment_slots": 2, "weapon_type": "shotgun", "quality": "standard", "description": "Choose slug or shell per shot. Uses Magnetic ammo. Standard Quality Shotgun."},
+    # Interface RED 5 - Assault Rifles
+    {"name": "Chadran Arms Jungle Reaper", "damage": "5d6", "rof": "4", "hands": 2, "concealable": False, "weight": 2, "value": 100, "category": "shoulder_arms", "clip": 25, "attachment_slots": 3, "weapon_type": "assault rifle", "quality": "poor", "description": "City Reaper's bigger sibling. Poor Quality Assault Rifle."},
+    {"name": "Darra Polytechnic Binary", "damage": "5d6", "rof": "4", "hands": 2, "concealable": False, "weight": 2, "value": 1000, "category": "shoulder_arms", "clip": 25, "attachment_slots": 1, "weapon_type": "assault rifle", "quality": "standard", "description": "Comes with installed Grenade Launcher Underbarrel. Standard Quality Assault Rifle."},
+    {"name": "Militech Dragon", "damage": "5d6", "rof": "4", "hands": 2, "concealable": False, "weight": 2, "value": 1000, "category": "shoulder_arms", "clip": 25, "attachment_slots": 3, "weapon_type": "assault rifle", "quality": "excellent", "description": "Lightweight. Popular with paratroopers. Excellent Quality Assault Rifle."},
+    {"name": "Militech Ronin", "damage": "5d6", "rof": "4", "hands": 2, "concealable": False, "weight": 2, "value": 500, "category": "shoulder_arms", "clip": 25, "attachment_slots": 3, "weapon_type": "assault rifle", "quality": "standard", "description": "Standard for US military. Standard Quality Assault Rifle."},
+    {"name": "Militech Ronin Hyperlight Assault", "damage": "4d6", "rof": "4", "hands": 2, "concealable": False, "weight": 2, "value": 600, "category": "shoulder_arms", "clip": 25, "attachment_slots": 2, "weapon_type": "assault rifle", "quality": "excellent", "description": "4d6 Single Shot. Comes with Extended Magazine. Excellent Quality Assault Rifle."},
+    {"name": "Sternmeyer M-95A4 Assault Weapon", "damage": "5d6", "rof": "4", "hands": 2, "concealable": False, "weight": 2, "value": 1600, "category": "shoulder_arms", "clip": 50, "attachment_slots": 1, "weapon_type": "assault rifle", "quality": "excellent", "description": "Comes with Drum Magazine and Sniping Scope. Excellent Quality Assault Rifle."},
+    # Interface RED 5 - Sniper Rifles
+    {"name": "Arasaka WSS Sniper System", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 1000, "category": "shoulder_arms", "clip": 4, "attachment_slots": 3, "weapon_type": "sniper rifle", "quality": "excellent", "description": "Rebuilds or copies. Excellent Quality Sniper Rifle."},
+    {"name": "Everest VentureWare Kodiak Hunter", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 100, "category": "shoulder_arms", "clip": 3, "attachment_slots": 3, "weapon_type": "sniper rifle", "quality": "excellent", "description": "3-shot capacity. Action to work bolt between shots. Incompatible with magazine Attachments. Excellent Quality Sniper Rifle."},
+    {"name": "GunMart Snipe-Starr", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 100, "category": "shoulder_arms", "clip": 4, "attachment_slots": 3, "weapon_type": "sniper rifle", "quality": "poor", "description": "Poor Quality Sniper Rifle."},
+    {"name": "Militech Ninja Sniper", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 600, "category": "shoulder_arms", "clip": 4, "attachment_slots": 2, "weapon_type": "sniper rifle", "quality": "standard", "description": "Comes with installed Silencer. Standard Quality Sniper Rifle."},
+    {"name": "Nomad Long Rifle", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 500, "category": "shoulder_arms", "clip": 4, "attachment_slots": 3, "weapon_type": "sniper rifle", "quality": "standard", "description": "Each unique. Standard Quality Sniper Rifle."},
+    {"name": "Towa Type-00-Kai", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 1500, "category": "shoulder_arms", "clip": 4, "attachment_slots": 1, "weapon_type": "sniper rifle", "quality": "excellent", "description": "Comes with Smartgun Link. Excellent Quality Sniper Rifle."},
+    # Interface RED 5 - Bows
+    {"name": "Arasaka Origami", "damage": "4d6", "rof": "2", "hands": 2, "concealable": True, "weight": 2, "value": 200, "category": "archery", "attachment_slots": 3, "weapon_type": "bow", "quality": "standard", "description": "Folds/unfolds with flick of wrist. Concealable when folded. Standard Quality Bow."},
+    {"name": "Eagletech Bearcat", "damage": "4d6", "rof": "2", "hands": 2, "concealable": False, "weight": 2, "value": 500, "category": "archery", "attachment_slots": 3, "weapon_type": "bow", "quality": "excellent", "description": "High-strength composites. Excellent Quality Bow."},
+    {"name": "Eagletech Tigercat", "damage": "4d6", "rof": "2", "hands": 2, "concealable": False, "weight": 2, "value": 1000, "category": "archery", "attachment_slots": 1, "weapon_type": "bow", "quality": "excellent", "description": "Comes with Smartgun Link. Excellent Quality Bow."},
+    {"name": "Eagletech Tomcat", "damage": "4d6", "rof": "2", "hands": 2, "concealable": False, "weight": 2, "value": 100, "category": "archery", "attachment_slots": 3, "weapon_type": "bow", "quality": "standard", "description": "Professional compound bow. Standard Quality Bow."},
+    {"name": "GunMart Hawk's Eye", "damage": "4d6", "rof": "2", "hands": 2, "concealable": True, "weight": 2, "value": 100, "category": "archery", "attachment_slots": 3, "weapon_type": "bow", "quality": "poor", "description": "Concealable when folded. Poor Quality Bow."},
+    {"name": "GunMart Sherwood", "damage": "4d6", "rof": "2", "hands": 2, "concealable": False, "weight": 2, "value": 50, "category": "archery", "attachment_slots": 3, "weapon_type": "bow", "quality": "poor", "description": "Cheap fiberglass. Poor Quality Bow."},
+    # Interface RED 5 - Crossbows
+    {"name": "Eagletech Arbelest", "damage": "4d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 1000, "category": "archery", "attachment_slots": 1, "weapon_type": "crossbow", "quality": "excellent", "description": "Comes with Smartgun Link. Excellent Quality Crossbow."},
+    {"name": "Eagletech Scorpion", "damage": "4d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 500, "category": "archery", "attachment_slots": 3, "weapon_type": "crossbow", "quality": "excellent", "description": "Cocking winch standard. Excellent Quality Crossbow."},
+    {"name": "Eagletech Stryker", "damage": "4d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 100, "category": "archery", "attachment_slots": 3, "weapon_type": "crossbow", "quality": "standard", "description": "Gold standard for sports. Standard Quality Crossbow."},
+    {"name": "Everest VentureWare Mountaineer", "damage": "4d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 200, "category": "archery", "attachment_slots": 2, "weapon_type": "crossbow", "quality": "standard", "description": "Comes with Grapple Gun Underbarrel. Standard Quality Crossbow."},
+    {"name": "GunMart Hunter", "damage": "4d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 50, "category": "archery", "attachment_slots": 3, "weapon_type": "crossbow", "quality": "poor", "description": "Poor Quality Crossbow."},
+    {"name": "GunMart Midnight Hunter", "damage": "4d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 550, "category": "archery", "attachment_slots": 2, "weapon_type": "crossbow", "quality": "poor", "description": "Comes with Infrared Nightvision Scope. Poor Quality Crossbow."},
+    # Interface RED 5 - Grenade Launchers
+    {"name": "GunMart Porta-Morta", "damage": "6d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 600, "category": "heavy_weapons", "clip": 2, "attachment_slots": 2, "weapon_type": "grenade launcher", "quality": "poor", "description": "Comes with Drum Magazine. Poor Quality Grenade Launcher."},
+    {"name": "Militech Mini-Grenade", "damage": "6d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 500, "category": "heavy_weapons", "clip": 2, "attachment_slots": 3, "weapon_type": "grenade launcher", "quality": "standard", "description": "Standard for Militech troops. Standard Quality Grenade Launcher."},
+    {"name": "Towa Manufacturing Type-G", "damage": "6d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 100, "category": "heavy_weapons", "clip": 2, "attachment_slots": 3, "weapon_type": "grenade launcher", "quality": "poor", "description": "Basic grenade launcher. Poor Quality Grenade Launcher."},
+    {"name": "Towa Manufacturing Type-G*2", "damage": "6d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 500, "category": "heavy_weapons", "clip": 2, "attachment_slots": 3, "weapon_type": "grenade launcher", "quality": "standard", "description": "Load two ammo types. Choose per shot. Incompatible with magazine Attachments. Standard Quality Grenade Launcher."},
+    {"name": "Tsunami Arms Type-18", "damage": "6d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 1000, "category": "heavy_weapons", "clip": 2, "attachment_slots": 3, "weapon_type": "grenade launcher", "quality": "excellent", "description": "Gyro-stabilization. Excellent Quality Grenade Launcher."},
+    {"name": "Tsunami Arms Type-18-S", "damage": "6d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 1500, "category": "heavy_weapons", "clip": 2, "attachment_slots": 1, "weapon_type": "grenade launcher", "quality": "excellent", "description": "Comes with Smartgun Link. Excellent Quality Grenade Launcher."},
+    # Interface RED 5 - Rocket Launchers
+    {"name": "MetaCorp Hela Smart Launcher", "damage": "8d6", "rof": "1", "hands": 2, "concealable": False, "weight": 3, "value": 1000, "category": "heavy_weapons", "clip": 1, "attachment_slots": 1, "weapon_type": "rocket launcher", "quality": "standard", "description": "Comes with Smartgun Link. Standard Quality Rocket Launcher."},
+    {"name": "Militech Hotshot L-ATGM", "damage": "8d6", "rof": "1", "hands": 2, "concealable": False, "weight": 3, "value": 1000, "category": "heavy_weapons", "clip": 1, "attachment_slots": 3, "weapon_type": "rocket launcher", "quality": "excellent", "description": "Excellent Quality Rocket Launcher."},
+    {"name": "Militech Starshot L-ATGM-N", "damage": "8d6", "rof": "1", "hands": 2, "concealable": False, "weight": 3, "value": 1500, "category": "heavy_weapons", "clip": 1, "attachment_slots": 2, "weapon_type": "rocket launcher", "quality": "excellent", "description": "Comes with Infrared Nightvision Scope. Excellent Quality Rocket Launcher."},
+    {"name": "Militech Urban", "damage": "8d6", "rof": "1", "hands": 2, "concealable": False, "weight": 3, "value": 500, "category": "heavy_weapons", "clip": 1, "attachment_slots": 3, "weapon_type": "rocket launcher", "quality": "standard", "description": "Standard Quality Rocket Launcher."},
+    {"name": "Towa Manufacturing Type-R", "damage": "8d6", "rof": "1", "hands": 2, "concealable": False, "weight": 3, "value": 100, "category": "heavy_weapons", "clip": 1, "attachment_slots": 3, "weapon_type": "rocket launcher", "quality": "poor", "description": "Poor Quality Rocket Launcher."},
+    {"name": "Towa Manufacturing Type-R*2", "damage": "8d6", "rof": "1", "hands": 2, "concealable": False, "weight": 3, "value": 500, "category": "heavy_weapons", "clip": 2, "attachment_slots": 3, "weapon_type": "rocket launcher", "quality": "standard", "description": "2-shot capacity. Two ammo types. Reload: 2 Actions. Incompatible with magazine Attachments. Standard Quality Rocket Launcher."},
+    # Additional weapons
+    {"name": "Arasaka Neo Rapid Assault 16", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 1600, "category": "shoulder_arms", "clip": 16, "attachment_slots": 1, "weapon_type": "shotgun", "quality": "excellent", "description": "Excellent Quality Shotgun. Autofire (Machine Pistol 4), Shotgun Shell. Drum Magazine, Shotgun Automatic Control Group."},
+    {"name": "Arasaka Takanami SMG", "damage": "3d6", "rof": "1", "hands": 1, "concealable": False, "weight": 2, "value": 600, "category": "handgun", "clip": 50, "attachment_slots": 2, "weapon_type": "heavy SMG", "quality": "excellent", "description": "Excellent Quality Heavy SMG. Subcompact SMG range. Autofire (SMG 4), Suppressive Fire. Extended Magazine."},
+    {"name": "MetaCorp Chaingun \"Victoria\"", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 5, "value": 4000, "category": "heavy_weapons", "clip": 100, "attachment_slots": 3, "weapon_type": "machine gun", "quality": "excellent", "description": "Excellent Quality Machine Gun. Autofire (Machine Gun 5), Suppressive Fire only. 20 bullets per mode. 2 Reload Actions. BODY 12+ unless mounted. Backpack ammo feed."},
+    {"name": "Midnight Arms Dawnmaker AMR", "damage": "6d6", "rof": "1", "hands": 2, "concealable": False, "weight": 3, "value": 2300, "category": "heavy_weapons", "clip": 4, "attachment_slots": 0, "weapon_type": "sniper rifle", "quality": "excellent", "description": "Excellent Quality Sniper Rifle. Heavy Weapons, Anti-materiel Rifle range. Infrared Nightvision Scope, Smartgun Link, Sniper Rifle Rechamber."},
+    {"name": "Midnight Arms Midnight Assault HB", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 4, "value": 3000, "category": "heavy_weapons", "clip": 60, "attachment_slots": 3, "weapon_type": "machine gun", "quality": "standard", "description": "Machine Gun. Heavy Weapons, Marksman Rifle range. Autofire (Machine Gun 5), Suppressive Fire. BODY 11+ unless mounted or Prone."},
+    {"name": "Militech MK.27 LMG", "damage": "4d6", "rof": "1", "hands": 2, "concealable": False, "weight": 4, "value": 1400, "category": "heavy_weapons", "clip": 80, "attachment_slots": 3, "weapon_type": "machine gun", "quality": "standard", "description": "Machine Gun. Heavy Weapons, Assault Rifle range. Autofire (Machine Gun 4), Suppressive Fire. 2 Reload Actions. BODY 10+ unless mounted or Prone."},
+    {"name": "Techtronika Russia BMG-500 (Silver Edition)", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 5, "value": 3000, "category": "heavy_weapons", "clip": 500, "attachment_slots": 3, "weapon_type": "machine gun", "quality": "standard", "description": "Machine Gun. Heavy Weapons, Assault Rifle range. Autofire (Assault Rifle 5), Suppressive Fire. BODY 11+ unless mounted or Prone."},
+    {"name": "Militech \"Big Boomer\"", "damage": "4d6", "rof": "1", "hands": 1, "concealable": False, "weight": 1, "value": 1100, "category": "handgun", "clip": 28, "attachment_slots": 1, "weapon_type": "very heavy pistol", "quality": "excellent", "description": "Excellent Quality Very Heavy Pistol. Snubnose Pistol range. Autofire (Machine Pistol 4). Drum Magazine, Pistol Autosear."},
+    # 12 Days of Redmas
+    {"name": "Centurion Essentials Thermal Dagger", "damage": "2d6", "rof": "2", "hands": 1, "concealable": True, "weight": 1, "value": 1000, "category": "melee", "weapon_type": "medium melee", "quality": "excellent", "description": "Excellent Quality Exotic Medium Melee Weapon. Anyone or anything hit is Strongly On Fire (CP:R p180)."},
+    {"name": "Nat's Long-Barreled Pistol", "damage": "4d6", "rof": "1", "hands": 1, "concealable": False, "weight": 1, "value": 500, "category": "handgun", "clip": 8, "attachment_slots": 3, "weapon_type": "very heavy pistol", "quality": "excellent", "range_dvs": {"0-6": 14, "7-12": 13, "13-25": 14, "26-50": 20, "51-100": 25, "101-200": 28, "201-400": 30}, "description": "Excellent Quality Very Heavy Pistol. Unique range table (Rusted Chrome)."},
+    {"name": "Pursuit Security E-TACK Rapid Responder", "damage": "2d6", "rof": "2", "hands": 1, "concealable": True, "weight": 1, "value": 500, "category": "handgun", "clip": 18, "attachment_slots": 1, "weapon_type": "medium pistol", "quality": "poor", "description": "Poor Quality Medium Pistol. Extended Magazine, non-removable Stun Bayonet. Burst mode: 3 bullets = Heavy Pistol damage, non-AP treated as AP. Disables burst when <3 rounds."},
 ]
 
 # Solo of Fortune 2045 weapon attachments (DV17 Weaponstech to install)
@@ -1369,6 +1948,16 @@ weapon_attachments = [
         "requires_slot": False,
         "install_dv": 17,
         "effect_description": "Upgrades SMG autofire rate.",
+    },
+    {
+        "name": "Stun Bayonet",
+        "value": 100,
+        "description": "When wielded, this weapon can also be used as a Stun Baton (CP:R p349). Eligible: All Non-Exotic Ranged Weapons fired with Shoulder Arms Skill.",
+        "eligible_categories": ["shoulder_arms"],
+        "requires_slot": False,
+        "install_dv": 17,
+        "install_skill": "Weaponstech",
+        "effect_description": "Weapon can be used as Stun Baton.",
     },
 ]
 
@@ -1578,274 +2167,519 @@ armors = [
         "value": 0,
         "description": "Patchwork armor scavenged from the dead. SP 7 Head and Body. Common in Combat Zones."
     },
+    # Roller Derby (Interface RED 5)
+    {
+        "name": "High-Density Bulletproof Shield",
+        "sp": 15,
+        "ev": 2,
+        "locations": "Shield",
+        "weight": 1,
+        "value": 200,
+        "description": "A shield with 15 HP. It cannot be installed in a Pop-Up Shield."
+    },
+    {
+        "name": "Light Metalgear®",
+        "sp": 16,
+        "ev": 3,
+        "locations": "Body",
+        "weight": 3,
+        "value": 1000,
+        "description": "Metalgear® with SP 16. Armor Penalty -3 to REF, DEX, and MOVE."
+    },
+    {
+        "name": "Hybrid Metalgear®",
+        "sp": 17,
+        "ev": 4,
+        "locations": "Body",
+        "weight": 3,
+        "value": 2552,
+        "description": "Metalgear® with SP 17. Armor Penalty -3 to REF, -4 to DEX, -4 to MOVE."
+    },
+    {
+        "name": "Heavy Metalgear®",
+        "sp": 19,
+        "ev": 5,
+        "locations": "Body",
+        "weight": 4,
+        "value": 5000,
+        "description": "Metalgear® with SP 19. Armor Penalty -4 to REF, -5 to DEX, -5 to MOVE."
+    },
+    {
+        "name": "Roller Derby Helmet",
+        "sp": 7,
+        "ev": 0,
+        "locations": "Head",
+        "weight": 1,
+        "value": 50,
+        "description": "Uniform padding for roller derby as determined by regulations established by the Night City Wonderland League. Head and Body are purchased separately. SP7. Always in a team's specific colors."
+    },
+    {
+        "name": "Roller Derby Padding",
+        "sp": 7,
+        "ev": 0,
+        "locations": "Body",
+        "weight": 1,
+        "value": 50,
+        "description": "Uniform padding for roller derby as determined by regulations established by the Night City Wonderland League. Head and Body are purchased separately. SP7. Always in a team's specific colors."
+    },
 ]
     # Gear
 gears = [
     {
         "name": "Agent",
         "category": "Electronics",
-        "description": "Smartphone-like personal assistant device",
+        "description": "Self-adaptive AI-powered smartphone that learns how best to fit your needs by interacting with you. While not a true AI, it is more than capable of replacing any need for a secretary. Can make phone calls (voice/video), surf the Data Pool, scan for locations and directions, keep your schedule, maintain a personality with name/voice/virtual body, suggest clothes, record audio/video to Memory Chip, link to Cyberware for data storage, link to appliances, monitor resources and auto-reorder at market price, recommend future actions. Gives +2 to Library Search and +2 to Wardrobe & Style (only when wearing Agent-suggested clothes, which change every season). Multiple Agents don't multiply bonuses.",
         "weight": 0.5,
         "value": 100
     },
     {
+        "name": "Roller Derby Skates",
+        "category": "Clothing",
+        "description": "A pair of roller skates with four wheels – two in front, two in the back – and a stopper. Roller Derby Skates increase movement by 4 m/yds when using the Run Action. Pulling the skates on or taking them off requires an Action. Any options stored in a Cyberleg or meat leg are inaccessible while the skates are worn. At the GM's discretion, performing a physical task involving the legs or balance while wearing skates might count as a Complex Task and impose a -2 modifier to Checks. This modifier shouldn't be applied to Checks made during a roller derby jam.",
+        "weight": 1,
+        "value": 50
+    },
+    {
+        "name": "Breacher",
+        "category": "Electronics",
+        "description": "A specialized tool designed for hacking Agents. An Agent upgraded with special hardware and software used to hack other Agents remotely. Breachers can only be used for hacking and will not function as a normal Agent, nor can they be hacked like one.",
+        "weight": 0.5,
+        "value": 500
+    },
+    {
+        "name": "Crunch Whistle",
+        "category": "Electronics",
+        "description": "A modern take on an ancient hacking tool. Cyberdeck Hardware Option. A Crunch Whistle connects a Netrunner's Cyberdeck to a Breacher, allowing them to add their Interface Rank to Electronics/Security Checks made to hack Agents.",
+        "weight": 0.5,
+        "value": 100
+    },
+    {
+        "name": "CyberDude Smart Glove",
+        "category": "Electronics",
+        "description": "Fingerless Smart Glove with Subdermal Grip and 2 Option Slots for Cyberarm/Cyberlimb options. When worn, options stored in glove can be accessed. Action to put on/off. Non-finger cyberware in hand underneath is inaccessible. Finger-based cyberware (Cyberfingers, Quick Digits, Scratchers, Rippers, Slice N' Dice) works normally. Cannot be concealed.",
+        "weight": 0.5,
+        "value": 750
+    },
+    {
+        "name": "Smart Ears",
+        "category": "Electronics",
+        "description": "Comes with non-removable Radio Scanner/Music Player and 2 Option Slots for Cyberaudio Options. When worn, user gets benefits of installed options. Installing/uninstalling Cyberaudio Option takes one hour. Only one set of Smart Ears at a time.",
+        "weight": 0.5,
+        "value": 1000
+    },
+    {
+        "name": "Zetatech CyberConductor",
+        "category": "Electronics",
+        "description": "Up to 3 Cyberdecks may be installed. Meat Action while Jacked In: switch between installed cyberdecks. When switching: all active programs Derezz (including Black ICE), user takes 3 damage to HP. Cyberdecks do not benefit from Programs/Hardware in other installed decks. Install/uninstall deck: one hour.",
+        "weight": 1,
+        "value": 1000
+    },
+    {
+        "name": "C9 Charge",
+        "category": "Explosives",
+        "description": "Explosive. Plant as Action. DV17 Demolitions: success 8d6 (AP Grenade), fail 5d6. 30 sec (10 Rounds) to arm. Set remote (1 mile) or countdown (armed to 1 week). DV to defuse = plant Check. Fail defuse or move = explode.",
+        "weight": 1,
+        "value": 250
+    },
+    {
+        "name": "C9 Kill Switch",
+        "category": "Explosives",
+        "description": "Installed when planting C9 on Vehicle (Security Upgrade), ACPA/External Linear Frame (Auth Handshake Port), Weapon (Smartgun Link), or Cyberdeck (DNA Lock). Unauthorized access = charge explodes, destroys device. DV17 plant guarantees destruction. Conceal/Reveal Object to hide. Disarm via C9 Charge disarm.",
+        "weight": 0.5,
+        "value": 100
+    },
+    {
+        "name": "Mini C9 Charge",
+        "category": "Explosives",
+        "description": "Explosive. Plant as Action. DV17 Demolitions: success 6d6 (AP Grenade), fail 4d6. 30 sec (10 Rounds) to arm. Set remote (1 mile) or countdown. DV to defuse = plant Check. Fail defuse or move = explode.",
+        "weight": 0.5,
+        "value": 60
+    },
+    {
+        "name": "Authorization Handshake Port",
+        "category": "Electronics",
+        "description": "Install on ACPA or External Linear Frame. Requires Interface Plugs. With Authorization Handshake Module, only users with current credentials can pilot. DV17 Electronics/Security: 24hr bypass. DV24: permanently disable.",
+        "weight": 0.5,
+        "value": 100
+    },
+    {
+        "name": "Thermal Decoy",
+        "category": "Tools",
+        "description": "Setup as Action, inflates immediately. Registers as human to Smart/Tech Weapons, Infrared Nightvision. Enters Initiative; on Turn: Holds or Aids. DV17 Perception to notice false (GM secret, -2 if relying on Low Light/IR/Radar). Damage revealed = drops from Initiative. Any damage = destroyed.",
+        "weight": 0.5,
+        "value": 100
+    },
+    {
+        "name": "Multihypo",
+        "category": "Medical",
+        "description": "Quad-reservoir drug platform. Action: administer 1 dose of each drug loaded to target. Willing targets only. Load 4 doses of 4 different drugs (16 total) as Action. Cannot inject multiple doses of same drug simultaneously.",
+        "weight": 1,
+        "value": 500
+    },
+    # Agent category (Interface RED 5)
+    {
+        "name": "EBM Pir2",
+        "category": "Agent",
+        "description": "EBM's version of the basic Internal Agent improves reliability without increasing the risk of migraines. Cyberaudio Option. Excellent Quality Internal Agent. Install: Mall. Humanity Loss: 3 (1d6).",
+        "weight": 0,
+        "value": 500
+    },
+    {
+        "name": "MediaWare Braingen",
+        "category": "Agent",
+        "description": "A discount Agent, cheaply made but readily available. Rumors of security exploits allowing direct access to a user's brain are unsubstantiated and considered libelous by the company. Cyberaudio Option. Poor Quality Internal Agent. Install: Mall. Humanity Loss: 3 (1d6).",
+        "weight": 0,
+        "value": 50
+    },
+    {
+        "name": "Raven Microcybernetics Drake",
+        "category": "Agent",
+        "description": "A common model of Internal Agent, with no stand-out features but no great weaknesses. Cyberaudio Option. Standard Quality Internal Agent. Install: Mall. Humanity Loss: 3 (1d6).",
+        "weight": 0,
+        "value": 100
+    },
+    {
+        "name": "Rocklin Augmentics Neuron",
+        "category": "Agent",
+        "description": "A post-war design just hitting the market, Rocklin's Neuron uses revolutionary new technology to project video directly via the user's optic nerve, eliminating the need for cyberoptics. Cyberaudio Option. Excellent Quality Internal Agent. Displays visual output into user's field of vision even if they do not have Cybereyes with Chyron installed. Install: Mall. Humanity Loss: 3 (1d6).",
+        "weight": 0,
+        "value": 1000
+    },
+    {
+        "name": "Segotari Double Agent",
+        "category": "Agent",
+        "description": "The classic, with its peak 2020s styling: black clamshell case with a brushed finish and abstract silver circuit patterns. Feels cheap because it is cheap. A Poor Quality Agent with a touchscreen and audio for input, and a second display-only screen and speaker for output. Onboard accessories: camera, microphone.",
+        "weight": 0.5,
+        "value": 50
+    },
+    {
+        "name": "Wyzard Technologies Merlyn",
+        "category": "Agent",
+        "description": "People wear a Merlyn to be seen wearing a Merlyn. The dense little wrist-mounted Agent and its flashy holo-display show that you care about taste. An Excellent Quality Agent that straps to the wrist like a watch. Touchscreen and audio input. Holographic and speaker output. A user adds +1 to Wardrobe and Style Skill Checks when visibly wearing a Merlyn. Onboard accessories: camera, flashlight, microphone.",
+        "weight": 0.5,
+        "value": 1000
+    },
+    {
+        "name": "Zetatech Grade A",
+        "category": "Agent",
+        "description": "One of the most ubiquitous Agent models. Unobtrusive. Effective. Rectangular. Available everywhere. A Standard Quality Agent with a single touchscreen for input and output, a microphone for audio input, and a speaker for audio output. Onboard accessories: camera, flashlight, microphone.",
+        "weight": 0.5,
+        "value": 100
+    },
+    {
+        "name": "Zetatech Grade A-Plus",
+        "category": "Agent",
+        "description": "An upgraded version of the Grade A. An Excellent Quality Agent with a single touchscreen for input and output, a microphone for audio input, a speaker for audio output, and holo-projector for additional visual output. Onboard accessories: camera, flashlight, microphone.",
+        "weight": 0.5,
+        "value": 500
+    },
+    {
+        "name": "Airhypo",
+        "category": "Medical",
+        "description": "Easy to use drug distribution platform using compressed air to force a drug through the skin. Use an Action to administer a single dose to a willing target, or make a Melee Weapon Attack to administer to unwilling target on hit (instead of damage). Reloading with a dose isn't an Action.",
+        "weight": 0.5,
+        "value": 100
+    },
+    {
+        "name": "Anti-Smog Breathing Mask",
+        "category": "Survival",
+        "description": "Useful for filtering out toxins and smoke from the local environment. User is immune to the effects of toxic gasses, fumes, and all similar dangers that must be inhaled to affect the user.",
+        "weight": 0.5,
+        "value": 50
+    },
+    {
         "name": "Audio Recorder",
         "category": "Electronics",
-        "description": "Records audio",
+        "description": "Device records up to 24 hours of audio before its output fills up a standard Memory Chip stored in the device.",
+        "weight": 0.5,
+        "value": 100
+    },
+    {
+        "name": "Auto Level Dampening Ear Protectors",
+        "category": "Tools",
+        "description": "Compact ear protection. When worn, user is immune to deafness or other effects caused by dangerously loud noises, like those produced by a flashbang.",
         "weight": 0.5,
         "value": 100
     },
     {
         "name": "Binoculars",
         "category": "Optics",
-        "description": "Magnifies distant objects",
+        "description": "You look through them. They double or triple the size of what you are seeing.",
         "weight": 1,
         "value": 50
     },
     {
         "name": "Braindance Viewer",
         "category": "Electronics",
-        "description": "Allows viewing of braindance recordings",
+        "description": "Allows the user to experience braindance content. Braindances are digital recordings of an experience which you view through the eyes of the actor. The experience includes all the subject's senses, and you feel every emotion felt, for better or worse.",
         "weight": 1,
         "value": 1000
     },
     {
         "name": "Bug Detector",
         "category": "Electronics",
-        "description": "Detects surveillance devices",
+        "description": "Device beeps when user is within 2m/yds of a tap, bug, or other listening device.",
         "weight": 0.5,
         "value": 500
     },
     {
         "name": "Carryall",
         "category": "Clothing",
-        "description": "Large bag for carrying gear",
+        "description": "Heavy ripstop nylon bags of varying sizes, from messenger to nearly man-sized duffel bags.",
         "weight": 0.5,
         "value": 20
     },
     {
         "name": "Chemical Analyzer",
         "category": "Electronics",
-        "description": "Analyzes chemical compounds",
+        "description": "Can test substances as an Action to find their precise chemical composition, identifying most substances instantly from a wide database of samples.",
         "weight": 1,
         "value": 1000
     },
     {
         "name": "Computer",
         "category": "Electronics",
-        "description": "Portable computer",
+        "description": "Laptop or desktop computer, used mostly for comfortable word processing and surfing the Data Pool.",
         "weight": 1,
         "value": 500
     },
     {
+        "name": "Cryopump",
+        "category": "Medical",
+        "description": "Briefcase-sized tool with body bag hooked to powerful pump. Place willing/unconscious targets in bag and hook up as Action; pump forces hyper-cooled chemical fluid in, 1 charge per target. In stasis: unconscious, no Death Saves for up to a week. Bag has 15 HP as cover; transparent top and gloves allow surgery while in stasis. Standard has 1 charge, holds 1 human-sized target. Refuel 50eb per charge. Medtech only.",
+        "weight": 3,
+        "value": 1000
+    },
+    {
+        "name": "Cryotank",
+        "category": "Medical",
+        "description": "Human-sized container holding fully grown adult. DV13 Medical Tech Check: keeps 1 person in stasis as long as desired. In stasis: unconscious, heals at double rate. Tank has 30 HP as cover. Medtech only.",
+        "weight": 5,
+        "value": 2000
+    },
+    {
         "name": "Disposable Cell Phone",
         "category": "Electronics",
-        "description": "One-time use phone",
+        "description": "There are still billions of the things around. A good choice for Fixers and other people who don't want to be tracked.",
         "weight": 0.5,
         "value": 50
     },
     {
         "name": "Drum Synthesizer",
         "category": "Music",
-        "description": "Electronic drum kit",
+        "description": "Flat plastic pads of varying sizes, linked by cables to a central processor. Can simulate almost any kind of drum. Requires some type of amplification to be heard.",
         "weight": 1,
         "value": 500
     },
     {
         "name": "Duct Tape",
         "category": "Tools",
-        "description": "Multipurpose adhesive tape",
+        "description": "Comes in many colors and optionally can glow in the dark. Glowing duct tape is often used to mark tunnels, dead drops, or caches. Glows in the dark even if there has been no light exposure.",
         "weight": 0.5,
         "value": 20
     },
     {
         "name": "Electric Guitar",
         "category": "Music",
-        "description": "Musical instrument",
+        "description": "Electric guitar or another instrument. Use your imagination. You will need an amp to be heard with any electronic-based instrument.",
         "weight": 2,
         "value": 500
     },
     {
         "name": "Flashlight",
         "category": "Tools",
-        "description": "Portable light source",
+        "description": "Rechargeable. 100m/yd beam, lasts up to 10 hours on a charge.",
         "weight": 0.5,
         "value": 20
     },
     {
         "name": "Food Stick",
         "category": "Survival",
-        "description": "Nutritional meal replacement",
+        "description": "Grainy, dried food bar that comes in a variety of (awful) flavors. One meal.",
         "weight": 0.5,
         "value": 10
     },
     {
         "name": "Glow Paint",
         "category": "Tools",
-        "description": "Luminescent paint",
+        "description": "Glow in the dark paint for marking locations and creating art. Comes in a spray can. Also good for tagging.",
         "weight": 0.5,
         "value": 20
     },
     {
         "name": "Glow Stick",
         "category": "Tools",
-        "description": "Chemical light source",
+        "description": "Light tube to illuminate a 4m/yd area for up to 10 hours. One use only.",
         "weight": 0.5,
         "value": 10
     },
     {
         "name": "Grapple Gun",
         "category": "Tools",
-        "description": "Fires a grappling hook",
+        "description": "When wielded in a hand, user as an Action can fire a rocket propelled grapple that attaches securely to any thick cover up to 30m/yds away. Line supports two times user's body weight, has 10 HP. User negates climbing movement penalty when climbing this line; can retract line without an Action. When used as grapple, user can't hold anything in that hand. Ineffective as weapon, cannot be used for Grab Action.",
         "weight": 1,
         "value": 100
     },
     {
         "name": "Handcuffs",
         "category": "Tools",
-        "description": "Restrains a person's wrists",
+        "description": "Book 'em, Danno. Can be broken easily if your BODY is higher than 10.",
         "weight": 0.5,
         "value": 50
     },
     {
         "name": "Homing Tracer",
         "category": "Electronics",
-        "description": "Tracking device",
+        "description": "Device can follow a linked tracer up to 1 mile away. Comes with a free button-sized linked tracer. Replacement linked tracers are 50eb.",
         "weight": 0.5,
         "value": 500
     },
     {
         "name": "Inflatable Bed & Sleep-bag",
         "category": "Survival",
-        "description": "Portable sleeping arrangement",
+        "description": "Self-inflating air mattress that comes packed with a thin sleeping bag. The whole thing folds to a 6\"x6\" package for easy storage.",
         "weight": 1,
         "value": 20
     },
     {
         "name": "Kibble Pack",
         "category": "Survival",
-        "description": "Dry pet food for human consumption",
+        "description": "One foil package of dry, pet food-like cereal or wafers equivalent to a single meal. Usually identified by number rather than the fake appetizing label and description.",
         "weight": 0.5,
         "value": 10
     },
     {
         "name": "Linear Frame Sigma",
         "category": "Cyberware",
-        "description": "Exoskeleton for enhanced strength",
+        "description": "Powered exoskeleton giving tremendous strength. User increases BODY to 12 while plugged in (cannot exceed 13). BODY increase doesn't increase HP or change Death Save. Requires 1 installation of Interface Plugs to operate.",
         "weight": 2,
         "value": 5000
     },
     {
         "name": "Linear Frame Beta",
         "category": "Cyberware",
-        "description": "Advanced exoskeleton",
+        "description": "Powered exoskeleton giving even more tremendous strength. User increases BODY to 14 while plugged in (cannot exceed 15). BODY increase doesn't increase HP or change Death Save. Requires 2 installations of Interface Plugs to operate.",
         "weight": 3,
         "value": 10000
     },
     {
         "name": "Lock Picking Set",
         "category": "Tools",
-        "description": "Tools for picking locks",
+        "description": "A small pouch of tools for cracking mechanical locks.",
         "weight": 0.5,
         "value": 20
     },
     {
         "name": "Medscanner",
         "category": "Medical",
-        "description": "Scans for medical issues",
+        "description": "Scanner with external probes and contacts that diagnoses injury and illness, assisting user in medical emergencies not requiring Surgery. User adds +2 to First Aid and Paramedic Skills. Doesn't stack with itself.",
         "weight": 1,
         "value": 1000
     },
     {
         "name": "Medtech Bag",
         "category": "Medical",
-        "description": "Contains medical supplies",
+        "description": "Medical toolkit that includes everything from dermal staplers to spray skin applicators to sterile scalpels. All you need to save lives using your skills and training.",
         "weight": 1,
         "value": 100
     },
     {
         "name": "Memory Chip",
         "category": "Electronics",
-        "description": "Data storage device",
+        "description": "Thin wafers of doped plastic that store information in all forms. Some of these are larger than others.",
         "weight": 0.1,
         "value": 10
     },
     {
         "name": "MRE",
         "category": "Survival",
-        "description": "Meal Ready to Eat",
+        "description": "Self-heating plastic and foil meal bag. Add water, snap the tab on the top, and in 2 minutes you have something that resembles a single hot, nourishing meal.",
         "weight": 0.5,
         "value": 10
     },
     {
         "name": "Personal CarePak",
         "category": "Survival",
-        "description": "Basic hygiene and care products",
+        "description": "Toothpaste-loaded toothbrush, all body wet-wipes, depilatory paste, comb, etc.",
         "weight": 0.5,
         "value": 20
     },
     {
         "name": "Pocket Amplifier",
         "category": "Music",
-        "description": "Small, portable amplifier",
+        "description": "About the size of a large book, this rechargeable amplifier delivers sound up to 100m/yd for up to 6 hours. Can support two instruments.",
         "weight": 0.5,
         "value": 50
     },
     {
         "name": "Radar Detector",
         "category": "Electronics",
-        "description": "Detects radar signals",
+        "description": "Device beeps if an active radar beam is present within 100m/yds.",
         "weight": 0.5,
         "value": 500
     },
     {
         "name": "Radio Communicator",
         "category": "Electronics",
-        "description": "Two-way radio",
+        "description": "Earpiece allowing user to communicate via radio, 1-mile range.",
         "weight": 0.5,
         "value": 100
     },
     {
         "name": "Radio Scanner/Music Player",
         "category": "Electronics",
-        "description": "Scans radio frequencies and plays music",
+        "description": "Music player can link to the Data Pool to listen to music, or play from a Memory Chip. User can scan all radio bands within a mile currently in use and tune into them, though some channels might require a Descrambler to understand.",
         "weight": 0.5,
         "value": 50
     },
     {
         "name": "Roadflare",
         "category": "Tools",
-        "description": "Bright emergency light",
+        "description": "Lights an area of 100m/yards for 1 hour. Different colors. One use.",
         "weight": 0.5,
         "value": 10
     },
     {
         "name": "Rope",
         "category": "Tools",
-        "description": "Strong, durable rope",
+        "description": "Nylon rope, 60m/yds. Can come in colors if desired. Holds up to 800 lbs (360 kg).",
         "weight": 1,
         "value": 20
     },
     {
         "name": "Scrambler/Descrambler",
         "category": "Electronics",
-        "description": "Encrypts and decrypts communications",
+        "description": "Allows user to scramble outgoing communications so they cannot be understood without a descrambler, which is also included at no extra charge.",
         "weight": 0.5,
         "value": 500
     },
     {
         "name": "Smart Glasses",
         "category": "Electronics",
-        "description": "Computerized eyewear",
+        "description": "Contains two option slots for Cybereye options. When worn, gives user access to benefits of these options. When cybereye options are installed, they always count as paired; costs same as installing once in a cybereye. Only one pair at a time. Enthusiasts often replace frames with nicer ones, as they aren't the prettiest out of the box.",
         "weight": 0.5,
         "value": 500
     },
     {
         "name": "Techtool",
         "category": "Tools",
-        "description": "Multipurpose tool for tech work",
+        "description": "An all-in-one tool. The various parts, including a small utility blade, pliers, various screwdrivers, files, and clippers all fold up into a compact and easy to carry package.",
         "weight": 0.5,
         "value": 100
+    },
+    {
+        "name": "Tech Bag",
+        "category": "Tools",
+        "description": "Small bag of tools for fixing electronics and machines. Includes a Techtool, electrical parts like tape and wire wraps, assorted screws and bolts, plug-in modules for repairs, heat torch, 2 small prybars, and hammer.",
+        "weight": 1,
+        "value": 100
+    },
+    {
+        "name": "Techscanner",
+        "category": "Electronics",
+        "description": "Scanner diagnoses a wide variety of machinery and electronics, assisting the user in repairs or other technical work. User adds +2 to Basic Tech, Cybertech, Land Vehicle Tech, Sea Vehicle Tech, Air Vehicle Tech, Electronics/Security Tech, and Weaponstech Skills. Doesn't stack with itself.",
+        "weight": 1,
+        "value": 1000
     },
     {
         "name": "Camping Equipment",
@@ -1857,7 +2691,7 @@ gears = [
     {
         "name": "Tent and Camping Equipment",
         "category": "Survival",
-        "description": "Tent and camping gear for nomads",
+        "description": "Small one-person tube tent with plastic stakes, one self-heating rechargeable pot to boil water (takes 5 min to recharge, lasts 2 hours), and a cheap metal spork that couldn't hurt a fly.",
         "weight": 3,
         "value": 50
     },
@@ -1871,28 +2705,28 @@ gears = [
     {
         "name": "Biotoxin",
         "category": "Medical",
-        "description": "Dangerous biological toxin",
+        "description": "An entire vial can be smeared on any Light Melee Weapon as an Action. For the next 30 minutes after application, instead of dealing the weapon's typical damage, anyone hit by the biotoxin-coated Light Melee Weapon must attempt to beat a DV15 Resist Torture/Drugs Check. Anyone who fails is dealt 3d6 damage directly to their HP. Their armor isn't ablated because it wasn't interacted with.",
         "weight": 0.1,
         "value": 500
     },
     {
         "name": "Poison",
         "category": "Medical",
-        "description": "Toxic substance",
+        "description": "An entire vial can be smeared on any Light Melee Weapon as an Action. For the next 30 minutes after application, instead of dealing the weapon's typical damage, anyone hit by the poisoned Light Melee Weapon must attempt to beat a DV13 Resist Torture/Drugs Check. Anyone who fails is dealt 2d6 damage directly to their HP. Their armor isn't ablated because it wasn't interacted with.",
         "weight": 0.1,
         "value": 100
     },
     {
         "name": "Video Camera",
         "category": "Electronics",
-        "description": "Records video footage",
+        "description": "When held in a hand, user can record up to 12 hours of video and audio before its output fills up a standard Memory Chip stored in the device.",
         "weight": 1,
         "value": 100
     },
     {
         "name": "Virtuality Goggles",
         "category": "Electronics",
-        "description": "For viewing virtual reality",
+        "description": "Headset that projects cyberspace imagery over your view of the world around you. Highly advised for Netrunners. See Netrunning Section for more info.",
         "weight": 0.5,
         "value": 100
     },
@@ -1906,29 +2740,85 @@ gears = [
     {
         "name": "Blue Glass",
         "category": "Drugs",
-        "description": "",
+        "description": "Primary Effect (4 hrs): GM occasionally tells you when you are flashing out (hallucinating swirls of vibrant colors); you lose your Action on a Turn while in this state. Secondary (DV15): Addicted. While addicted, GM occasionally tells you when flashing out. Blue Glass junkies typically flash out once per hour. While addicted, Primary Effect changes: immune to flashing out while experiencing Primary Effect; you take it for stability.",
         "weight": 0.5,
         "value": 20
     },
     {
         "name": "Boost",
         "category": "Drugs",
-        "description": "",
+        "description": "Primary Effect (24 hrs): User's INT increases by 2 points. Can raise INT above 8. Secondary (DV17): Addicted. While addicted, INT lowered by 2 points.",
         "weight": 0.5,
         "value": 50
     },
     {
         "name": "Smash",
         "category": "Drugs",
-        "description": "",
+        "description": "Primary Effect (4 hrs): Yellow, foamy, sold in cans everywhere. User feels euphoric, loose, happy, ready to party. +2 to Dance, Contortionist, Conversation, Human Perception, Persuasion, and Acting. Secondary (DV15): Addicted. Loss of interest in enjoyable activities; -2 to those Skills. GM occasionally tells you when you crave more; roleplay accordingly.",
         "weight": 0.5,
         "value": 10
     },
     {
         "name": "Synthcoke",
         "category": "Drugs",
-        "description": "",
+        "description": "Primary Effect (4 hrs): User's REF increases by 1 point (can raise REF above 8). Prone to paranoid ideation; GM occasionally tells you when you feel paranoid. Secondary (DV15): Addicted. While addicted, REF lowered by 2 points unless experiencing Primary Effect. GM occasionally tells you when you crave more; roleplay accordingly.",
         "weight": 0.5,
+        "value": 20
+    },
+    {
+        "name": "Anti-Cerebral",
+        "category": "Drugs",
+        "description": "Primary: 1d6 HL, roll Secondary. No duration. Secondary (DV17): Not addictive. 1d6 HL.",
+        "weight": 0.1,
+        "value": 60
+    },
+    {
+        "name": "Deliriant",
+        "category": "Drugs",
+        "description": "Primary (10 min): DV17 Resist Torture/Drugs or Damaged Ear, Damaged Eye, Torn Muscle Critical Injuries (no Bonus Damage). Cybereyes: no Damaged Eye. Secondary (DV17): Not addictive. If addicted to Blue Glass: 1d6 HL.",
+        "weight": 0.1,
+        "value": 50
+    },
+    {
+        "name": "Mindfre",
+        "category": "Drugs",
+        "description": "Primary (1 min): DV15 Resist Torture/Drugs. Without Pain Editor, fail: 1 HP damage at end of each Turn (or every 3 sec out of combat). Cannot reduce below 1 HP. Secondary (DV15): Not addictive. Without Pain Editor who failed Primary: 1d6 HL.",
+        "weight": 0.1,
+        "value": 50
+    },
+    {
+        "name": "Mortalis",
+        "category": "Drugs",
+        "description": "Primary (9 sec): Non-FBC: DV21 Resist Torture/Drugs. Fail: Mortally Wounded effects (no Death Saves). Enhanced Antibodies fail: until end of next Round. Secondary (DV13): Not addictive. Non-FBC: Death Save; fail = Brain Injury + Concussion (no Bonus Damage) instead of death.",
+        "weight": 0.1,
+        "value": 250
+    },
+    {
+        "name": "Rime",
+        "category": "Drugs",
+        "description": "Primary (24 hrs): REF -2 (min 6) unless Cyberspine. Without Cyberspine: chills, roleplay. Secondary (DV15): Not addictive. Without Cyberspine: 1d6 HL.",
+        "weight": 0.1,
+        "value": 60
+    },
+    {
+        "name": "Terrifer",
+        "category": "Drugs",
+        "description": "Primary (24 hrs): Without Speedware/Berserk: DV15 Resist Torture/Drugs or -2 to Actions vs humans seen first minute after dose. Berserker/Prime Time ends Primary, no Secondary. Secondary (DV17): Not addictive. Failed Primary: re-suffer Primary, same feared characters.",
+        "weight": 0.1,
+        "value": 40
+    },
+    {
+        "name": "Red Lace",
+        "category": "Drugs",
+        "description": "Primary (24 hrs): 1d6 HL on dose. Melee Weapon: 5's count as 6's for Critical Injury. If addicted to Black Lace: temporarily remove REF reduction. Secondary (DV17): Addicted. DEX -2 unless on Primary. Roleplay impulsive behavior.",
+        "weight": 0.1,
+        "value": 110
+    },
+    {
+        "name": "White Lace",
+        "category": "Drugs",
+        "description": "Primary (12 hrs): 1d6 HL (returned if not affected by Secondary). Not addicted to Black Lace: ignore Seriously Wounded. Addicted to Black/Red Lace: temporarily remove REF/DEX reductions. Secondary (DV15): HL not returned. Addicted to Black Lace.",
+        "weight": 0.1,
         "value": 20
     },
     # Black Chrome gear and apps
@@ -1942,100 +2832,128 @@ gears = [
     {
         "name": "Drink Master 3000",
         "category": "Electronics",
-        "description": "Rolling bar unit. Holds 32 fluids, dispenses 3000 drink combinations. 10 beverages before refill (100eb). Can dispense Smash.",
+        "description": "Large rolling unit by Hammered Industries. Holds 32 separate fluids (Karmotrine, MCA, etc.) and combines them to produce one of 3,000 drinks via programmable bar gun at desired temperature. Back zips open to reveal backpack straps. Can dispense 10 beverages before refill (100eb). Can dispense Smash and all manner of delicious beverages. Exec favorite for lubricating negotiations.",
         "weight": 2,
         "value": 1000
     },
     {
         "name": "Hydrosubsidium Universal Aqualung",
         "category": "Survival",
-        "description": "Donut-shaped neck device. Breathe water within 10m of surface. Filters oxygen from seawater.",
+        "description": "Donut-shaped neck device with two water filtration and conversion filters that pull oxygen from seawater and deliver it to the wearer's mouthpiece. Originally designed for underwater labor to make oxygen tanks obsolete. User can breathe water within 10 m/yds of the surface. Marketed as recreational toy for the wealthy.",
         "weight": 1,
         "value": 5000
     },
     {
         "name": "Jeeves Executive Garment Bag",
         "category": "Clothing",
-        "description": "Repairs damaged Fashion or Armor. Time: Cheap 1hr, Costly 6hr, Premium 1 day, Expensive 1 week, V.Expensive 2 weeks.",
+        "description": "Large garment bags from Nu-Tek. Clean and make minor repairs to any clothing placed inside. Repairs one damaged or destroyed (but not beyond repair) Fashion, Body Armor, or Head Armor at a time. Cannot repair Luxury or Super Luxury. Repair time by Price Category: Cheap/Everyday 1hr, Costly 6hr, Premium 1 day, Expensive 1 week, Very Expensive 2 weeks. Popular with Execs in areas with little infrastructure.",
         "weight": 1,
         "value": 1000
     },
     {
         "name": "Zetatech Porta-Printer",
         "category": "Electronics",
-        "description": "Backpack 3D printer. Tech can use Upgrade/Fabrication Expertise anywhere with assembly tools.",
+        "description": "Reliable 3D printer built into a backpack for the Tech on the go. Workshop in miniature, can replace need for dedicated workspace. Allows Tech to use Upgrade and Fabrication Expertise anywhere so long as they have adequate tools for post-printing assembly work.",
         "weight": 2,
         "value": 1000
     },
     {
         "name": "ChipVault by SecSystems",
         "category": "Electronics",
-        "description": "Holds 8 Chipware. EMP shielding. Biometric lock. DV17 Electronics/Security to bypass.",
+        "description": "Reinforced, moisture-free environment for Chipware. Holds up to 8 pieces. Chipware inside cannot be rendered inoperable by EMP (e.g. Microwaver). Biometric lock (thumbprint, iris, blood, etc.). DV17 Electronics/Security Tech to bypass. DV10 Pick Lock on exposed hinge. Small as a deck of cards. Floats in water.",
         "weight": 0.5,
         "value": 100
     },
     {
         "name": "Streetcase by SecSystems",
         "category": "Electronics",
-        "description": "Briefcase with Heavy Pistol holster, laptop space, ChipVault, Smoke Grenade. Draw pistol without Action. Floats.",
+        "description": "ExecAttire line briefcase. Outside holster for Heavy Pistol (draw without Action). Inside: laptop space, ChipVault (included), Smoke Grenade (included). As Action while holding handle, detonate Smoke Grenade at position (drops through hatch). ModFire 10x in Heavy Pistol mode can fit instead. Floats.",
         "weight": 2,
         "value": 500
     },
     {
         "name": "RapiDeploy Sheath",
         "category": "Tools",
-        "description": "Rapid deployment for pistols/light melee. +2 Conceal/Reveal Object. Wrist or back config. Repairable when destroyed.",
+        "description": "Handmade by Gambler (Texas). Multipurpose rapid deployment sheath for pistols and light melee. Configurable for wrist or center-back. +2 Conceal/Reveal Object when concealing weapon already concealable. If destroyed beyond repair, instead simply destroyed; if destroyed but not beyond repair, instead left unscathed.",
         "weight": 0.5,
         "value": 500
     },
     {
         "name": "Everest VentureWare AirWell 50",
         "category": "Survival",
-        "description": "Atmospheric water condenser. Produces 17oz per 5 hours. Solar powered.",
+        "description": "Cylindrical device with solar-powered battery, condensate mechanism, and reverse osmosis filter. Draws moisture from atmosphere and converts to drinkable water. Produces 17 oz (.5 L) per 5 hours. Enough to sustain a person but not quench thirst. Popular with Nomad outriders.",
         "weight": 1,
         "value": 100
     },
     {
         "name": "Everest VentureWare One Touch Habitat",
         "category": "Survival",
-        "description": "Self-deploying tent. Protection from Exposure. Heating/AC. Deploy/undeploy as Action.",
+        "description": "AW-003 nylon with carbon composite frame. Built-in heating and AC. Unlock latches, place on ground, push button to self-deploy. Protection from Exposure to Extreme Elements. Sleeping counts as Wilderness (or Street if in city). 2+ people = Crammed. Deploy/undeploy as Action.",
         "weight": 2,
         "value": 100
     },
     {
         "name": "Mr. Biscuit Multi-Food Processor",
         "category": "Survival",
-        "description": "Converts organic material to nutritious wafers in 10 min. Feeds 10 without Lifestyle in Outskirts.",
+        "description": "Feeds hay, grass, leaves, squirrels, woodchips, etc. Nano-technology breaks down organic material and extracts nutrients. After 10 min prints (usually) green wafers. Tastes worse than Kibble but filling and nutritious. Up to 10 people can survive without Lifestyle in Outskirts. Not enough organic material in cities for regular use.",
         "weight": 2,
         "value": 500
     },
     {
         "name": "WorldSat Aerial Sphere",
         "category": "Electronics",
-        "description": "Helium balloon relay. 1hr setup. CitiNet access within 50 miles. 100m range to control unit.",
+        "description": "Compact box: helium cartridge, control unit, stakes, high tensile wire, inflatable balloon with solar panel and transmission webbing. Inflate, attach wire, let rise, activate control. 1hr setup; 1hr to deconstruct. CitiNet connection within 50 miles (80 km) or another Sphere. Must be within 100 m/yds of control unit. Wire tether 10 HP; if cut, service terminates and Sphere destroyed.",
         "weight": 1,
         "value": 1000
     },
     {
         "name": "KillStrom Banshee Microphone",
         "category": "Music",
-        "description": "Wireless headset. +2 Play Instrument (Singing). 48hr runtime per 1hr charge.",
+        "description": "Clearest wireless microphone headset. Crisply captures vocals, filters background noise, links to Agent. 1hr charge = 48hr runtime. +2 Play Instrument (Singing). Bonus applies once, won't combine with other instruments. Solution for impromptu rebel yells and musical inspiration.",
         "weight": 0.5,
         "value": 1000
     },
     {
         "name": "KillStrom Sonic Boom Amp",
         "category": "Music",
-        "description": "Action: DV15 Resist Torture/Drugs for everyone within 10m or Damaged Ear 1min. Requires outlet.",
+        "description": "Pumps power, makes instruments into weapons. Blows speakers, shatters eardrums. Must-have for hardcore metal. Requires solid power source (outlet); blows fuse otherwise. Action: everyone within 10 m/yds of connected speaker makes DV15 Resist Torture/Drugs or suffers Damaged Ear Critical Injury for 1 min (no Bonus Damage). Must be plugged in.",
         "weight": 2,
         "value": 1000
     },
     {
+        "name": "KillStrom Typhoid Speaker",
+        "category": "Music",
+        "description": "Speaker designed to pair with Sonic Boom Amp. Cracks concrete, rattles garbage cans at football field distance. Hardline only, no wireless. Requires outlet. Dampeners ensure clear sound. When connected: Sonic Boom Amp DV +1, range +90 m/yds for Resist Torture/Drugs Check.",
+        "weight": 2,
+        "value": 500
+    },
+    {
         "name": "Laser Light Electric Guitar",
         "category": "Music",
-        "description": "Laser fret display. +1 Play Instrument (Guitar). Counts as 1 Light Tattoo for Style.",
+        "description": "Lasers in frets light up strings; head studded with six lasers mirroring strings. Agent-linked for customizable light show. Wireless, accepts hard connection. +1 Play Instrument (Guitar). Bonus applies once. Counts as 1 Light Tattoo Fashionware when worn openly (helps reach +2 Wardrobe and Style for 3 installations).",
         "weight": 2,
         "value": 1000
+    },
+    {
+        "name": "Doberman 500 Marking Scent",
+        "category": "Electronics",
+        "description": "KTech scent marker for Doberman 500 drones. Undetectable to baseline human nose. Ammunition for Air Pistol (CP:R p347): no damage, marks target with scent that lasts 24hrs (alcohol to wash off). Doberman 500: +4 Tracking. Olfactory Boost/bloodhounds: +2 Tracking. Pack of 12.",
+        "weight": 0.2,
+        "value": 50
+    },
+    {
+        "name": "KTech Doberman 500",
+        "category": "Electronics",
+        "description": "Four-legged combat drone. 8 MOVE, 11 SP, 25 HP. Combat Number 10. Exotic Very Heavy Melee, Motion Detector, Olfactory Suite. Roaming 50 m/yds. Links to Agent (5 min to relink). Cannot be Countered. Modes: Standby (off), Sentry (follows 8m, scans 50m, attacks threats), Tracking (olfactory track, no attacks). 48hr energy, 1hr charge. SovOil security origin.",
+        "weight": 5,
+        "value": 5000
+    },
+    {
+        "name": "Petrochem Nitro Ultra9",
+        "category": "Tools",
+        "description": "Volatile ethanol-based chemical blend. Pour into CHOOH2 tank as Action to instantly refill. 24hrs after use: vehicle rams or is rammed (6d6 damage) takes 12d6 instead; MOVE +5 (Combat Speed only). Engine runs super-hot; sudden impact can cause explosion. Gang favorite for jacked rides.",
+        "weight": 1,
+        "value": 100
     },
     {
         "name": "Digital Gladiator App",
@@ -2119,35 +3037,35 @@ gears = [
     {
         "name": "Cold-Weather Jacket Lining",
         "category": "Clothing",
-        "description": "Insulated lining for existing jacket. Protects against Exposure (extreme cold).",
+        "description": "Insulated material lining you can apply to an existing jacket. Protects against extremely low temperatures. Counts as appropriate gear when dealing with Exposure to extreme cold.",
         "weight": 0.5,
         "value": 500
     },
     {
         "name": "Hot-Weather Jacket Lining",
         "category": "Clothing",
-        "description": "Wicking, vented lining for jacket. Protects against Exposure (extreme heat). Lowers Heat Wave armor penalty by 1.",
+        "description": "Lining you can apply to an existing jacket. Wicks sweat and vents heat using a low-power ducted fan system. Protects against extremely high temperatures. Counts as appropriate gear for Exposure. Lowers the additional Armor Penalty due to hot temperatures or a Heat Wave by 1.",
         "weight": 0.5,
         "value": 500
     },
     {
         "name": "Militech Tactical Umbrella",
         "category": "Tools",
-        "description": "Protects vs Acid/Blood Rain. Excellent Quality Exotic Heavy Melee + Poor Quality Exotic Heavy Pistol (2 rounds). Armed Executive line.",
+        "description": "Part of Militech's Armed Executive line. Protects against Acid and Blood Rain like a regular umbrella. Two weapons in one: Excellent Quality Exotic Heavy Melee Weapon and Poor Quality Exotic Heavy Pistol (loads Basic and Non-Basic ammo). Clip holds 2 bullets, reload like typical Heavy Pistol. Top-shelf look without sacrificing protection.",
         "weight": 1,
         "value": 1000
     },
     {
         "name": "Umbrella",
         "category": "Tools",
-        "description": "Negates Acid Rain armor ablation. +2 Resist Torture/Drugs vs Blood Rain. Hand holding umbrella cannot hold anything else.",
+        "description": "Any umbrella sold in Night City minimizes effects of intense weather. Negates armor ablating effects of Acid Rain. +2 to Resist Torture/Drugs vs Blood Rain. Keeps you mostly dry. Variety of colors and styles. Hand holding umbrella cannot hold anything else.",
         "weight": 0.5,
         "value": 10
     },
     {
         "name": "Waterproof Jacket Lining",
         "category": "Clothing",
-        "description": "Treated lining for jacket. Negates Acid Rain ablation, +2 Resist Torture/Drugs vs Blood Rain. Not for submersion.",
+        "description": "Lining treated with special chemicals you can apply to an existing jacket. Negates armor ablating effects of Acid Rain. +2 to Resist Torture/Drugs vs Blood Rain. Despite the name, will not keep you dry if completely submerged in liquid.",
         "weight": 0.5,
         "value": 500
     },
@@ -2287,7 +3205,7 @@ cyberdecks = [
     },
     {
         "name": "Kiraama Advanced Deck",
-        "description": "",
+        "description": "Kirama's premier offering. To go further than this, a Netrunner must find a custom build, or try another brand. Cyberdeck with 5 slots to install either Programs or Hardware. Any unsafe Jack Out is considered instead to be a safe Jack Out.",
         "hardware_slots": 0,
         "program_slots": 0,
         "any_slots": 5,
@@ -2295,7 +3213,7 @@ cyberdecks = [
     },
     {
         "name": "Kirama Entry Deck",
-        "description": "",
+        "description": "Considered by many to be the safest bet on a low budget, and by others to be a trap which many novice Netrunners never grow out of. Cyberdeck with 5 slots that can only install Programs. Only one Attacker, Defender, Booster, and Black ICE Program each may be installed. Any unsafe Jack Out is considered instead to be a safe Jack Out.",
         "hardware_slots": 0,
         "program_slots": 5,
         "any_slots": 0,
@@ -2303,7 +3221,7 @@ cyberdecks = [
     },
     {
         "name": "Kirama Training Deck",
-        "description": "",
+        "description": "Every Netrunner's first Cyberdeck, but an unfortunate number's last Cyberdeck too. Cyberdeck with 5 slots that can only install Programs. While using this Cyberdeck, you must be within 2 m/yds of an access point to Jack In to a NET Architecture, and must remain within that distance to maintain connection. Additionally, whenever you would take damage directly to your brain when using this Cyberdeck, you take double that damage directly to your brain instead.",
         "hardware_slots": 0,
         "program_slots": 5,
         "any_slots": 0,
@@ -2311,7 +3229,7 @@ cyberdecks = [
     },
     {
         "name": "Microtech Assault",
-        "description": "",
+        "description": "If you can live within the stringent build restrictions of a Microtech Assault, then it's a paradise, not a prison. Cyberdeck with 4 slots that can only install Programs and 5 slots that can only install Hardware. Only Black ICE can be installed in the Cyberdeck's Program slots.",
         "hardware_slots": 5,
         "program_slots": 4,
         "any_slots": 0,
@@ -2319,7 +3237,7 @@ cyberdecks = [
     },
     {
         "name": "Microtech Scout",
-        "description": "",
+        "description": "Popular as a side-deck. Makes a great gift for the Netrunner who has everything. Everybody can find a use for another Microtech Scout. Cyberdeck with 5 slots to install either Programs or Hardware. Immediately after you Jack In, you can use the Pathfinder Interface Ability once without a NET Action.",
         "hardware_slots": 0,
         "program_slots": 0,
         "any_slots": 5,
@@ -2327,7 +3245,7 @@ cyberdecks = [
     },
     {
         "name": "Microtech Warrior",
-        "description": "",
+        "description": "A hyper aggressive Cyberdeck that's all about going straight for the kill and jacking out. Cyberdeck with 7 slots that can only install Programs. Immediately after you Jack In, you can activate an Armor Program installed on your Cyberdeck without a NET Action.",
         "hardware_slots": 0,
         "program_slots": 7,
         "any_slots": 0,
@@ -2335,7 +3253,7 @@ cyberdecks = [
     },
     {
         "name": "Raven Microcyb Hummingbird",
-        "description": "",
+        "description": "When you want to rely solely on your abilities, Raven Microcybernetics has you covered. Cyberdeck with 2 slots that can only install Hardware. While using this Cyberdeck, you have one additional NET Action every turn.",
         "hardware_slots": 2,
         "program_slots": 0,
         "any_slots": 0,
@@ -2343,7 +3261,7 @@ cyberdecks = [
     },
     {
         "name": "Raven Microcyb Kestrel 2",
-        "description": "",
+        "description": "The Kestrel 2 is one of Raven Microcybernetics's best selling products, probably because Netrunners love to go fast. Cyberdeck with 7 slots that can only install Programs. Immediately after you Jack In, you can activate up to 2 Speedy Gonzalves Programs installed on your Cyberdeck without a NET Action.",
         "hardware_slots": 0,
         "program_slots": 7,
         "any_slots": 0,
@@ -2351,7 +3269,7 @@ cyberdecks = [
     },
     {
         "name": "Raven Microcyb Phoenix",
-        "description": "",
+        "description": "Yes, you could buy a top of the line custom Cyberdeck for the same price, but just think of all the money you'll save not replacing those expensive Black ICE programs when they get Asp'd. Cyberdeck with 6 slots to install either Programs or Hardware. Whenever you safely Jack Out, any Programs that were destroyed in your cyberdeck during the netrun are restored to full working order.",
         "hardware_slots": 0,
         "program_slots": 0,
         "any_slots": 6,
@@ -2359,7 +3277,7 @@ cyberdecks = [
     },
     {
         "name": "SGI Technologies Kerberos",
-        "description": "",
+        "description": "Raw power in Cyberdeck form. Drag your enemies down to hell! Cyberdeck with 6 slots that can only install Programs, and 5 slots that can only install Hardware. Only Hellhound Black ICE can be installed in the Cyberdeck's Program slots.",
         "hardware_slots": 5,
         "program_slots": 6,
         "any_slots": 0,
@@ -2367,7 +3285,7 @@ cyberdecks = [
     },
     {
         "name": "SGI Technologies Verdant Knight",
-        "description": "",
+        "description": "Some like it for its simplicity, as a tool against Anti-Program Black ICE heavy NET Architectures. Cyberdeck with 9 slots that can only install Programs. Only Sword and Shield Programs can be installed in those Program slots.",
         "hardware_slots": 0,
         "program_slots": 9,
         "any_slots": 0,
@@ -2375,7 +3293,7 @@ cyberdecks = [
     },
     {
         "name": "SGI Technologies Warlock's Book",
-        "description": "",
+        "description": "If all you're doing is sliding through NET Architectures, you don't need anything else. Cyberdeck with 9 slots to install either Programs or Hardware. No Attacker or Black ICE Program may be installed.",
         "hardware_slots": 0,
         "program_slots": 0,
         "any_slots": 9,
@@ -2383,7 +3301,7 @@ cyberdecks = [
     },
     {
         "name": "Zetatech Kaliya",
-        "description": "",
+        "description": "A remarkably affordable Cyberdeck with a snake-like segmented cylindrical form factor. Cyberdeck with 3 slots that can only install Programs and 6 slots to install either Programs or Hardware. The 3 slots that can only install Programs can only install Flak. No Defender Program other than Flak can be installed in any slot. No Black ICE other than Asp may be installed in any slot.",
         "hardware_slots": 0,
         "program_slots": 3,
         "any_slots": 6,
@@ -2391,7 +3309,7 @@ cyberdecks = [
     },
     {
         "name": "Zetatech MicroMate",
-        "description": "",
+        "description": "A remarkable portable cyberdeck. Rumor has it that the form factor was only possible by removing important safety features from the Cyberdeck. Cyberdeck with 9 slots to install either Programs or Hardware. No Defender Program can be installed. Whenever you would take damage directly to your brain when using this Cyberdeck, double that damage.",
         "hardware_slots": 0,
         "program_slots": 0,
         "any_slots": 9,
@@ -2399,7 +3317,7 @@ cyberdecks = [
     },
     {
         "name": "Zetatech Parraline 6000",
-        "description": "",
+        "description": "Zetatech's flagship product, the Parraline 6000 is made exclusively for the Hardware obsessed. Cyberdeck with 3 slots that can only install Programs and 6 slots that can only install Hardware.",
         "hardware_slots": 6,
         "program_slots": 3,
         "any_slots": 0,
@@ -2413,7 +3331,8 @@ def initialize_weapons():
 
     allowed_keys = {
         'damage', 'rof', 'hands', 'concealable', 'weight', 'value',
-        'category', 'clip', 'description', 'attachment_slots', 'range_dvs'
+        'category', 'clip', 'description', 'attachment_slots', 'range_dvs',
+        'weapon_type', 'quality'
     }
     for weapon_data in weapons:
         if not all(weapon_data.get(k) is not None for k in ('name', 'damage', 'rof', 'hands')):
@@ -2612,19 +3531,28 @@ def initialize_ammunition():
     print(f"Initialized {len(ammunition)} ammunition types.")
 
 def populate_weapons():
-    existing_names = set(Weapon.objects.values_list("name", flat=True))
-    created = 0
     allowed_keys = {
         "damage", "rof", "hands", "concealable", "weight", "value",
         "category", "clip", "description", "attachment_slots", "range_dvs",
+        "weapon_type", "quality",
     }
+    created = 0
     for weapon_data in weapons:
-        if weapon_data.get("name") in existing_names:
+        name = weapon_data.get("name")
+        if not name:
             continue
         defaults = {k: v for k, v in weapon_data.items() if k in allowed_keys and k != "name"}
-        Weapon.objects.get_or_create(name=weapon_data["name"], defaults=defaults)
-        created += 1
-        existing_names.add(weapon_data["name"])
+        obj, was_created = Weapon.objects.get_or_create(name=name, defaults=defaults)
+        if was_created:
+            created += 1
+        else:
+            changed = False
+            for key in allowed_keys:
+                if key in weapon_data and getattr(obj, key, None) != weapon_data[key]:
+                    setattr(obj, key, weapon_data[key])
+                    changed = True
+            if changed:
+                obj.save()
     print(f"Populated {len(weapons)} weapons ({created} new).")
 
 
@@ -2671,12 +3599,9 @@ def populate_gear():
 
 
 def populate_cyberdecks():
-    existing_names = set(Cyberdeck.objects.values_list("name", flat=True))
     created = 0
     for cyberdeck_data in cyberdecks:
-        if cyberdeck_data.get("name") in existing_names:
-            continue
-        Cyberdeck.objects.get_or_create(
+        obj, was_created = Cyberdeck.objects.update_or_create(
             name=cyberdeck_data["name"],
             defaults={
                 "description": cyberdeck_data.get("description", ""),
@@ -2686,8 +3611,8 @@ def populate_cyberdecks():
                 "value": cyberdeck_data.get("value", 0),
             },
         )
-        created += 1
-        existing_names.add(cyberdeck_data["name"])
+        if was_created:
+            created += 1
     print(f"Populated {len(cyberdecks)} cyberdecks ({created} new).")
 
 

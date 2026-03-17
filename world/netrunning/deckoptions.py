@@ -269,6 +269,12 @@ hardware = [
     "description": "A Cyberdeck with a Range Upgrade can connect to an access point from up to 8m away.",
     "slots": 1,
     "cost": 100,
+    },
+    {
+    "name": "Crunch Whistle",
+    "description": "A Crunch Whistle connects a Netrunner's Cyberdeck to a Breacher, allowing them to add their Interface Rank to Electronics/Security Checks made to hack Agents.",
+    "slots": 1,
+    "cost": 100,
     }
 ]
 

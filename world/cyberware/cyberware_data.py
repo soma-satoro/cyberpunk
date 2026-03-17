@@ -249,7 +249,8 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 14,
         "cost": 500,
         "is_weapon": False,
-        "description": "Assists Neural Link. User can dodge bullets regardless of REF.",
+        "description": "Neuralware Option. Assists Neural Link in processing, freeing it to focus on enhancing reflexes. User with Reflex Co-Processor can dodge bullets regardless of REF. Requires Neural Link.",
+        "requirements": "Neural Link",
     },
     # Add more Neuralware items -- Leaving open in case of new book releases.
 
@@ -270,7 +271,17 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 2,
         "cost": 100,
         "is_weapon": False,
-        "description": " Projects a tiny subscreen into user's normal field of vision for messages, video, etc. from a user's other cyberware or electronics. Picture in a picture for real life. Requires a Cybereye.",
+        "description": "Projects a tiny subscreen into user's normal field of vision for messages, video, etc. from a user's other cyberware or electronics. Picture in a picture for real life. Requires a Cybereye.",
+        "requirements": "Cybereye",
+    },
+    {
+        "name": "Anti-Dazzle",
+        "type": "Cyberoptics",
+        "slots": 1,
+        "humanity_loss": 2,
+        "cost": 100,
+        "is_weapon": False,
+        "description": "Reduces penalties from bright lights and flash effects. Immune to flashbang blindness. Requires Cybereye.",
         "requirements": "Cybereye",
     },
     {
@@ -311,6 +322,16 @@ CYBERWARE_DATA_LIST = [
         "cost": 500,
         "is_weapon": False,
         "description": "Reduces penalties imposed by darkness and other intangible obscurement, like smoke, fog, etc. to 0. User can distinguish hot meat from cold metal but cannot see through anything that could provide cover. Requires two Cybereyes, must be paired, and takes 2 Option Slots per Cybereye.",
+        "requirements": "Cybereye",
+    },
+    {
+        "name": "MicroOptics",
+        "type": "Cyberoptics",
+        "slots": 1,
+        "humanity_loss": 2,
+        "cost": 500,
+        "is_weapon": False,
+        "description": "Cybereye option providing optical magnification for detailed viewing. Requires Cybereye.",
         "requirements": "Cybereye",
     },
     {
@@ -674,6 +695,24 @@ CYBERWARE_DATA_LIST = [
         "is_weapon": False,
         "description": "All Internal Body cyberware immune to electric shock, microwaver, EMP, Non-Black ICE program effects.",
     },
+    {
+        "name": "Quick Change Faceplate Mount",
+        "type": "Internal Body",
+        "slots": 0,
+        "humanity_loss": 14,
+        "cost": 1000,
+        "is_weapon": False,
+        "description": "Replaces meat face with mounting for Faceplates. Faceplate install/uninstall: Action. Purchase includes 1 personalized Faceplate. Additional Faceplates (Realskinn/SuperChrome) 100eb. Install: Hospital.",
+    },
+    {
+        "name": "Sycust Cyberspine",
+        "type": "Internal Body",
+        "slots": 3,
+        "humanity_loss": 7,
+        "cost": 1000,
+        "is_weapon": False,
+        "description": "Immune to Spinal Injury Critical Injury and bonus damage. Hardened: immune to EMP, Microwaver, Non-Black ICE Program effects. +1 to Contortionist Checks. Counts as orifice for Cybersnake mount. Install: Hospital.",
+    },
     # Add more Internal Cyberware items -- Leaving open in case of new book releases.
 
 
@@ -875,6 +914,15 @@ CYBERWARE_DATA_LIST = [
         "description": "Monofilament whip implanted in the user's thumb. A Medium Melee Weapon (2d6 damage, 2 ROF) that can be successfully concealed without a Check. When wielded as a weapon, user can't hold anything in this arm's hand. Can be installed as the only piece of Cyberware in a meat arm."
     },
     {
+        "name": "Rocklin Augmentics Quick Digits",
+        "type": "Cyberarm",
+        "slots": 0,
+        "humanity_loss": 3,
+        "cost": 250,
+        "is_weapon": False,
+        "description": "Cyberhand. Can be installed as the only piece of cyberware in a meat arm. With 2+ Quick Digits: +1 Complementary Skill Check to Conceal/Reveal Object, Contortionist (hand-based), First Aid, Forgery, Language (Sign), Paramedic, Pick Lock, Pick Pocket. Install: Clinic.",
+    },
+    {
         "name": "Subdermal Grip",
         "type": "Cyberarm",
         "slots": 1,
@@ -974,6 +1022,16 @@ CYBERWARE_DATA_LIST = [
         "is_weapon": False,
         "description": "Thin webbing between toes. Negates movement penalty when swimming. Requires Two Cyberlegs and must be paired",
         "requirements": "Cyberleg"
+    },
+    {
+        "name": "Rocklin Augmentics Skydrivers",
+        "type": "Cyberleg",
+        "slots": 0,
+        "humanity_loss": 14,
+        "cost": 1000,
+        "is_weapon": False,
+        "description": "Paired Cyberlegs. Must be installed together. Each has 2 Option Slots. Pre-installed Jump Boosters (no HL, no slot). Jump Boosters cannot be removed without destroying legs. After moving 4+ m/yds this Turn, Brawling/Martial Arts Attack vs cover only using legs: +3d6 damage. Install: Hospital.",
+        "requirements": "Cyberleg",
     },
     {
         "name": "Hardened Shielding",
@@ -1103,7 +1161,7 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 3,
         "cost": 500,
         "is_weapon": False,
-        "description": "Cyberlimb Option. +2 Contortionist per limb. Max 4 limbs for +8 total. One per limb. Requires Cyberarm or Cyberleg.",
+        "description": "Cyberlimb Option. +2 to Contortionist Skill Checks. One per cyberlimb. Max 4 cyberlimbs for +8 total. Requires Cyberarm or Cyberleg.",
         "requirements": "Cyberlimb",
     },
     # Black Chrome Cyberfingers (require Modular Finger Cyberhand)
@@ -1209,6 +1267,15 @@ CYBERWARE_DATA_LIST = [
         "is_weapon": False,
         "description": "Twin flattened antennae protruding from the user's head improving their Cyberaudio Suite, sometimes referred to as 'Rabbit Ears.' User can install up to 5 additional Cyberaudio Options into their Cyberaudio Suite. User can only have one Sensor Array installed. Requires Cyberaudio Suite but doesn't take up a Cyberaudio Option Slot.",
         "requirements": "Cyberaudio Suite"
+    },
+    {
+        "name": "Zetatech CyberConductor, Integrated",
+        "type": "Borgware",
+        "slots": 3,
+        "humanity_loss": 14,
+        "cost": 1000,
+        "is_weapon": False,
+        "description": "Internal Body Cyberware. May only be installed in Full Body Conversion. Installed in FBC body. Connects all FBC cyberdecks to CyberConductor; switch between any of them. No damage when switching. Cyberdecks count as Integrated for FBC Bodyweight Coating etc. Only one CyberConductor. Install: Hospital.",
     },
     # Black Chrome Borgware
     {
@@ -1334,7 +1401,7 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 7,
         "cost": 500,
         "is_weapon": False,
-        "description": "Ignore hunger via Biomonitor. Ignore Humanity Loss from Long-term Environmental Stress (starvation). After 7 days without food: Death Save at day start, +1 cumulative. Requires Biomonitor.",
+        "description": "Manage and ignore hunger at touch of button via Biomonitor. Ignore Humanity Loss from Long-term Environmental Stress (starvation). Starvation still an issue: after 7 days without food, Death Save at day start with cumulative +1 per additional day. Requires Biomonitor.",
         "requirements": "Biomonitor",
     },
     {
@@ -1401,7 +1468,7 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 7,
         "cost": 100,
         "is_weapon": False,
-        "description": "Cybernetic tongue. Virtual seasoning via Agent. Deactivate to eliminate taste.",
+        "description": "Cybernetic tongue alters sense of taste. Virtual seasoning via linked Agent. Can be deactivated anytime without Action to eliminate sense of taste.",
     },
     {
         "name": "PerfectFit Cyberfoot",
@@ -1555,6 +1622,26 @@ CYBERWARE_DATA_LIST = [
         "is_weapon": False,
         "description": "Skinweave SP7 body and head. 10 min without strenuous activity: repairs to full SP.",
     },
+    # Interface RED Vol 2
+    {
+        "name": "Combat Tail",
+        "type": "External Body Cyberware",
+        "slots": 2,
+        "humanity_loss": 14,
+        "cost": 1000,
+        "is_weapon": True,
+        "description": "Spine extended to connect nerves to weaponized tail module. Functions as Heavy Melee Weapon. At GM discretion, may be used for other tasks at -4 penalty (cannot be used as weapon during). Requires Neural Link.",
+        "requirements": "Neural Link",
+    },
+    {
+        "name": "Firebreather",
+        "type": "Internal Body Cyberware",
+        "slots": 2,
+        "humanity_loss": 14,
+        "cost": 1000,
+        "is_weapon": True,
+        "description": "Exotic shotgun in throat, fired by opening mouth and hyperextending tongue. Incompatible with weapon attachments. Single incendiary shell only. Complete mouth/nose/throat rebuild. Can be concealed without Check.",
+    },
     # Danger Gal Dossier
     {
         "name": "Combat Jaw",
@@ -1563,7 +1650,7 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 14,
         "cost": 500,
         "is_weapon": True,
-        "description": "Hydraulic jaw with reinforced teeth. Very Heavy Melee Weapon.",
+        "description": "Jaw replaced with hydraulic jaw capable of devastating bite force. Two rows of reinforced teeth. Functions as Very Heavy Melee Weapon.",
     },
     {
         "name": "Wyzard Technologies Romanova Cyberlegs",
@@ -1586,5 +1673,124 @@ CYBERWARE_DATA_LIST = [
         "description": "Pre-loaded dose of one combat drug. Action to inject. Refill at Clinic. No need to stop to administer drug in combat.",
     },
 ]
+
+# Bodysculpt packages: when purchased, all listed cyberware is added to the character.
+# Package cost and humanity_loss are the total for the package.
+BODYCULPT_PACKAGES = {
+    "Demonique": {
+        "cost": 2100,
+        "humanity_loss": 14,
+        "description": "Dark and Mysterious. Biotechnica's most sensual Exotic. Never worry about shoes again when you can wear hooves. Be the devil on your own shoulder. Includes 31 day stay at The Zoo.",
+        "package_contains": ["Combat Tail", "Cyberaudio Suite", "Voice Stress Analyzer", "Cyberleg", "Neural Link", "Subdermal Armor"],
+    },
+    "Embrace Rodentia": {
+        "cost": 2100,
+        "humanity_loss": 16,
+        "description": "You've always been a street rat. Better make it official. Latest generation rodent Bioexotic, most customizable edition. Custom Sensor Array ears in rodent shapes: Chipmunk, Mink, Ferret, Field Mouse, and more. Includes 31 day stay at The Zoo.",
+        "package_contains": ["Cyberaudio Suite", "Amplified Hearing", "Cybereye", "Low Light-IR-UV", "Sensor Array"],
+    },
+    "Katnip": {
+        "cost": 2200,
+        "humanity_loss": 18,
+        "description": "Feeling feline? Land like a cat. No kitty complete without claws. Best-selling Exotic Bodysculpt for 25 years. Includes 31 day stay at The Zoo.",
+        "package_contains": ["Cybereye", "Cybereye", "Low Light-IR-UV", "Low Light-IR-UV", "Cyberleg", "Cyberleg", "Grafted Muscle and Bone Lace", "Scratchers", "Scratchers"],
+    },
+    "Lagoform": {
+        "cost": 2100,
+        "humanity_loss": 16,
+        "description": "Be your own good luck charm! Premium Rocklin Augmentics Jump Boosters. Fluffy tail optional. Includes 31 day stay at The Zoo.",
+        "package_contains": ["Cyberaudio Suite", "Amplified Hearing", "Cyberleg", "Cyberleg", "Jump Booster", "Jump Booster", "Sensor Array"],
+    },
+    "Lupaform": {
+        "cost": 2200,
+        "humanity_loss": 20,
+        "description": "Not everyone is a cat person. Biotechnica's most cosmetically customizable Bioexotic. If it has four legs and could catch a ball, there's a LupaForm for that. Includes 31 day stay at The Zoo.",
+        "package_contains": ["Chipware Socket", "Olfactory Boost", "Combat Jaw", "Cyberaudio Suite", "Amplified Hearing", "Cybereye", "Low Light-IR-UV", "Neural Link"],
+    },
+    "Serpentize Yourself": {
+        "cost": 2100,
+        "humanity_loss": 16,
+        "description": "Do you find mammals unappealing? Do your veins run cold? 25th anniversary edition, Biotechnica's most seductive snake form. Get your tongue forked today. Includes 31 day stay at The Zoo.",
+        "package_contains": ["Chipware Socket", "Olfactory Boost", "Cybereye", "Low Light-IR-UV", "Neural Link", "Vampyres"],
+    },
+    "Aquaform": {
+        "cost": 4500,
+        "humanity_loss": 22,
+        "description": "Luxurious AquaForm. Delight of ocean lovers and lawyers for 25 years. Re-textured aquadynamic shark skin. Also available in Seal, Dolphin, Orca. Includes 31 day stay at The Zoo.",
+        "package_contains": ["Combat Jaw", "Cybereye", "Cybereye", "Low Light-IR-UV", "Low Light-IR-UV", "Cyberleg", "Cyberleg", "Web Foot", "Web Foot", "Gills", "Radar Sonar Implant"],
+    },
+    "Bigkatt": {
+        "cost": 7000,
+        "humanity_loss": 36,
+        "description": "When KatNip isn't enough, go big. Concrete jungle's latest predator. Lion, tiger, liger, tigon, puma, cheetah, and more. Includes 31 day stay at The Zoo.",
+        "package_contains": ["Neural Link", "Cybereye", "Cybereye", "Low Light-IR-UV", "Cyberleg", "Cyberleg", "Grip Foot", "Grip Foot", "Jump Booster", "Jump Booster", "Grafted Muscle and Bone Lace", "Grafted Muscle and Bone Lace", "Reflex Co-Processor", "Sandevistan", "Combat Jaw", "Wolvers", "Wolvers"],
+    },
+    "Bughouse": {
+        "cost": 6600,
+        "humanity_loss": 48,
+        "description": "Step sideways on the evolutionary scale. 25th anniversary. Truly rare and exotic form. Biotechnica's number one most satisfied Bioexotics responders. When it's time to bug out, trust Biotechnica. Includes 31 day stay at The Zoo.",
+        "package_contains": ["Cyberarm", "Cyberarm", "Extra-Jointed Cyberlimb Upgrade", "Extra-Jointed Cyberlimb Upgrade", "Cybereye", "Cybereye", "Cybereye", "Cybereye", "Cybereye", "Cybereye", "Image Enhance", "Image Enhance", "Low Light-IR-UV", "Low Light-IR-UV", "MicroOptics", "Cyberleg", "Cyberleg", "Extra-Jointed Cyberlimb Upgrade", "Extra-Jointed Cyberlimb Upgrade", "Jump Booster", "Jump Booster", "MultiOptic Mount", "Combat Jaw"],
+    },
+    "NeuHuman": {
+        "cost": 4000,
+        "humanity_loss": 32,
+        "description": "Embrace the Neu. Your form perfected, defended, confident. Custom NeuHuman Bodysculpt. Turn heads, take action on street and boardroom. Includes Health Monitor and 31 day stay at The Zoo.",
+        "package_contains": ["Appetite Controller", "Biomonitor", "Chipware Socket", "Pain Editor", "Cybereye", "Cybereye", "Anti-Dazzle", "Anti-Dazzle", "Chyron", "Cyberaudio Suite", "Level Damper", "Internal Agent", "Enhanced Antibodies", "Heuristic Health Monitor", "Nasal Filters", "Neural Link", "Reflex Co-Processor", "NeuTongue", "Toxin Binders"],
+    },
+    "Ursaform": {
+        "cost": 8200,
+        "humanity_loss": 52,
+        "description": "Biotechnica's most enhanced Bioexotic. Pride of research division. Change your life in a beary good way. Psychological evaluation provided. Unseen side effects can result in brief cyberpsychosis. Requires BODY 4+ for Linear Frame Sigma. Includes 31 day stay at The Zoo.",
+        "package_contains": ["Chipware Socket", "Pain Editor", "Chipware Socket", "Olfactory Boost", "Combat Jaw", "Cyberarm", "Cyberarm", "Wolvers", "Wolvers", "Cyberaudio Suite", "Amplified Hearing", "Cybereye", "Cybereye", "Low Light-IR-UV", "Low Light-IR-UV", "Cyberleg", "Cyberleg", "Grip Foot", "Grip Foot", "Grafted Muscle and Bone Lace", "Implanted Linear Frame Sigma", "Neural Link"],
+    },
+    "Draconic Fantaform": {
+        "cost": 11000,
+        "humanity_loss": 34,
+        "description": "Original and ultimate FantaForm. 25 years development. Fire-breathing mouth. Train at Bioexotics camp, fight Dwarven FantaForm adventurers in mountain lair LARP finale. Requires BODY 4+ for Linear Frame Beta. Includes 31 day stay at The Zoo.",
+        "package_contains": ["Combat Jaw", "Combat Tail", "Cyberarm", "Cyberarm", "Cybereye", "Cybereye", "Cyberleg", "Cyberleg", "Firebreather", "Grafted Muscle and Bone Lace", "Grafted Muscle and Bone Lace", "Implanted Linear Frame Beta", "Neural Link", "Subdermal Armor", "Wolvers", "Wolvers"],
+    },
+    "Dwarvish Fantaform": {
+        "cost": 2100,
+        "humanity_loss": 12,
+        "description": "Heartiest and bravest Dwarves made at Bioexotics camp. Exclusive LARP trek through Blue Mountains. Dungeons deep, caverns old, long forgotten gold. Includes 31 day stay at The Zoo.",
+        "package_contains": ["Cybereye", "Cybereye", "Low Light-IR-UV", "Low Light-IR-UV", "Grafted Muscle and Bone Lace", "Toxin Binders"],
+    },
+    "Elvish Fantaform": {
+        "cost": 2100,
+        "humanity_loss": 16,
+        "description": "Take your Elf Life Offline. Live full time as your Elflines Online character. Forest LARP of a Lifetime. Come home a real Elf. Includes 31 day stay at The Zoo.",
+        "package_contains": ["Cyberaudio Suite", "Amplified Hearing", "Cybereye", "Cybereye", "Image Enhance", "Image Enhance", "Low Light-IR-UV", "Low Light-IR-UV"],
+    },
+    "Merish Fantaform": {
+        "cost": 3600,
+        "humanity_loss": 24,
+        "description": "At home under waves and on land. Month underwater off Oregon in LARPlantis. Get used to new body with campmates, solve murder mystery. One participant chosen as murderer. Includes 31 day stay at The Zoo.",
+        "package_contains": ["Chipware Socket", "Tactile Boost", "Cybereye", "Cybereye", "Low Light-IR-UV", "Low Light-IR-UV", "Cyberleg", "Cyberleg", "Web Foot", "Web Foot", "Gills", "Neural Link"],
+    },
+    "Ogrish Fantaform": {
+        "cost": 4000,
+        "humanity_loss": 12,
+        "description": "Feel invincible. Same military grade Pain Editor Militech trusts. Trained to lead Orcish Fantaform soldiers in LARP by real Militech Operative. Biotechnica not responsible for injuries. Includes 31 day stay at The Zoo.",
+        "package_contains": ["Chipware Socket", "Pain Editor", "Enhanced Antibodies", "Grafted Muscle and Bone Lace", "Neural Link", "Subdermal Armor"],
+    },
+    "Orcish Fantaform": {
+        "cost": 2500,
+        "humanity_loss": 12,
+        "description": "Crave blood and battle? Forged in heat of war and death at Bioexotics camp. Martial campaign LARP against bodysculpted actors. Earn your place as real Orc. Shameful to become Orc any other way. Biotechnica not responsible for injuries. Includes 31 day stay at The Zoo.",
+        "package_contains": ["Cybereye", "Cybereye", "Low Light-IR-UV", "Low Light-IR-UV", "Grafted Muscle and Bone Lace", "Skin Weave"],
+    },
+}
+
+# Add bodysculpt packages as Cyberware entries so they appear in catalogs
+for pkg_name, pkg_data in BODYCULPT_PACKAGES.items():
+    CYBERWARE_DATA_LIST.append({
+        "name": pkg_name,
+        "type": "Bodysculpt Package",
+        "slots": 0,
+        "humanity_loss": pkg_data["humanity_loss"],
+        "cost": pkg_data["cost"],
+        "is_weapon": False,
+        "description": pkg_data["description"] + " Package contains: " + ", ".join(pkg_data["package_contains"]),
+    })
 
 CYBERWARE_DATA = {item['name']: item for item in CYBERWARE_DATA_LIST}

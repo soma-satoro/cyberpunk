@@ -9,6 +9,7 @@ from world.inventory.models import Weapon, Armor, Gear, Vehicle as VehicleModel,
 from world.equipment_data import weapons, armors, gears, cyberdecks as cyberdecks_data, vehicles as vehicles_data
 from world.cyberware.models import Cyberware
 from world.cyberware.merchants import check_cyberware_requirements
+from world.cyberware.cyberware_data import BODYCULPT_PACKAGES
 from evennia.utils.evmenu import get_input, EvMenu
 from world.cyberpunk_sheets.merchants import Merchant
 from world.utils.character_utils import get_character_sheet
@@ -580,9 +581,74 @@ class CmdBuy(MuxCommand):
         else:
             self.caller.msg(f"You have purchased {item['name']} for {price} eb.")
 
+    def _buy_bodysculpt_package(self, package_cyberware, chargen_purchase=False):
+        """Purchase a bodysculpt package; add all contained cyberware to character."""
+        pkg_data = BODYCULPT_PACKAGES.get(package_cyberware.name)
+        if not pkg_data:
+            self.caller.msg(f"Unknown bodysculpt package: {package_cyberware.name}.")
+            return
+        try:
+            character_sheet = self.caller.character_sheet
+        except AttributeError:
+            self.caller.msg("No character sheet found for your character.")
+            return
+        inventory, _ = Inventory.get_or_create_for_character(self.caller)
+        base_cost = pkg_data["cost"]
+        discount = get_purchase_discount_percent(self.caller, "cyberware", None)
+        final_cost = calculate_final_price(base_cost, discount)
+        if not CharacterMoneyService.spend_money(self.caller, final_cost):
+            self.caller.msg(
+                f"Not enough money for {package_cyberware.name}. It costs {final_cost} eb."
+            )
+            return
+        added = []
+        missing = []
+        for cw_name in pkg_data["package_contains"]:
+            try:
+                cw = Cyberware.objects.get(name__iexact=cw_name)
+            except Cyberware.DoesNotExist:
+                missing.append(cw_name)
+                continue
+            instance = CyberwareInstance.objects.create(
+                cyberware=cw,
+                character_sheet=character_sheet,
+                installed=True,
+            )
+            inventory.cyberware.add(instance)
+            added.append(cw_name)
+            if cw.name.lower() == "cyberarm":
+                character_sheet.has_cyberarm = True
+        if missing:
+            self.caller.msg(
+                f"Warning: some package items not found: {', '.join(missing)}. "
+                f"Added {len(added)} items."
+            )
+        character_sheet.refresh_from_db()
+        character_sheet.calculate_humanity_loss()
+        character_sheet.save()
+        if chargen_purchase:
+            purchased = inventory.chargen_purchased or []
+            purchased.append({"type": "cyberware", "name": package_cyberware.name})
+            inventory.chargen_purchased = purchased
+            inventory.save()
+        if discount > 0:
+            self.caller.msg(
+                f"You have purchased {package_cyberware.name} for {final_cost} eb "
+                f"(base {base_cost} eb, {discount}% discount). Package installed: {len(added)} cyberware items."
+            )
+        else:
+            self.caller.msg(
+                f"You have purchased {package_cyberware.name} for {final_cost} eb. "
+                f"Package installed: {len(added)} cyberware items."
+            )
+
     def _buy_cyberware_from_chargen(self, item, stash=False, chargen_purchase=False):
         """Handle chargen purchase of body cyberware (from Cyberware model). stash=True = buy without installing."""
         cyberware = item["_cyberware"]
+        # Bodysculpt packages: add all package cyberware to character
+        if getattr(cyberware, "type", "") == "Bodysculpt Package":
+            self._buy_bodysculpt_package(cyberware, chargen_purchase)
+            return
         # Popup Melee/Ranged require weapon selection at install - must stash
         cw_lower = cyberware.name.lower()
         if not stash and cw_lower in ("popup melee weapon", "popup ranged weapon"):

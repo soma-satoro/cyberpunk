@@ -384,6 +384,9 @@ def _get_equipdb_subcategories():
     for cat in Weapon.objects.values_list("category", flat=True).distinct():
         if cat:
             result["weapons"].append(cat)
+    for wt in Weapon.objects.exclude(weapon_type="").values_list("weapon_type", flat=True).distinct():
+        if wt and wt not in result["weapons"]:
+            result["weapons"].append(wt)
     for loc_str in Armor.objects.values_list("locations", flat=True):
         for loc in (loc_str or "").split(","):
             loc = loc.strip()
@@ -423,6 +426,7 @@ class CmdViewEquipment(MuxCommand):
       equipdb gear [Electronics|Tools|Medical|Drugs|Clothing|...]
       equipdb vehicles [land|sea|air]
       equipdb medical            - Gear in Medical category (subcategory shorthand)
+      equipdb list [type [category]]  - Same as above (list/list gear/list gear medical)
       equipdb/search <string>    - Search all equipment by name, category, or description
       equipdb/info <item>       - Detailed info on a specific item (like +lookup/info)
 
@@ -457,6 +461,7 @@ class CmdViewEquipment(MuxCommand):
         # Parse args: support "equipdb", "equipdb weapons", "equipdb weapons handgun",
         # "equipdb gear medical", "equipdb medical" (subcategory shorthand)
         # Also support "equipdb/weapons" or "equipdb/gear medical" via MuxCommand switches
+        # "equipdb list" or "equipdb/list" -> show menu; "equipdb list gear" -> show gear
         switches = self.switches or []
         switch_part = (switches[0] if switches else "").strip()
         args_part = (self.args or "").strip()
@@ -465,6 +470,15 @@ class CmdViewEquipment(MuxCommand):
         parts = raw.split(None, 1) if raw else []
         equip_type = parts[0] if parts else None
         subcategory = parts[1] if len(parts) > 1 else None
+
+        # equipdb list / equipdb/list: show menu; equipdb list gear [medical] -> treat as equipdb gear [medical]
+        if equip_type == "list":
+            if subcategory:
+                sub_parts = subcategory.split(None, 1)
+                equip_type = sub_parts[0]
+                subcategory = sub_parts[1] if len(sub_parts) > 1 else None
+            else:
+                equip_type = None
 
         # Resolve subcategory-only: "equipdb medical" -> gear medical
         if equip_type and equip_type not in valid_types and not subcategory:
@@ -548,15 +562,20 @@ class CmdViewEquipment(MuxCommand):
     def display_weapons(self, subcategory=None):
         qs = Weapon.objects.all().order_by('category', 'name')
         if subcategory:
-            qs = qs.filter(category__iexact=subcategory)
+            qs = qs.filter(
+                models.Q(category__iexact=subcategory) |
+                models.Q(weapon_type__iexact=subcategory)
+            )
         weapons = list(qs)
         if not weapons:
             return section_header("Weapons", width=78) + "\nNo weapons found.\n"
         out = [section_header("Weapons", width=78)]
         for w in weapons:
             nm = crop(w.name, width=28, suffix="...")
+            wt = getattr(w, 'weapon_type', '') or ''
+            qual = getattr(w, 'quality', 'standard') or 'standard'
             out.append(f"|c{nm:<28}|n |gDamage:|n {w.damage:<8} |gROF:|n {w.rof:<4} |gHands:|n {w.hands} |gValue:|n |y{w.value} eb|n")
-            out.append(f"  |gCategory:|n {w.category:<14} |gConceal:|n {'Yes' if w.concealable else 'No'} |gWeight:|n {w.weight}")
+            out.append(f"  |gType:|n {(wt or w.category):<16} |gQuality:|n {qual:<10} |gConceal:|n {'Yes' if w.concealable else 'No'} |gWeight:|n {w.weight}")
         out.append(divider("", width=78))
         return "\n".join(out) + "\n"
 
@@ -679,6 +698,7 @@ def format_search_equipment(search_str, chargen_only=False):
     # Weapons
     weapons_q = Weapon.objects.filter(
         models.Q(name__icontains=q) | models.Q(category__icontains=q) |
+        models.Q(weapon_type__icontains=q) | models.Q(quality__icontains=q) |
         models.Q(description__icontains=q)
     )
     if chargen_only:
@@ -688,7 +708,8 @@ def format_search_equipment(search_str, chargen_only=False):
         output.append(section_header("Weapons", width=78))
         for w in weapons:
             nm = crop(w.name, width=28, suffix="...")
-            output.append(f"|c{nm:<28}|n |gDamage:|n {w.damage:<8} |gROF:|n {w.rof:<4} |gValue:|n |y{w.value} eb|n")
+            qual = getattr(w, 'quality', 'standard') or 'standard'
+            output.append(f"|c{nm:<28}|n |gDamage:|n {w.damage:<8} |gROF:|n {w.rof:<4} |gQuality:|n {qual:<10} |gValue:|n |y{w.value} eb|n")
         output.append("")
 
     # Armor

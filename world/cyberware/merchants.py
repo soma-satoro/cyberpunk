@@ -8,6 +8,7 @@ from world.cyberpunk_sheets.models import CharacterSheet
 from world.cyberpunk_sheets.services import CharacterMoneyService
 from world.commerce.pricing import get_purchase_discount_percent, calculate_final_price
 from .models import Cyberware
+from .cyberware_data import BODYCULPT_PACKAGES
 from evennia import CmdSet
 
 # Main cyberware that provide option slots. Include both standard and discount variants.
@@ -204,6 +205,14 @@ class CmdImplantCyberware(Command):
             self.caller.msg(f"Cyberware '{cyberware_name}' not found.")
             return
 
+        # Bodysculpt packages: add all package cyberware (cannot stash)
+        if getattr(cyberware, "type", "") == "Bodysculpt Package":
+            if stash:
+                self.caller.msg("Bodysculpt packages cannot be stashed; they are always installed.")
+                return
+            self._install_bodysculpt_package(cyberware)
+            return
+
         try:
             character_sheet = self.caller.character_sheet
         except AttributeError:
@@ -294,28 +303,80 @@ class CmdImplantCyberware(Command):
         # Display updated installed cyberware list
         self.caller.msg("Installed Cyberware:")
         try:
-            installed_cyberware = CyberwareInstance.objects.filter(character_sheet=character_sheet, installed=True)
-            for cw in installed_cyberware:
+            for cw in CyberwareInstance.objects.filter(character_sheet=character_sheet, installed=True):
                 self.caller.msg(f"- {cw.cyberware.name} ({cw.cyberware.type})")
                 if cw.cyberware.is_weapon:
-                    self.caller.msg(f"  Weapon stats: {cw.cyberware.damage_dice}d{cw.cyberware.damage_die_type} damage, {cw.cyberware.rate_of_fire} ROF")
-        except Exception as e:
-            self.caller.msg(f"Error retrieving installed cyberware: {str(e)}")
-
-        # Display all cyberware in inventory (including not installed)
-        self.caller.msg("\nAll Cyberware in Inventory:")
-        try:
-            all_cyberware = CyberwareInstance.objects.filter(character_sheet=character_sheet)
-            for cw in all_cyberware:
-                status = "Installed" if cw.installed else "Not Installed"
-                self.caller.msg(f"- {cw.cyberware.name} ({cw.cyberware.type}) - {status}")
-                if cw.cyberware.is_weapon:
-                    self.caller.msg(f"  Weapon stats: {cw.cyberware.damage_dice}d{cw.cyberware.damage_die_type} damage, {cw.cyberware.rate_of_fire} ROF")
+                    self.caller.msg(f"  Weapon: {cw.cyberware.damage_dice}d{cw.cyberware.damage_die_type} damage, {cw.cyberware.rate_of_fire} ROF")
         except Exception as e:
             self.caller.msg(f"Error retrieving cyberware: {str(e)}")
 
-        character_sheet.recalculate_derived_stats()
+    def _install_bodysculpt_package(self, package_cyberware):
+        """Install a bodysculpt package; add all contained cyberware to character."""
+        pkg_data = BODYCULPT_PACKAGES.get(package_cyberware.name)
+        if not pkg_data:
+            self.caller.msg(f"Unknown bodysculpt package: {package_cyberware.name}.")
+            return
+        try:
+            character_sheet = self.caller.character_sheet
+        except AttributeError:
+            self.caller.msg("No character sheet found for your character.")
+            return
+        base_cost = pkg_data["cost"]
+        discount = get_purchase_discount_percent(self.caller, "cyberware", None)
+        final_cost = calculate_final_price(base_cost, discount)
+        if not CharacterMoneyService.spend_money(self.caller, final_cost):
+            self.caller.msg(
+                f"Not enough money for {package_cyberware.name}. It costs {final_cost} eb."
+            )
+            return
+        inventory = character_sheet.inventory
+        added = []
+        missing = []
+        for cw_name in pkg_data["package_contains"]:
+            try:
+                cw = Cyberware.objects.get(name__iexact=cw_name)
+            except Cyberware.DoesNotExist:
+                missing.append(cw_name)
+                continue
+            instance = CyberwareInstance.objects.create(
+                cyberware=cw,
+                character_sheet=character_sheet,
+                installed=True,
+            )
+            inventory.cyberware.add(instance)
+            added.append(cw_name)
+            if cw.name.lower() == "cyberarm":
+                character_sheet.has_cyberarm = True
+                character_sheet.save()
+        if missing:
+            self.caller.msg(
+                f"Warning: some package items not found: {', '.join(missing)}. "
+                f"Added {len(added)} items."
+            )
+        character_sheet.refresh_from_db()
+        character_sheet.calculate_humanity_loss()
         character_sheet.save()
+        if discount > 0:
+            self.caller.msg(
+                f"You have purchased and installed {package_cyberware.name} for {final_cost} eb "
+                f"(base {base_cost} eb, {discount}% discount). Package: {len(added)} cyberware items."
+            )
+        else:
+            self.caller.msg(
+                f"You have purchased and installed {package_cyberware.name} for {final_cost} eb. "
+                f"Package: {len(added)} cyberware items."
+            )
+        self.caller.msg(f"Your new humanity is {character_sheet.humanity}.")
+
+        # Display updated installed cyberware list
+        self.caller.msg("Installed Cyberware:")
+        try:
+            for cw in CyberwareInstance.objects.filter(character_sheet=character_sheet, installed=True):
+                self.caller.msg(f"- {cw.cyberware.name} ({cw.cyberware.type})")
+                if cw.cyberware.is_weapon:
+                    self.caller.msg(f"  Weapon: {cw.cyberware.damage_dice}d{cw.cyberware.damage_die_type} damage, {cw.cyberware.rate_of_fire} ROF")
+        except Exception as e:
+            self.caller.msg(f"Error retrieving cyberware: {str(e)}")
 
 
 class CyberwareMerchant(Command):

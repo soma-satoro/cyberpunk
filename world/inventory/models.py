@@ -28,6 +28,8 @@ class AmmoType(models.TextChoices):
     TEARGAS = 'Teargas', 'Teargas Ammunition'
     TRACER = 'Tracer', 'Tracer Ammunition'
     JUNK = 'Junk', 'Junk Ammunition'
+    ARROWHYPO = 'Arrowhypo', 'Arrowhypo Ammunition'
+    AIRBURST = 'Airburst', 'Airburst Ammunition'
 
 class Ammunition(SharedMemoryModel):
     name = models.CharField(max_length=100)
@@ -175,6 +177,8 @@ class Weapon(Item):
     hands = models.IntegerField(default=1)
     concealable = models.BooleanField(default=False)
     category = models.CharField(max_length=50, default='handgun')
+    weapon_type = models.CharField(max_length=80, blank=True, default='')
+    quality = models.CharField(max_length=20, default='standard')
     ammo_type = models.CharField(max_length=20, choices=AmmoType.choices, default=AmmoType.BASIC)
     current_ammo = models.PositiveIntegerField(default=0)
     max_ammo = models.PositiveIntegerField(default=0)
