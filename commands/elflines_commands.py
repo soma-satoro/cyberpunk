@@ -4,6 +4,7 @@ Elflines Online commands - +elo, +elfline, +elologin, +elologout.
 
 from evennia import Command
 from evennia.utils import evtable
+from evennia.commands.default.muxcommand import MuxCommand
 
 from world.elflines.models import ElflineSheet, Elfline, ElflineMembership
 from world.elflines.services import (
@@ -24,7 +25,7 @@ from world.elflines.elflines_data import (
 )
 
 
-class CmdElo(Command):
+class CmdElo(MuxCommand):
     """
     Elflines Online - the MMO within the Cyberpunk universe.
 
