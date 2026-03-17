@@ -94,6 +94,22 @@ class CyberwareInstance(SharedMemoryModel):
     active = models.BooleanField(default=False)
     # For Popup Melee/Ranged Weapon: stores weapon name from equipment_data when installed
     popup_weapon_name = models.CharField(max_length=100, blank=True)
+    # Parent: options (Image Enhance, Popup Shotgun, etc.) link to their base piece (Cybereye, Cyberarm, etc.)
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="children",
+    )
+    # Paired: second Cybereye/Cyberarm/Cyberleg points to the first (paired_with=first_instance)
+    paired_with = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="paired_instances",
+    )
     
     class Meta:
         # Ensure at least one character field is populated

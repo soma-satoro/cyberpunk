@@ -176,7 +176,7 @@ class Character(DefaultCharacter):
             "basic_tech": 0,
             "cybertech": 0,
             "demolitions": 0,
-            "electronics": 0,
+            "electronics_security_tech": 0,
             "first_aid": 0,
             "forgery": 0,
             "land_vehicle_tech": 0,
@@ -1263,7 +1263,7 @@ class Character(DefaultCharacter):
             self.db.skills = skills
         skills = {k: v for k, v in skills.items() if k in known_skills and k not in core_stats}
         double_cost_skills = ['autofire', 'martial_arts', 'pilot_air',
-                             'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
+                             'heavy_weapons', 'demolitions', 'electronics_security_tech', 'paramedic']
         # Base skills that have instances: don't count base (instance counts instead)
         skills_with_instances = set()
         if self.db.skill_instances:

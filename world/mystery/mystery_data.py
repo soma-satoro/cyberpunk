@@ -75,7 +75,7 @@ CLUE_TYPES = {
         "fumble_effect": None,
     },
     "digital_scavenging": {
-        "skills": ["electronics"],
+        "skills": ["electronics_security_tech"],
         "damage_dice": "4d6",
         "focus_damage_dice": "3d6",
         "fumble_effect": "Device destroyed.",

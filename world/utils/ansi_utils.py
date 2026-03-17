@@ -76,3 +76,55 @@ def wrap_ansi(text, width, left_padding=0, right_padding=0):
     ]
 
     return "\n".join(padded_lines)
+
+
+def wrap_labeled_comma_list(label, items, value_prefix="", value_suffix="", width=78, separator=", "):
+    """
+    Wrap a comma-separated list under a label. Breaks only when adding the next
+    item would exceed width. Continuation lines are indented to align with
+    content. No extra newlines between items.
+
+    Args:
+        label: Prefix for first line (e.g. "|yCyberware:|n ") - can include ANSI.
+        items: List of strings to join with separator.
+        value_prefix: ANSI prefix for value (e.g. "|w").
+        value_suffix: ANSI suffix for value (e.g. "|n").
+        width: Max visible line length.
+        separator: String between items (default ", ").
+
+    Returns:
+        str: Wrapped text ending with newline.
+    """
+    if not items:
+        return label + value_prefix + "None" + value_suffix + "\n"
+
+    indent_len = len(ANSIString(str(label)).clean())
+    value_prefix_len = len(ANSIString(str(value_prefix)).clean())
+    content_start = indent_len + value_prefix_len
+    content_width = width - content_start
+
+    lines = []
+    current_items = []
+    current_len = 0
+
+    for item in items:
+        item_len = len(item)
+        sep_len = len(separator) if current_items else 0
+        need = sep_len + item_len
+
+        if current_len + need > content_width and current_items:
+            lines.append(separator.join(current_items))
+            current_items = [item]
+            current_len = item_len
+        else:
+            current_items.append(item)
+            current_len += sep_len + item_len
+
+    if current_items:
+        lines.append(separator.join(current_items))
+
+    result = label + value_prefix + lines[0] + value_suffix + "\n"
+    for line in lines[1:]:
+        result += " " * indent_len + value_prefix + line + value_suffix + "\n"
+
+    return result

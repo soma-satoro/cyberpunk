@@ -144,7 +144,7 @@ SKILL_MAPPING = {
     'BT': 'basic_tech',
     'CT': 'cybertech',
     'DEM': 'demolitions',
-    'ES': 'electronics',
+    'ES': 'electronics_security_tech',
     'FA': 'first_aid',
     'FORG': 'forgery',
     'LVT': 'land_vehicle_tech',

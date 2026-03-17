@@ -1084,7 +1084,7 @@ class CmdSelfStat(MuxCommand):
                 points_needed = value - current_value
                 
                 # Check for double-cost skills
-                is_double_cost = full_attr_name in ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
+                is_double_cost = full_attr_name in ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics_security_tech', 'paramedic']
                 actual_points_needed = points_needed * 2 if is_double_cost else points_needed
 
                 # Calculate remaining skill points (Edgerunner and Complete Package: 86)
@@ -1114,7 +1114,7 @@ class CmdSelfStat(MuxCommand):
                 current_value = char.get_skill(full_attr_name)
                 points_needed = value - current_value
 
-                is_double_cost = full_attr_name in ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
+                is_double_cost = full_attr_name in ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics_security_tech', 'paramedic']
                 actual_points_needed = points_needed * 2 if is_double_cost else points_needed
 
                 _, skill_points_spent = char.calculate_spent_points()

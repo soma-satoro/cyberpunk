@@ -277,7 +277,7 @@ class CharacterSheet(SharedMemoryModel):
     basic_tech = models.PositiveIntegerField(default=0)
     cybertech = models.PositiveIntegerField(default=0)
     demolitions = models.PositiveIntegerField(default=0)
-    electronics = models.PositiveIntegerField(default=0)
+    electronics_security_tech = models.PositiveIntegerField(default=0)
     first_aid = models.PositiveIntegerField(default=0)
     forgery = models.PositiveIntegerField(default=0)
     land_vehicle_tech = models.PositiveIntegerField(default=0)
@@ -452,7 +452,7 @@ class CharacterSheet(SharedMemoryModel):
             "Basic Tech": self.basic_tech,
             "Cybertech": self.cybertech,
             "Demolitions": self.demolitions,
-            "Electronics/Security": self.electronics,
+            "Electronics/Security": self.electronics_security_tech,
             "First Aid": self.first_aid,
             "Forgery": self.forgery,
             "Land Vehicle Tech": self.land_vehicle_tech,

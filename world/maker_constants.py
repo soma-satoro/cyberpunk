@@ -125,12 +125,12 @@ ITEM_TYPE_TO_TECH_SKILL = {
     "cyberware": "cybertech",
     "ammunition": "weaponstech",
     "vehicle": None,  # Resolved by vehicle category
-    "cyberdeck": "electronics",
+    "cyberdeck": "electronics_security_tech",
 }
 
 # Gear category -> tech skill
 GEAR_CATEGORY_TO_TECH_SKILL = {
-    "Electronics": "electronics",
+    "Electronics": "electronics_security_tech",
     "Tools": "basic_tech",
     "Medical": "basic_tech",
     "Drugs": "basic_tech",  # MedTech pharma uses Medical Tech

@@ -3,7 +3,7 @@ import random
 import logging
 import traceback
 from world.cyberpunk_constants import ROLES, STATS, ROLE_SKILLS, ROLE_SKILL_NAME_MAP, EQUIPMENT, EQUIPMENT_OR_CHOICES, ROLE_STAT_TABLES, ROLE_CYBERWARE
-DOUBLE_COST_SKILLS = ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
+DOUBLE_COST_SKILLS = ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics_security_tech', 'paramedic']
 from world.cyberpunk_constants import LANGUAGES as CYBERPUNK_LANGUAGES
 from world.inventory.models import Inventory, Weapon, Armor, Gear, CyberwareInstance, Ammunition, AmmoType
 from world.equipment_data import weapons, armors, gears, ammunition, cyberdecks as cyberdecks_data
@@ -669,10 +669,24 @@ class EdgerunnerChargen:
             "Fixer": ["Cyberaudio Suite", "Internal Agent", "Subdermal Pocket", "Voice Stress Analyzer"],
             "Nomad": ["Interface Plugs", "Neural Link"]
         }
+        role_cyberware_paired = {"Tech": ["Cybereye"], "Medtech": ["Cybereye"]}
+        role_cyberware_parent = {
+            "Rockerboy": [("Audio Recorder", "Cyberaudio Suite")],
+            "Tech": [("MicroOptics", "Cybereye")],
+            "Medtech": [("TeleOptics", "Cybereye")],
+            "Media": [("Amplified Hearing", "Cyberaudio Suite")],
+            "Fixer": [("Internal Agent", "Cyberaudio Suite"), ("Voice Stress Analyzer", "Cyberaudio Suite")],
+        }
 
         cyberware_list = role_cyberware.get(role, [])
+        for paired_name in role_cyberware_paired.get(role, []):
+            if paired_name in cyberware_list:
+                cyberware_list = list(cyberware_list)
+                idx = cyberware_list.index(paired_name)
+                cyberware_list.insert(idx + 1, paired_name)
         logger.info(f"Cyberware list: {cyberware_list}")
         
+        instances_by_name = {}
         for item_name in cyberware_list:
             logger.info(f"Processing cyberware: {item_name}")
             # Get defaults from CYBERWARE_DATA to satisfy NOT NULL constraints (cost, etc.)
@@ -706,8 +720,27 @@ class EdgerunnerChargen:
             # Add to inventory (same as vendor purchase) so it shows in inv/sheet
             inventory, _ = Inventory.get_or_create_for_character(character)
             inventory.cyberware.add(instance)
-                
+
+            # Track instances for parent/paired (by name, list for duplicates)
+            instances_by_name.setdefault(item_name, []).append(instance)
+
+            # Paired: second instance points to first
+            paired_for_role = role_cyberware_paired.get(role, [])
+            if item_name in paired_for_role and len(instances_by_name[item_name]) == 2:
+                instance.paired_with = instances_by_name[item_name][0]
+                instance.save()
+                logger.info(f"Paired {item_name} to first instance")
+
             logger.info(f"Added cyberware instance: {item_name}")
+
+        # Apply parent relationships
+        for child_name, parent_name in role_cyberware_parent.get(role, []):
+            child_instances = instances_by_name.get(child_name, [])
+            parent_instances = instances_by_name.get(parent_name, [])
+            if child_instances and parent_instances:
+                child_instances[0].parent = parent_instances[0]
+                child_instances[0].save()
+                logger.info(f"Parented {child_name} to {parent_name}")
 
         logger.info("About to calculate humanity loss")
         cls.recalculate_humanity_for_typeclass(character)
@@ -1045,10 +1078,24 @@ class EdgerunnerChargen:
             "Fixer": ["Cyberaudio Suite", "Internal Agent", "Subdermal Pocket", "Voice Stress Analyzer"],
             "Nomad": ["Interface Plugs", "Neural Link"]
         }
+        role_cyberware_paired = {"Tech": ["Cybereye"], "Medtech": ["Cybereye"]}
+        role_cyberware_parent = {
+            "Rockerboy": [("Audio Recorder", "Cyberaudio Suite")],
+            "Tech": [("MicroOptics", "Cybereye")],
+            "Medtech": [("TeleOptics", "Cybereye")],
+            "Media": [("Amplified Hearing", "Cyberaudio Suite")],
+            "Fixer": [("Internal Agent", "Cyberaudio Suite"), ("Voice Stress Analyzer", "Cyberaudio Suite")],
+        }
 
         cyberware_list = role_cyberware.get(role, [])
+        for paired_name in role_cyberware_paired.get(role, []):
+            if paired_name in cyberware_list:
+                cyberware_list = list(cyberware_list)
+                idx = cyberware_list.index(paired_name)
+                cyberware_list.insert(idx + 1, paired_name)
         logger.info(f"Cyberware list: {cyberware_list}")
         
+        instances_by_name = {}
         for item_name in cyberware_list:
             logger.info(f"Processing cyberware: {item_name}")
             # Get defaults from CYBERWARE_DATA to satisfy NOT NULL constraints (cost, etc.)
@@ -1078,7 +1125,23 @@ class EdgerunnerChargen:
             # Add to inventory (same as vendor purchase) so it shows in inv/sheet
             inventory, _ = Inventory.objects.get_or_create(character_id=sheet_pk)
             inventory.cyberware.add(cw_instance)
+
+            instances_by_name.setdefault(item_name, []).append(cw_instance)
+
+            if item_name in role_cyberware_paired.get(role, []) and len(instances_by_name[item_name]) == 2:
+                cw_instance.paired_with = instances_by_name[item_name][0]
+                cw_instance.save()
+                logger.info(f"Paired {item_name} to first instance")
+
             logger.info(f"Added cyberware instance: {item_name}")
+
+        for child_name, parent_name in role_cyberware_parent.get(role, []):
+            child_instances = instances_by_name.get(child_name, [])
+            parent_instances = instances_by_name.get(parent_name, [])
+            if child_instances and parent_instances:
+                child_instances[0].parent = parent_instances[0]
+                child_instances[0].save()
+                logger.info(f"Parented {child_name} to {parent_name}")
 
         logger.info("About to calculate humanity loss")
         sheet.calculate_humanity_loss()

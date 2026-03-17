@@ -644,7 +644,7 @@ def _skill_to_stat(skill_name):
                     "handgun", "heavy_weapons", "shoulder_arms"],
         "dexterity": ["athletics", "contortionist", "dance", "endurance", "resist_torture_drugs",
                      "stealth", "brawling", "evasion", "martial_arts", "melee"],
-        "technology": ["basic_tech", "cybertech", "demolitions", "electronics", "first_aid",
+        "technology": ["basic_tech", "cybertech", "demolitions", "electronics_security_tech", "first_aid",
                       "forgery", "paramedic", "medicine", "surgery", "pick_lock", "weaponstech",
                       "air_vehicle_tech", "land_vehicle_tech", "sea_vehicle_tech"],
         "cool": ["acting", "play_instrument", "style", "bribery", "conversation", "human_perception",

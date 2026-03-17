@@ -1295,16 +1295,16 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 7,
         "cost": 1000,
         "is_weapon": False,
-        "description": "Action to activate. Ignore Seriously and Mortally Wounded effects for 60 seconds (still make Death Saves). 1hr cooldown.",
+        "description": "Neuralware Option. Hormone regulation implant for fight-or-flight. Action to activate: ignore Seriously and Mortally Wounded effects for 60 seconds (20 Rounds); Mortally Wounded still make Death Saves. 1hr cooldown before reactivation.",
     },
     {
-        "name": "David's Experimental Sandevistan",
+        "name": "Experimental Sandevistan",
         "type": "Borgware",
         "slots": 2,
         "humanity_loss": 14,
         "cost": 250000,
         "is_weapon": False,
-        "description": "Neuralware Option. Speedware. 2 slots. Activation: 2d6 HL. No Action to activate. Move to top of Initiative. If on your Turn: +1 Move or Action. Negative Humanity: take HL as HP damage. Only one Speedware.",
+        "description": "Neuralware Option. Borgware. Speedware. 2 slots. Activation: 2d6 HL (no Action, even during combat). Top of Initiative. If activated on your Turn: +1 Move or Action. Negative Humanity: take HL as direct HP damage (bypasses armor). Extreme Cyberpsychosis if negative. Only one Speedware.",
     },
     {
         "name": "Ex-Disk",
@@ -1313,7 +1313,7 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 3,
         "cost": 1000,
         "is_weapon": False,
-        "description": "Requires Neuroport Cyberdeck Port. +1 Hardware-only slot for Cyberdeck. 2+ Ex-Disks: +1 NET Action when directly connected to Access Point.",
+        "description": "Neuralware. Requires Neuroport Cyberdeck Port. +1 Hardware-only slot for Cyberdeck. Hardware in Ex-Disks counts as installed in any deck in Neuroport. 2+ Ex-Disks: +1 NET Action when physically connected to Access Point via Interface Plug.",
         "requirements": "Neuroport Cyberdeck Port",
     },
     {
@@ -1326,7 +1326,7 @@ CYBERWARE_DATA_LIST = [
         "damage_dice": 3,
         "damage_die_type": 6,
         "rate_of_fire": 2,
-        "description": "Cyberarm Option. Excellent Quality Heavy Melee. Wield 2H weapons as BODY 11. Paired: pry doors, Choke, Slam as BODY 11. Requires Cyberarm, 2 slots.",
+        "description": "Cyberarm Option. 2 slots. Excellent Quality Heavy Melee Weapon. Wield weapons in this arm as BODY 11. Paired (both arms): pry doors, move Thick Cover, Choke, Slam as BODY 11. Requires Cyberarm, 2 slots.",
         "requirements": "Cyberarm",
     },
     {
@@ -1339,7 +1339,7 @@ CYBERWARE_DATA_LIST = [
         "damage_dice": 3,
         "damage_die_type": 6,
         "rate_of_fire": 2,
-        "description": "Cyberarm Option. Excellent Quality Heavy Melee. Concealed, draw/stow no Action. Paired: negate climb penalty. Requires Cyberarm, 2 slots.",
+        "description": "Cyberarm Option. 2 slots. One-Handed Excellent Quality Heavy Melee. Concealed without Check, draw/stow no Action. Popped up: cannot hold in hand. Paired (both arms): negate climb movement penalty. Requires Cyberarm, 2 slots.",
         "requirements": "Cyberarm",
     },
     {
@@ -1352,17 +1352,17 @@ CYBERWARE_DATA_LIST = [
         "damage_dice": 3,
         "damage_die_type": 6,
         "rate_of_fire": 2,
-        "description": "Cyberarm Option. Exotic Heavy Melee, 6m range. Concealed. Critical: roll twice on table, pick result. Requires Cyberarm.",
+        "description": "Cyberarm Option. Monofilament whip. One-Handed Exotic Heavy Melee, 6m range. Concealed without Check. Critical: roll twice on table, choose result. Requires Cyberarm.",
         "requirements": "Cyberarm",
     },
     {
         "name": "Neuroport",
         "type": "Neuralware",
         "slots": 0,
-        "humanity_loss": 7,
+        "humanity_loss": 0,
         "cost": 1000,
         "is_weapon": False,
-        "description": "2070s control package. Includes: Neural Link (5 slots), Holophone, Biomonitor, Virtu, HUD, 2 Shard Slots, Personal Link. Required for non-medical cyberware. Quickhack target.",
+        "description": "2070s control package. Neural Link (5 slots), Holophone, Biomonitor, Virtu, HUD, 2 Shard Slots, Personal Link. No additional Option Slots taken. Required for non-medical cyberware. Quickhack target.",
     },
     {
         "name": "Neuroport Cyberdeck Port",
@@ -1381,7 +1381,7 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 14,
         "cost": 1000,
         "is_weapon": False,
-        "description": "Cyberarm Option. Rocket/Grenade Launcher, 1 round. Smart Rebuild compatible. Concealed, draw/stow no Action. Requires Cyberarm, 2 slots.",
+        "description": "Cyberarm Option. Borgware. 2 slots. Rocket Launcher or Grenade Launcher, 1 round. Incompatible with all weapon attachments except Smart Rebuild. Concealed without Check, draw/stow no Action. Popped up: cannot hold in hand. Requires Cyberarm, 2 slots.",
         "requirements": "Cyberarm",
     },
     {
@@ -1665,12 +1665,33 @@ CYBERWARE_DATA_LIST = [
     # Interface RED Vol 4: Hornet's Pharmacy
     {
         "name": "Bodyweight Autoinjector",
-        "type": "External Body Cyberware",
+        "type": "Internal Body Cyberware",
         "slots": 1,
         "humanity_loss": 3,
         "cost": 100,
         "is_weapon": False,
-        "description": "Pre-loaded dose of one combat drug. Action to inject. Refill at Clinic. No need to stop to administer drug in combat.",
+        "description": "Subdermal reservoir. Load one dose of Street Drug as Action; inject as Action. With Biomonitor: program auto-inject on Initiative, Critical Injury, or chosen Wound State.",
+    },
+    {
+        "name": "Pursuit Security Inc Gas Jet",
+        "type": "Cyberarm",
+        "slots": 2,
+        "humanity_loss": 7,
+        "cost": 500,
+        "is_weapon": False,
+        "description": "Aerosol gas launcher. 3 doses Street Drug or Poison/Biotoxin. Concealable. One-handed Exotic Shotgun, 1-shot, Shotgun Shell mode only. Hit applies loaded substance. Nasal Filters negate. Requires Cyberarm.",
+        "requirements": "Cyberarm",
+    },
+    # Interface RED Vol 4: 12 Days of Gearmas
+    {
+        "name": "Cyberscanner, Integrated",
+        "type": "Cyberarm",
+        "slots": 2,
+        "humanity_loss": 7,
+        "cost": 500,
+        "is_weapon": False,
+        "description": "Cyberscanner in Cyberarm. Readout on arm LED, Chyron, or Agent. Scan 2 m/yds, 1 minute, target still. Hardened/Tech-Upgraded/unknown chrome = error. Requires Cyberarm.",
+        "requirements": "Cyberarm",
     },
 ]
 

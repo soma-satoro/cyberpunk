@@ -1,4 +1,5 @@
 from world.lifepath_dictionary import CULTURAL_ORIGINS, CULTURAL_ORIGIN_LANGUAGES, PERSONALITIES, CLOTHING_STYLES, HAIRSTYLES, AFFECTATIONS, MOTIVATIONS, LIFE_GOALS, ROLE_SPECIFIC_LIFEPATHS, VALUED_PERSON, VALUED_POSSESSION, FAMILY_BACKGROUND, ENVIRONMENT, FAMILY_CRISIS
+from world.lifepath import undo_neuroport_choice
 from world.cyberpunk_sheets.models import CharacterSheet
 from django.db import IntegrityError
 
@@ -32,10 +33,11 @@ def start_lifepath(caller):
         {"key": "9", "desc": "Most Valued Person", "goto": "valued_person"},
         {"key": "10", "desc": "Valued Possession", "goto": "valued_possession"},
         {"key": "11", "desc": "Family Background", "goto": "family_background"},
-        {"key": "12", "desc": "Origin Environment", "goto": "environment"},
-        {"key": "13", "desc": "Family Crisis", "goto": "family_crisis"},
-        {"key": "14", "desc": "Role-specific Lifepath", "goto": "role_specific"},
-        {"key": "15", "desc": "Finish Lifepath", "goto": "finish_lifepath"},
+        {"key": "12", "desc": "Neuroport (Yes/No)", "goto": "neuroport_option"},
+        {"key": "13", "desc": "Origin Environment", "goto": "environment"},
+        {"key": "14", "desc": "Family Crisis", "goto": "family_crisis"},
+        {"key": "15", "desc": "Role-specific Lifepath", "goto": "role_specific"},
+        {"key": "16", "desc": "Finish Lifepath", "goto": "finish_lifepath"},
         {"key": "q", "desc": "Quit", "goto": "exit_menu"}
     ]
     return text, options
@@ -137,6 +139,67 @@ def valued_possession(caller):
 
 def family_background(caller):
     return create_menu("Family Background", FAMILY_BACKGROUND, "family_background")
+
+
+def neuroport_option(caller):
+    """Neuroport choice: 1=Yes (free cyberware), 2=No (500 eb)."""
+    desc = (
+        "In the 2070s, most parents have done all they can to give their kids a Neuroport. "
+        "This handy piece of cyberware is so ubiquitous that almost everyone has one. "
+        "Do you have a neuroport?"
+    )
+    text = f"|c{desc}|n\n\n  |w1|n. Yes (free Neuroport)\n  |w2|n. No (500 eurodollars)\n\n  |w0|n. Back\n"
+    options = [
+        {"key": "1", "desc": "Yes", "goto": ("set_neuroport", {"has_neuroport": True})},
+        {"key": "2", "desc": "No", "goto": ("set_neuroport", {"has_neuroport": False})},
+        {"key": "0", "desc": "Back", "goto": "start_lifepath"},
+    ]
+    return text, options
+
+
+def set_neuroport(caller, raw_string, has_neuroport=True, **kwargs):
+    """Apply neuroport choice: grant cyberware or 500 eb. Store in db.lifepath.
+    Undoes previous neuroport choice first (removes Neuroport or deducts 500 eb)."""
+    lp = getattr(caller.db, "lifepath", None) or {}
+    if not isinstance(lp, dict):
+        lp = {}
+    ok, blocked_msg = undo_neuroport_choice(caller, lp)
+    if not ok:
+        if blocked_msg:
+            caller.msg(blocked_msg)
+        return start_lifepath(caller)
+
+    lp["neuroport_option"] = "yes" if has_neuroport else "no"
+    caller.db.lifepath = lp
+
+    char = getattr(caller, "character", caller) if hasattr(caller, "character") else caller
+    sheet = getattr(char, "character_sheet", None) or getattr(caller, "character_sheet", None)
+
+    if has_neuroport and sheet:
+        try:
+            from world.cyberware.models import Cyberware
+            from world.inventory.models import Inventory, CyberwareInstance
+            cw = Cyberware.objects.filter(name__iexact="Neuroport").first()
+            if cw:
+                inventory, _ = Inventory.get_or_create_for_character(char)
+                if not inventory.cyberware.filter(cyberware__name__iexact="Neuroport", installed=True).exists():
+                    inst = CyberwareInstance.objects.create(cyberware=cw, character_sheet=sheet, installed=True)
+                    inventory.cyberware.add(inst)
+                    if hasattr(sheet, "calculate_humanity_loss"):
+                        sheet.calculate_humanity_loss()
+                    sheet.save()
+                    caller.msg("You received a free Neuroport!")
+            else:
+                caller.msg("Neuroport cyberware not found.")
+        except Exception as e:
+            caller.msg(f"Error granting Neuroport: {e}")
+    elif not has_neuroport:
+        from world.cyberpunk_sheets.services import CharacterMoneyService
+        CharacterMoneyService.add_money(char, 500)
+        caller.msg("You received 500 eurodollars (saved from not buying cyberware).")
+
+    return start_lifepath(caller)
+
 
 def environment(caller):
     return create_menu("Origin Environment", ENVIRONMENT, "environment")

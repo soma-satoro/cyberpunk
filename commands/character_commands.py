@@ -3,6 +3,7 @@ import re
 from evennia import Command, logger, search_object, default_cmds
 from typeclasses.rental import CharacterSheetMoneyService
 from world.utils.character_utils import get_full_attribute_name, ALL_ATTRIBUTES, TOPSHEET_MAPPING, is_staff
+from world.list_data import STAT_DESCRIPTIONS, SKILL_TO_STAT_LOOKUP, SKILL_DISPLAY_OVERRIDES
 from world.utils.calculation_utils import get_remaining_points, STAT_MAPPING, SKILL_MAPPING
 from typeclasses.chargen import ChargenRoom
 from evennia.utils import evtable
@@ -13,7 +14,7 @@ from world.cyberpunk_sheets.models import CharacterSheet
 from world.languages.models import Language
 from evennia.utils.evtable import EvTable
 from world.utils.formatting import footer, sheet_header, sheet_section
-from world.utils.ansi_utils import wrap_ansi
+from world.utils.ansi_utils import wrap_ansi, wrap_labeled_comma_list
 from world.inventory.models import Weapon, Armor, Gear, Inventory
 from evennia.commands.default.muxcommand import MuxCommand
 from world.lifepath_dictionary import CULTURAL_ORIGINS, PERSONALITIES, CLOTHING_STYLES, HAIRSTYLES, AFFECTATIONS, MOTIVATIONS, LIFE_GOALS, ROLE_SPECIFIC_LIFEPATHS, VALUED_PERSON, VALUED_POSSESSION, FAMILY_BACKGROUND, ENVIRONMENT, FAMILY_CRISIS
@@ -310,7 +311,8 @@ class CmdSheet(MuxCommand):
             ("Weight:", f"{target.db.weight or 0} kg", "Luck:", f"{target.db.current_luck or 1}/{target.db.luck or 1}"),
         ]
         for row in basic_info:
-            output += f"|y{row[0]:<18}|n {str(row[1]):<18} |y{row[2]:<15}|n {str(row[3]):<18}\n"
+            v1, v3 = str(row[1])[:18], str(row[3])[:18]
+            output += f"|y{row[0]:<18}|n {v1:<18} |y{row[2]:<15}|n {v3:<18}\n"
         # Role on its own line (full width) - includes secondary roles from role abilities
         display_roles = self.get_display_roles(target)
         output += f"|yRole:|n {display_roles}\n"
@@ -328,7 +330,7 @@ class CmdSheet(MuxCommand):
                 for label, v in zip(row[::2], row[1::2])
             ) + "\n"
 
-        # Skills (2 columns, 30+5=35 visible per column to stay within 80)
+        # Skills (2 columns, 30+1+5=36 per column = 72 total, under 80)
         output += sheet_section("SKILLS", width=W)
         active_skills = self.get_active_skills(target)
         for i in range(0, len(active_skills), 2):
@@ -388,17 +390,21 @@ class CmdSheet(MuxCommand):
                     if sheet_pk:
                         inv, _ = Inventory.objects.get_or_create(character_id=sheet_pk)
             if inv:
+                EQUIP_WIDTH = 78
                 weapons = list(inv.weapons.all()) if hasattr(inv, 'weapons') else []
-                output += f"|yWeapons:|n {'|w' + ', '.join(w.name for w in weapons) + '|n' if weapons else '|wNone|n'}\n"
+                w_items = [w.name for w in weapons] if weapons else ["None"]
+                output += wrap_labeled_comma_list("|yWeapons:|n ", w_items, "|w", "|n", width=EQUIP_WIDTH, separator=",")
 
                 armor = list(inv.armor.all()) if hasattr(inv, 'armor') else []
-                output += f"|yArmor:|n {'|w' + ', '.join(p.name for p in armor) + '|n' if armor else '|wNone|n'}\n"
+                a_items = [p.name for p in armor] if armor else ["None"]
+                output += wrap_labeled_comma_list("|yArmor:|n ", a_items, "|w", "|n", width=EQUIP_WIDTH, separator=",")
 
                 # Use get_gear_with_quantities (same as +inventory) - avoids M2M-through issues
                 try:
                     gear_items = inv.get_gear_with_quantities() if hasattr(inv, 'get_gear_with_quantities') else [(g, 1) for g in inv.gear.all()]
                     gear_names = [f"{g.name} (x{qty})" if qty > 1 else g.name for g, qty in gear_items]
-                    output += f"|yGear:|n {'|w' + ', '.join(gear_names) + '|n' if gear_names else '|wNone|n'}\n"
+                    g_items = gear_names if gear_names else ["None"]
+                    output += wrap_labeled_comma_list("|yGear:|n ", g_items, "|w", "|n", width=EQUIP_WIDTH, separator=",")
                 except Exception as gear_err:
                     logger.log_err(f"Error retrieving gear for {target}: {gear_err}", exc_info=True)
                     output += "|yGear:|n |wError retrieving gear|n\n"
@@ -406,7 +412,8 @@ class CmdSheet(MuxCommand):
                 try:
                     cyberware = list(inv.cyberware.filter(installed=True)) if hasattr(inv, 'cyberware') else []
                     cw_names = [c.cyberware.name for c in cyberware]
-                    output += f"|yCyberware:|n {'|w' + ', '.join(cw_names) + '|n' if cw_names else '|wNone|n'}\n"
+                    cw_items = cw_names if cw_names else ["None"]
+                    output += wrap_labeled_comma_list("|yCyberware:|n ", cw_items, "|w", "|n", width=EQUIP_WIDTH, separator=",")
                 except Exception as cw_err:
                     logger.log_err(f"Error retrieving cyberware for {target}: {cw_err}", exc_info=True)
                     output += "|yCyberware:|n |wError retrieving cyberware|n\n"
@@ -491,23 +498,40 @@ class CmdSheet(MuxCommand):
     # Role ability keys - displayed in Role Abilities section, excluded from SKILLS
     ROLE_ABILITY_KEYS = frozenset(ROLE_ABILITY_TO_ROLE.keys())
 
-    # Max width for skill names on sheet (2 columns, 30+5=35 per column, fits 80)
+    # Max width for skill names (2 cols: 30+1+5=36 each = 72 total, under 80)
     SKILL_NAME_WIDTH = 30
 
-    def _format_skill_for_sheet(self, name, skill_key=None):
+    def _format_skill_for_sheet(self, name, skill_key=None, base_skill=None):
         """
-        Format skill name for sheet display. Uses abbreviated form for instanced skills
-        (e.g. 'P Instrument (flute)') and truncates if too long.
+        Format skill name for sheet display.
+        - Instanced skills (Local Expert, Martial Arts, Play Instrument): "Skill Name: Instance (STAT)"
+        - Regular skills: "Skill Name (STAT)"
+        - Applies display overrides (Resist Torture/Drugs, Electronics/Security Tech, etc.)
         """
+        base = (base_skill or "").lower().strip()
+        instance = None
         if skill_key and "(" in skill_key and ")" in skill_key:
-            base_name, instance = skill_key.split("(", 1)
-            instance = instance.rstrip(")")
-            base_display = base_name.replace('_', ' ').title()
-            if base_name.lower() == 'play_instrument':
-                base_display = "P Instrument"
-            formatted = f"{base_display} ({instance})"
+            base, instance = skill_key.split("(", 1)
+            base = base.strip().lower()
+            instance = instance.rstrip(")").strip()
+
+        # Get display name: override or title-case
+        display_name = SKILL_DISPLAY_OVERRIDES.get(base)
+        if not display_name:
+            display_name = base.replace("_", " ").title() if base else name
+
+        # Instanced format: "SKILL NAME: INSTANCE" (not parens)
+        if instance:
+            formatted = f"{display_name}: {instance}"
         else:
-            formatted = name
+            formatted = display_name
+
+        # Add stat abbreviation
+        stat_key = SKILL_TO_STAT_LOOKUP.get(base)
+        if stat_key and stat_key in STAT_DESCRIPTIONS:
+            stat_abbrev = STAT_DESCRIPTIONS[stat_key]["abbrev"]
+            formatted = f"{formatted} ({stat_abbrev})"
+
         if len(formatted) > self.SKILL_NAME_WIDTH:
             formatted = formatted[: self.SKILL_NAME_WIDTH - 3] + "..."
         return formatted
@@ -523,8 +547,10 @@ class CmdSheet(MuxCommand):
         if hasattr(char, 'db') and char.db.skills:
             for skill_name, value in char.db.skills.items():
                 if value > 0 and skill_name not in self.NON_SKILL_KEYS and skill_name not in self.ROLE_ABILITY_KEYS:
-                    display_name = skill_name.replace('_', ' ').title()
-                    display_name = self._format_skill_for_sheet(display_name)
+                    display_name = self._format_skill_for_sheet(
+                        skill_name.replace('_', ' ').title(),
+                        base_skill=skill_name,
+                    )
                     skill_list.append([display_name, value])
 
         # Add skill instances from character typeclass

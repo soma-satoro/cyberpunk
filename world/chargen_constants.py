@@ -183,6 +183,18 @@ SELL_YOUR_SOUL_CORPORATION_OPTIONS = [
     "EuroBank",
 ]
 
+SELL_YOUR_SOUL_GANG_OPTIONS = [
+    "Raffen Shiv",
+    "6th Street",
+    "Maelstrom",
+    "Animals",
+    "Tyger Claws",
+    "Valentinos",
+    "Voodoo Boys",
+    "Scavengers",
+    "Wraiths",
+]
+
 # Science skills - Tech and Medtech choose one at chargen (Edgerunner)
 SCIENCE_SKILLS = (
     "zoology",

@@ -24,7 +24,7 @@ IP_ROLE_ABILITIES = [
 # Difficult skills (x2 cost)
 IP_DIFFICULT_SKILLS = [
     "autofire", "martial_arts", "pilot_air", "heavy_weapons",
-    "demolitions", "electronics", "paramedic"
+    "demolitions", "electronics_security_tech", "paramedic"
 ]
 
 # All skills (typical cost except those in IP_DIFFICULT_SKILLS)

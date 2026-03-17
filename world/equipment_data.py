@@ -193,75 +193,37 @@ vehicles = [
         "speed_narrative": "60 MPH / 97 KPH",
         "value": 15000,
     },
+        # Interface RED Vol 4: 12 Days of Gearmas
     {
-        "name": "AmeriCar EconoCompact",
-        "description": "Affordable no-frills compact. 3 seats. Rear folds for storage.",
+        "name": "Zonda Metrocar",
+        "description": "Classic 2020s city car. Yang's Wheels under Zonda license. Compact Groundcar, 2 seats. SDP 25. Incompatible with Heavy Chassis, Seating Upgrade. AV Engine = can fly, speeds unchanged. Cannot Tech-Upgrade speed. Nomad Access: 1.",
         "category": "land",
-        "sdp": 50,
-        "seats": 3,
-        "speed_combat": 20,
-        "speed_narrative": "100 MPH / 161 KPH",
-        "value": 20000,
-    },
-    {
-        "name": "Harvey 100",
-        "description": "AmeriCar 'motorcycle for everyone.' Customizable. Frankenbike reputation.",
-        "category": "land",
-        "sdp": 35,
+        "sdp": 25,
         "seats": 2,
-        "speed_combat": 20,
-        "speed_narrative": "100 MPH / 161 KPH",
-        "value": 20000,
+        "speed_combat": 10,
+        "speed_narrative": "30 MPH / 48 KPH",
+        "value": 1000,
     },
-    {
-        "name": "Makigai Ebi",
-        "description": "Reliable mini-hatchback. 35 SDP. Incompatible with Heavy Chassis. Great fuel efficiency.",
-        "category": "land",
-        "sdp": 35,
-        "seats": 4,
-        "speed_combat": 20,
-        "speed_narrative": "100 MPH / 161 KPH",
-        "value": 23000,
-    },
-    {
-        "name": "The Grundy",
-        "description": "Grundy Salvage scrap-built truck. Heavy Chassis, Armored Chassis, Combat Plow. Mobile bunker.",
-        "category": "land",
-        "sdp": 50,
-        "seats": 4,
-        "speed_combat": 20,
-        "speed_narrative": "100 MPH / 161 KPH",
-        "value": 41000,
-    },
-    {
-        "name": "Zetatech AeroVox",
-        "description": "Economy-class aerodyne. Heavy Chassis. Sturdy corporate transport.",
-        "category": "air",
-        "sdp": 100,
-        "seats": 6,
-        "speed_combat": 40,
-        "speed_narrative": "200 MPH / 322 KPH",
-        "value": 51000,
-    },
-    {
-        "name": "Zetatech Destination",
-        "description": "Compact aerodyne. 4 seats. Affordable and reliable.",
-        "category": "air",
-        "sdp": 100,
-        "seats": 4,
-        "speed_combat": 40,
-        "speed_narrative": "200 MPH / 322 KPH",
-        "value": 40000,
-    },
-    # Interface RED Vol 3: Spinning Your Wheels
+# Interface RED Vol 3: Spinning Your Wheels (Danger Gal Dossier)
     {
         "name": "Bicycle",
-        "description": "Yang's Wheels. Speed BODY-dependent. Upgrades: Electric Pedal Assist, Enclosure, etc.",
+        "description": "Two-wheeled, muscle-powered. SDP 15, 1 seat, 100eb. Speed by BODY: BODY<4: 8 MOVE/12 MPH; 4-7: 10 MOVE/20 MPH; 8+: 15 MOVE/30 MPH. BODY 11+ too heavy. Athletics (not Drive). Basic Tech (not LVT). No Interface Plugs. Rider uses own Initiative. Crash/ram: 3d6 (not 6d6), rider Prone. No Nomad Moto upgrades. 48hr charge.",
         "category": "land",
         "sdp": 15,
         "seats": 1,
         "speed_combat": 15,
         "speed_narrative": "BODY Dependent",
+        "value": 100,
+    },
+    # Danger Gal Dossier - Cyberchairs
+    {
+        "name": "Mercurius Cyberchair",
+        "description": "Rocklin Augmentics motorized wheelchair. 1 seat, Interface Plug or hand control. MOVE 5 (minus Armor Penalty). Stairs no penalty. Attacks target pilot. Pilot can't be removed while conscious. Critical Injury to MOVE lowers chair MOVE. EMP-proof. Night City Nukes regulation model.",
+        "category": "land",
+        "sdp": 15,
+        "seats": 1,
+        "speed_combat": 5,
+        "speed_narrative": "5 MOVE",
         "value": 100,
     },
 ]
@@ -518,6 +480,54 @@ weapons = [
         "category": "heavy_weapons",
         "clip": 4,
         "weapon_type": "flamethrower",
+        "quality": "standard"
+    },
+    {
+        "name": "Light Melee Weapon",
+        "damage": "1d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 50,
+        "category": "melee",
+        "weapon_type": "light melee",
+        "quality": "standard"
+    },
+    {
+        "name": "Medium Melee Weapon",
+        "damage": "2d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 50,
+        "category": "melee",
+        "weapon_type": "medium melee",
+        "quality": "standard"
+    },
+    {
+        "name": "Heavy Melee Weapon",
+        "damage": "3d6",
+        "rof": "2",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 100,
+        "category": "melee",
+        "weapon_type": "heavy melee",
+        "quality": "standard"
+    },
+    {
+        "name": "Very Heavy Melee Weapon",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 100,
+        "category": "melee",
+        "weapon_type": "very heavy melee",
         "quality": "standard"
     },
     {
@@ -904,6 +914,8 @@ weapons = [
         "value": 500,
         "category": "handgun",
         "clip": 30,
+        "weapon_type": "SMG",
+        "quality": "standard",
         "description": "Exotic SMG with Smart Rebuild. Single shot: 3d6, 3 rounds/check. Autofire x3. +1 Attack. Improved Smart Ammo compatible."
     },
     {
@@ -916,6 +928,8 @@ weapons = [
         "value": 500,
         "category": "shoulder_arms",
         "clip": 24,
+        "weapon_type": "assault rifle",
+        "quality": "standard",
         "description": "Exotic Assault Rifle with Power Rebuild. 5d6 single (3 rounds), 4d6 if fewer. Power: +5 Critical Bonus, ricochet shots."
     },
     {
@@ -928,6 +942,8 @@ weapons = [
         "value": 1000,
         "category": "handgun",
         "clip": 30,
+        "weapon_type": "heavy SMG",
+        "quality": "standard",
         "description": "Exotic Heavy SMG with Smart Rebuild. Autofire x4. 3d6/3 rounds or 2d6. +1 Attack. Improved Smart Ammo."
     },
     {
@@ -940,6 +956,8 @@ weapons = [
         "value": 100,
         "category": "shoulder_arms",
         "clip": 5,
+        "weapon_type": "shotgun",
+        "quality": "poor",
         "description": "Poor Quality Shotgun with Power Rebuild. BODY 10+ or Torn Muscle. Power: +5 Critical Bonus, ricochet."
     },
     {
@@ -952,6 +970,8 @@ weapons = [
         "value": 500,
         "category": "handgun",
         "clip": 12,
+        "weapon_type": "heavy pistol",
+        "quality": "standard",
         "description": "Exotic Heavy Pistol with Power Rebuild. Aimed Shot: 4d6. Power: +5 Critical Bonus, ricochet."
     },
     {
@@ -964,10 +984,12 @@ weapons = [
         "value": 1000,
         "category": "shoulder_arms",
         "clip": 32,
-        "description": "Exotic Shotgun with Smart Rebuild. Improved Smart Shells only. 8 shells per shot. 4d6 to 6m area."
+        "weapon_type": "shotgun",
+        "quality": "standard",
+        "description": "Exotic Shotgun with Smart Rebuild. Improved Smart Shells only. 8 shells per shot. 4d6 to 6m area. 32 rounds. Without 8 shells loaded, will not fire."
     },
     {
-        "name": "Militech Crusher",
+        "name": "Militech Crusher (circa 207X)",
         "damage": "3d6",
         "rof": "1",
         "hands": 1,
@@ -976,7 +998,9 @@ weapons = [
         "value": 1000,
         "category": "handgun",
         "clip": 12,
-        "description": "Exotic Very Heavy Pistol with Power Rebuild. Shotgun Shells only. 3d6 to 6m area. Power: ricochet."
+        "weapon_type": "very heavy pistol",
+        "quality": "standard",
+        "description": "Exotic Very Heavy Pistol with Power Rebuild. Shotgun Shell Ammunition only. Power: +5 Critical Bonus, ricochet."
     },
     {
         "name": "Militech M-10AF Lexington",
@@ -988,7 +1012,9 @@ weapons = [
         "value": 1000,
         "category": "handgun",
         "clip": 21,
-        "description": "Exotic Heavy Pistol with Power Rebuild. Power: +5 Critical Bonus, ricochet."
+        "weapon_type": "heavy pistol",
+        "quality": "standard",
+        "description": "Exotic Heavy Pistol with Power Rebuild. 21-shot capacity. Power: +5 Critical Bonus, ricochet."
     },
     {
         "name": "Militech M-76e Omaha",
@@ -1000,7 +1026,9 @@ weapons = [
         "value": 500,
         "category": "handgun",
         "clip": 9,
-        "description": "Exotic Heavy Pistol with Tech Rebuild. Charge: ROF2, 3 rounds/shot, fire through Thin Cover, half SP."
+        "weapon_type": "heavy pistol",
+        "quality": "standard",
+        "description": "Exotic Heavy Pistol with Tech Rebuild. 9-shot capacity. Charge: ROF2, 3 rounds/shot, fire through Thin Cover, half SP. Charge persists until end of Turn fired."
     },
     {
         "name": "Rostovic DB-2 Satara Shotgun",
@@ -1012,7 +1040,9 @@ weapons = [
         "value": 500,
         "category": "shoulder_arms",
         "clip": 2,
-        "description": "Exotic Shotgun with Tech Rebuild. Dual barrels, separate ammo types. Charge: fire through Thin Cover, half SP."
+        "weapon_type": "shotgun",
+        "quality": "standard",
+        "description": "Exotic Shotgun with Tech Rebuild. 2-shot capacity, one per barrel. Each barrel can load different ammo. Charge: fire through Thin Cover, half SP. Loads Non-Basic Ammunition."
     },
     {
         "name": "Techtronika RT-46 Burya",
@@ -1024,7 +1054,9 @@ weapons = [
         "value": 1000,
         "category": "handgun",
         "clip": 4,
-        "description": "Exotic Very Heavy Pistol with Tech Rebuild. Charge without Move Action. Muscle&Bone Lace or Cyberarm or Broken Arm."
+        "weapon_type": "very heavy pistol",
+        "quality": "standard",
+        "description": "Exotic Very Heavy Pistol with Tech Rebuild. 4-shot capacity. Charge without Move Action. Without Muscle & Bone Lace or Cyberarm: Broken Arm Critical Injury."
     },
     {
         "name": "Techtronika SPT32 Grad",
@@ -1036,7 +1068,9 @@ weapons = [
         "value": 500,
         "category": "shoulder_arms",
         "clip": 4,
-        "description": "Excellent Quality Exotic Sniper Rifle with Power Rebuild. +1 Attack. Bolt action: 1 Action between shots."
+        "weapon_type": "sniper rifle",
+        "quality": "excellent",
+        "description": "Excellent Quality Exotic Sniper Rifle with Power Rebuild. Loads Non-Basic Ammunition. +1 Attack. Action to work bolt between shots."
     },
     {
         "name": "Tsunami Arms Nekomata",
@@ -1048,7 +1082,9 @@ weapons = [
         "value": 1000,
         "category": "shoulder_arms",
         "clip": 4,
-        "description": "Sniper Rifle with Tech Rebuild. Charged: fire through Thin and Thick Cover, half SP."
+        "weapon_type": "sniper rifle",
+        "quality": "standard",
+        "description": "Sniper Rifle with Tech Rebuild. Charged: scope sees through Thin and Thick Cover, fire through both, half SP."
     },
     # Interface RED Vol 2: The 12 Days of Gunmas
     {
@@ -1241,7 +1277,9 @@ weapons = [
         "value": 1000,
         "category": "heavy_weapons",
         "clip": 4,
-        "description": "Exotic Rocket Launcher. Explosive, Double Launch. Max range 400 m/yd."
+        "weapon_type": "rocket launcher",
+        "quality": "standard",
+        "description": "Exotic Rocket Launcher. 4 AP Rockets. Fires 2 at once; GM chooses 2 locations within 50 m/yds of target, 10 m/yds apart. DV15 Evasion to dodge (must be able to dodge bullets). Max range 400 m/yds. Cannot Tech-Upgrade to remove GM targeting."
     },
     {
         "name": "Militech Aegis",
@@ -1275,9 +1313,9 @@ weapons = [
         "concealable": False,
         "weight": 2,
         "value": 1000,
-        "category": "heavy_weapons",
+        "category": "shoulder_arms",
         "clip": 1,
-        "description": "Exotic Shotgun (Shoulder Arms). 1 shot. Coats targets in liquid (paint/water/acid). Acid: -1 SP to coated targets. Poison/Biotoxin: 3 vials per shot, Resist Check."
+        "description": "Exotic Shotgun. 1-shot, Shotgun Shell mode. Coats targets in liquid (paint/water/acid). Acid: -1 SP to coated armor. Poison/Biotoxin: 3 vials per shot, Resist Check. Shoulder Arms Skill."
     },
     {
         "name": "Pursuit Security Inc. TearJerker",
@@ -1289,6 +1327,8 @@ weapons = [
         "value": 500,
         "category": "heavy_weapons",
         "clip": 3,
+        "weapon_type": "grenade launcher",
+        "quality": "excellent",
         "description": "Excellent Quality Exotic Grenade Launcher. Smoke or Teargas ammunition only."
     },
     {
@@ -1872,7 +1912,21 @@ weapons = [
     {"name": "Centurion Essentials Thermal Dagger", "damage": "2d6", "rof": "2", "hands": 1, "concealable": True, "weight": 1, "value": 1000, "category": "melee", "weapon_type": "medium melee", "quality": "excellent", "description": "Excellent Quality Exotic Medium Melee Weapon. Anyone or anything hit is Strongly On Fire (CP:R p180)."},
     {"name": "Nat's Long-Barreled Pistol", "damage": "4d6", "rof": "1", "hands": 1, "concealable": False, "weight": 1, "value": 500, "category": "handgun", "clip": 8, "attachment_slots": 3, "weapon_type": "very heavy pistol", "quality": "excellent", "range_dvs": {"0-6": 14, "7-12": 13, "13-25": 14, "26-50": 20, "51-100": 25, "101-200": 28, "201-400": 30}, "description": "Excellent Quality Very Heavy Pistol. Unique range table (Rusted Chrome)."},
     {"name": "Pursuit Security E-TACK Rapid Responder", "damage": "2d6", "rof": "2", "hands": 1, "concealable": True, "weight": 1, "value": 500, "category": "handgun", "clip": 18, "attachment_slots": 1, "weapon_type": "medium pistol", "quality": "poor", "description": "Poor Quality Medium Pistol. Extended Magazine, non-removable Stun Bayonet. Burst mode: 3 bullets = Heavy Pistol damage, non-AP treated as AP. Disables burst when <3 rounds."},
+    # Interface RED Vol 4: Molly's Black Chrome+
+    {"name": "Big Dreem", "damage": "2d6", "rof": "1", "hands": 1, "concealable": False, "weight": 1, "value": 10, "category": "handgun", "clip": 30, "weapon_type": "SMG", "quality": "standard", "description": "Exotic SMG. Autofire (3) only. Proprietary 30-round Basic bricks (20eb each). Once fired, continues Autofire next 2 Turns even if dropped. During those Turns, AF Skill Base 10, GM picks targets. Cannot conceal."},
+    {"name": "Everest VentureWare SportMaster", "damage": "3d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 50, "category": "shoulder_arms", "clip": 25, "weapon_type": "assault rifle", "quality": "standard", "description": "Assault Rifle incapable of Autofire/Suppressive Fire. Small Game Ammunition only."},
+    {"name": "Everest VentureWare SurvivalMaster", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 100, "category": "shoulder_arms", "clip": 5, "weapon_type": "assault rifle", "quality": "standard", "description": "Exotic Assault Rifle. Single shot only. 5-round internal mag. Cannot Tech-Upgrade. Disassemble: fits in hollow stock, concealable. Disassembly/reassembly: 1 min each."},
+    {"name": "Sanroo Hello Cutie 1TruLuv", "damage": "5d6", "rof": "1", "hands": 2, "concealable": False, "weight": 2, "value": 1000, "category": "shoulder_arms", "clip": 4, "weapon_type": "sniper rifle", "quality": "standard", "description": "Exotic Sniper Rifle. Built-in Agent, Sniper Scope, Infrared Nightvision. Agent cannot be removed without destroying both. Loads Non-Basic Ammunition. Pseudo AI girlfriend with bone-conduction speaker. After 10 kills: bonds to user, acts as Excellent Quality. Cannot conceal."},
+    {"name": "Timeless WW1 Rifle to Pistol Conversion", "damage": "4d6", "rof": "1", "hands": 1, "concealable": False, "weight": 1, "value": 20, "category": "handgun", "clip": 5, "weapon_type": "very heavy pistol", "quality": "poor", "description": "Poor Quality Very Heavy Pistol. 5-round capacity. Incompatible with magazine attachments. Action to work bolt and chamber next round between shots."},
 ]
+
+# Optional: Include Cyberpunk 2020 weapon conversions (from cp2020_conversions.py)
+# Set to True to add converted CP2020 weapons to the equipment list.
+INCLUDE_CP2020_CONVERSIONS = False
+
+if INCLUDE_CP2020_CONVERSIONS:
+    from world.cp2020_conversions import get_cp2020_converted_weapons
+    weapons.extend(get_cp2020_converted_weapons(exclude_existing=True))
 
 # Solo of Fortune 2045 weapon attachments (DV17 Weaponstech to install)
 weapon_attachments = [
@@ -2160,12 +2214,22 @@ armors = [
     # Danger Gal Dossier
     {
         "name": "Scavenged Armor",
-        "sp": 7,
+        "sp": 11,
         "ev": 0,
         "locations": "Head, Body",
         "weight": 1,
-        "value": 0,
-        "description": "Patchwork armor scavenged from the dead. SP 7 Head and Body. Common in Combat Zones."
+        "value": 50,
+        "description": "Body or head armor. SP 11. Once ablated, SP cannot be restored by any means. At 0 SP, it falls off the wearer."
+    },
+    # Molly's Black Chrome+ (Interface RED Vol 4)
+    {
+        "name": "Molly's Scavenged Armor",
+        "sp": 11,
+        "ev": 0,
+        "locations": "Body",
+        "weight": 1,
+        "value": 50,
+        "description": "Judie's handcrafted body armor. SP 11. Once ablated, SP cannot be restored. At 0 SP, it falls off the wearer."
     },
     # Roller Derby (Interface RED 5)
     {
@@ -2994,42 +3058,42 @@ gears = [
     {
         "name": "Immunoblockers",
         "category": "Drugs",
-        "description": "Primary: Restore 2d6 Humanity for 1 month (cannot exceed therapy max). Secondary (DV21): Lose gain, -2 Checks 60sec, 4d6 HL if no 2 doses. 100eb/dose.",
+        "description": "Treatment for cyberpsychosis patients. Primary: Restore 2d6 Humanity for 1 month (cannot exceed therapy max). May wear off early per GM from stress. Secondary (DV21): Any Humanity gained is lost; -2 to all Checks 60 sec; unless 2 doses injected as Action within 60 sec, take 4d6 HL at end (does not impact therapy max). GM may increase doses needed. Negative Humanity: Extreme Cyberpsychosis, sheet to GM; GM may grant +2 to Checks. Not technically addictive.",
         "weight": 0.1,
         "value": 100
     },
     {
         "name": "Power Rebuild",
         "category": "Weapon Attachments",
-        "description": "2 attachment slots. Transforms weapon to Power: +5 Critical Injury bonus damage, ricochet shots at -4.",
+        "description": "Rebuild. 2 slots. Transforms to Power Weapon. +5 Bonus Damage on Critical Injury. Ricochet: hit targets behind cover or out of sight; -4 to Attack (Aimed Shot ignores -4, uses Aimed Shot penalty only). Range measured user-to-target. Shotgun Shell: choose surface within 6m as new origin for 6m spread in new direction. Eligible: All Non-Exotic Ranged Weapons. 1hr install/uninstall.",
         "weight": 0.5,
         "value": 1000
     },
     {
         "name": "Smart Rebuild",
         "category": "Weapon Attachments",
-        "description": "2 attachment slots. Transforms to Smart Weapon. +1 Attack. Improved Smart Ammo compatible. Requires Interface Plug or Subdermal Grip.",
+        "description": "Rebuild. 2 slots. Transforms to Smart Weapon. Cannot attach to weapon with Smartgun Link. Requires Interface Plug or Subdermal Grip. +1 to Ranged Attack. Load Improved Smart Ammunition for full benefits; other ammo: +1 only. Eligible: All Non-Exotic Ranged Weapons. 1hr install/uninstall.",
         "weight": 0.5,
         "value": 1000
     },
     {
         "name": "Tech Rebuild",
         "category": "Weapon Attachments",
-        "description": "2 attachment slots. Transforms to Tech Weapon. Charge (Move Action): fire through Thin Cover, half SP. No GL/RL.",
+        "description": "Rebuild. 2 slots. Transforms to Tech Weapon. Scope sees target outlines through Thin Cover. Move Action to charge; charged until fired or 60 sec (20 Rounds). While charged: ROF1, fire through Thin Cover, ignore half target SP (round up). Cover fired through does not lose HP. Eligible: All Non-Exotic except Grenade Launcher and Rocket Launcher. 1hr install/uninstall.",
         "weight": 0.5,
         "value": 1000
     },
     {
         "name": "Improved Smart Ammunition (10)",
         "category": "Ammunition",
-        "description": "Smart Weapons only. Ignore darkness/smoke/fog penalties. Miss by 5 or less: retry with 14+1d10 vs same DV. Bullets, Slugs, Shells, Arrows.",
+        "description": "Smart Weapons only (not Smartgun Link). 50eb for 10 Arrows, Bullets, Slugs, or Shells. Ignore penalties from darkness, smoke, fog, visual obscurement. Miss by 5 or less: immediate retry, add 14+1d10 (can add LUCK) vs original DV; penalties carry over. Ammo types: Arrows, Bullets, Slugs, Shotgun Shells.",
         "weight": 0.5,
         "value": 50
     },
     {
         "name": "Improved Smart Grenade/Rocket",
         "category": "Ammunition",
-        "description": "Smart Weapons only. One grenade or rocket. Same benefits as Improved Smart Ammo.",
+        "description": "Smart Weapons only (not Smartgun Link). 500eb for 1 Grenade or Rocket. Ignore darkness/smoke/fog penalties. Miss by 5 or less: retry with 14+1d10 vs same DV. Same benefits as Improved Smart Ammo.",
         "weight": 0.5,
         "value": 500
     },
@@ -3134,6 +3198,133 @@ gears = [
         "weight": 0.1,
         "value": 50
     },
+    {
+        "name": "Sedative",
+        "category": "Medical",
+        "description": "Medtech only. Willing target: unconscious 4 hrs, +2 Surgery to Medtech treating. Unwilling: DV15 Resist Torture/Drugs or unconscious 1 min or until awoken by damage/Action. Pharmaceuticals (CP:R p149).",
+        "weight": 0.1,
+        "value": 0
+    },
+    {
+        "name": "Veritas",
+        "category": "Medical",
+        "description": "Medtech only. Target DV17 Resist Torture/Drugs or hazy, suggestive state 10 min. -5 to Acting, Concentration, Conversation, Deduction, Human Perception, Persuasion. Pharmaceuticals.",
+        "weight": 0.1,
+        "value": 0
+    },
+    {
+        "name": "Piranha Smash",
+        "category": "Drugs",
+        "description": "Smash upgraded by Tech. Lime-flavored. Primary (4 hrs): +2 Acting, Contortionist, Conversation, Dance, Human Perception, Persuasion. Secondary (DV9): Addicted; -2 to those Skills. Piranhas only.",
+        "weight": 0.5,
+        "value": 10
+    },
+    {
+        "name": "Bullet to Slug Adapter Casings",
+        "category": "Ammunition",
+        "description": "Box of 10. Convert bullet ammo to shotgun slugs for weapons that fire slugs. Action with jig to load 10 bullets into casings. Reusable.",
+        "weight": 0.5,
+        "value": 100
+    },
+    {
+        "name": "Small Game Ammunition",
+        "category": "Ammunition",
+        "description": "100 rounds. -2d6 damage (min 1d6) in Single Shot. Autofire -1 (min Autofire 3). Bullets only. Good for hunting.",
+        "weight": 0.5,
+        "value": 10
+    },
+    {
+        "name": "Solo of Fortune Bodypillow",
+        "category": "Clothing",
+        "description": "Bodypillows of famous 2020s Solos (Morgan Blackhand, Boa Boa Weyland, Adam Smasher). 20x54 inches. Adam Smasher model reduces housing capacity by 1.",
+        "weight": 1,
+        "value": 100
+    },
+    {
+        "name": "Suzumebachi Assassin Drone",
+        "category": "Electronics",
+        "description": "Insectoid flying drone. 6 MOVE, 7 SP, 10 HP. DV17 Electronics/Security Tech, 5 min to counter. Observation Camera (Low Light/IR/UV), Dartgun 8 Biotoxin Arrows, Airhypo. Range: building perimeter or 50 m/yds from portable NET Architecture.",
+        "weight": 0.5,
+        "value": 5000
+    },
+    # Interface RED Vol 4: 12 Days of Gearmas
+    {
+        "name": "Cybercam EX-1",
+        "category": "Electronics",
+        "description": "Head-mounted camera. Records video/audio, adds graphics/logos before livecast. Media Role Ability: published story via EX-1 livecast +1 believability. Stacks with verifiable evidence.",
+        "weight": 0.5,
+        "value": 1000
+    },
+    {
+        "name": "Cyberscanner",
+        "category": "Electronics",
+        "description": "Double-pronged wand. Scan target within 2 m/yds for 1 min (target still). Displays installed cyberware. Errors on hardened, Tech-Upgraded, or unique cyberware.",
+        "weight": 0.5,
+        "value": 1000
+    },
+    {
+        "name": "DPI Smartsticks",
+        "category": "Electronics",
+        "description": "Drum sticks with haptic feedback and subwoofer. +1 Play Instrument (Drums). Bonus applies once, won't stack.",
+        "weight": 0.5,
+        "value": 500
+    },
+    {
+        "name": "Dynalar Xtra-Dex Smart Glove",
+        "category": "Electronics",
+        "description": "2 Cyberarm Option Slots, up to 5 Cyberfingers. Strap and plug to command. Action to put on/off. Requires Interface Plugs. Options in arm underneath inaccessible while worn. Cannot conceal.",
+        "weight": 0.5,
+        "value": 1000
+    },
+    {
+        "name": "Esporma Environment Suit",
+        "category": "Electronics",
+        "description": "Body + Head. SP 8 each, self-repairing (1 SP/hr when no damage). Protects from radiation. 30 min internal O2, 1 hr refill from air. Magnetic seams, airtight.",
+        "weight": 3,
+        "value": 5000
+    },
+    {
+        "name": "Hammered Industries Green Light Go Sniffer",
+        "category": "Electronics",
+        "description": "Insert wand into substance, read indicator. Action: analyze dose. Green = pure per database, red = impure. Does not identify substance.",
+        "weight": 0.2,
+        "value": 100
+    },
+    {
+        "name": "Ion Cuffs",
+        "category": "Tools",
+        "description": "Restraint. Non-hardened cyberware in bound limb inoperable. BODY 13+ breaks easily.",
+        "weight": 0.5,
+        "value": 500
+    },
+    {
+        "name": "Master Mechanic's Tool Kit",
+        "category": "Tools",
+        "description": "Tech +4 Basic Tech, Cybertech, Land/Sea/Air Vehicle Tech, Electronics/Security Tech, Weaponstech for Maker. Counts as Thick Steel Cover. BODY 10+ to move without equipment.",
+        "weight": 20,
+        "value": 20000
+    },
+    {
+        "name": "MiniMag Speakers by TelecTronics",
+        "category": "Electronics",
+        "description": "1 inch, magnetic. Wireless to linked Agent 100 m/yds. Variety of colors.",
+        "weight": 0.1,
+        "value": 50
+    },
+    {
+        "name": "Optitech MagViewer",
+        "category": "Electronics",
+        "description": "Binoculars, detail to 800 m/yds. Complementary Skill for Single/Aimed Shot 51+ m/yds: +1 Attack (stacks with normal complementary bonus). Doesn't stack with Sniping Scope or TeleOptics.",
+        "weight": 0.5,
+        "value": 500
+    },
+    {
+        "name": "SkidRow PackShield",
+        "category": "Clothing",
+        "description": "Backpack that unfolds into Bulletproof Shield (HP10). Businesswear appearance. Must equip in hand for protection. Cannot install in Popup Shield cyberware.",
+        "weight": 1,
+        "value": 100
+    },
     # Interface RED Vol 5: Solo of Fortune 2045 - Explosives
     {
         "name": "C9 Charge",
@@ -3170,6 +3361,14 @@ gears = [
         "description": "Flying quadcopter drone. 6 MOVE, 15 HP. Links to Agent. Standby/Auto/Direct Control. Records 1hr. Observation Camera. DV17 Electronics/Security to counter.",
         "weight": 0.5,
         "value": 1000
+    },
+    # Danger Gal Dossier: Micro Chrome
+    {
+        "name": "Smart Lens",
+        "category": "Electronics",
+        "description": "Contact lens or monocle. 1 Cybereye Option Slot. Install options like Cybereye (same cost). Pairing options not allowed. One per eye.",
+        "weight": 0,
+        "value": 500
     },
 ]
 
@@ -3536,12 +3735,25 @@ def populate_weapons():
         "category", "clip", "description", "attachment_slots", "range_dvs",
         "weapon_type", "quality",
     }
+    # Remove legacy "Melee Weapon (X)" entries; we use "X Melee Weapon" instead
+    legacy_melee_names = [
+        "Melee Weapon (Light)",
+        "Melee Weapon (Medium)",
+        "Melee Weapon (Heavy)",
+        "Melee Weapon (Very Heavy)",
+    ]
+    deleted, _ = Weapon.objects.filter(name__in=legacy_melee_names).delete()
+    if deleted:
+        logger.info(f"Removed {deleted} legacy melee weapon(s) from database.")
     created = 0
     for weapon_data in weapons:
         name = weapon_data.get("name")
         if not name:
             continue
         defaults = {k: v for k, v in weapon_data.items() if k in allowed_keys and k != "name"}
+        # Weapon.clip is NOT NULL; ensure we never pass None
+        if "clip" in defaults and defaults["clip"] is None:
+            defaults["clip"] = 0
         obj, was_created = Weapon.objects.get_or_create(name=name, defaults=defaults)
         if was_created:
             created += 1

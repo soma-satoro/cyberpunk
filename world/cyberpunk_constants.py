@@ -157,7 +157,7 @@ ROLE_SKILL_NAME_MAP = {
     "melee_weapon": "melee",
     "personal_grooming": "style",  # CharacterSheet merged into style
     "drive_land_vehicle": "drive_land",
-    "cyberdeck_programming": "electronics",
+    "cyberdeck_programming": "electronics_security_tech",
     "system_knowledge": "library_search",  # Closest equivalent
     "diagnosis": "medicine",  # Medtech
     "pharmaceuticals": "paramedic",
@@ -222,7 +222,7 @@ ROLE_SKILLS = {
         'cryptography': 2, 
         'cyberdeck_programming': 2, 
         'education': 2, 
-        'electronics': 2, 
+        'electronics_security_tech': 2, 
         'evasion': 2,
         'first_aid': 2,
         'human_perception': 2,
@@ -244,7 +244,7 @@ ROLE_SKILLS = {
         'cyberdeck_programming': 2,
         'cybertech': 2,
         'education': 2,
-        'electronics': 2,
+        'electronics_security_tech': 2,
         'evasion': 2,
         'first_aid': 2,
         'handgun': 2,

@@ -57,6 +57,49 @@ STAT_DESCRIPTIONS = {
     },
 }
 
+# Skill key -> stat key (for sheet stat abbreviation display). Based on CPR skill table.
+SKILL_TO_STAT = {
+    "intelligence": [
+        "accounting", "animal_handling", "bureaucracy", "business", "composition", "criminology",
+        "cryptography", "conceal_object", "deduction", "education", "gamble", "library_search",
+        "local_expert", "lip_reading", "perception", "physics", "biology", "chemistry", "neuroscience",
+        "data_science", "economics", "sociology", "political_science", "genetics", "anatomy",
+        "robotics", "nanotechnology", "stock_market", "tactics", "tracking", "wilderness_survival", "zoology",
+    ],
+    "reflexes": [
+        "archery", "autofire", "handgun", "heavy_weapons", "shoulder_arms",
+        "drive_land", "pilot_air", "pilot_sea", "riding",
+    ],
+    "dexterity": [
+        "athletics", "brawling", "contortionist", "dance", "evasion", "martial_arts", "melee",
+        "pick_pocket", "stealth",
+    ],
+    "technology": [
+        "air_vehicle_tech", "artistry", "basic_tech", "cybertech", "demolitions",
+        "electronics", "electronics_security_tech", "first_aid", "forgery", "land_vehicle_tech",
+        "paramedic", "photography", "pick_lock", "play_instrument", "sea_vehicle_tech", "weaponstech",
+    ],
+    "cool": [
+        "acting", "bribery", "interrogation", "personal_grooming", "persuasion", "streetwise", "style", "trading",
+    ],
+    "willpower": ["concentration", "endurance", "resist_torture_drugs"],
+    "empathy": ["conversation", "human_perception"],
+}
+# Flatten to skill -> stat for lookup
+SKILL_TO_STAT_LOOKUP = {sk: stat for stat, skills in SKILL_TO_STAT.items() for sk in skills}
+
+# Skill display overrides (internal key -> sheet display name)
+SKILL_DISPLAY_OVERRIDES = {
+    "resist_torture_drugs": "Resist Torture/Drugs",
+    "electronics_security_tech": "Electronics/Security Tech",
+    "electronics": "Electronics/Security Tech",
+    "conceal_object": "Conceal/Reveal Object",
+    "drive_land": "Drive Land Vehicle",
+    "pilot_sea": "Pilot Sea Vehicle",
+    "pilot_air": "Pilot Air Vehicle",
+    "melee": "Melee Weapon",
+}
+
 # Brief skill descriptions by category
 SKILL_DESCRIPTIONS = {
     # Awareness
@@ -130,7 +173,7 @@ SKILL_DESCRIPTIONS = {
     "pick_pocket": ("Technique", "Steal from pockets."),
     "sea_vehicle_tech": ("Technique", "Repair watercraft."),
     "weaponstech": ("Technique", "Modify and repair weapons."),
-    # Role abilities
+    # Role abilities (use primary stat for each role ability)
     "charismatic_impact": ("Rockerboy", "Inspire crowds through performance."),
     "combat_awareness": ("Solo", "Spot threats, gain tactical edge."),
     "interface": ("Netrunner", "Jack into the Net and run programs."),
@@ -141,6 +184,158 @@ SKILL_DESCRIPTIONS = {
     "backup": ("Lawman", "Role ability: call backup."),
     "operator": ("Exec", "Command your team asset."),
     "moto": ("Nomad", "Call upon family resources."),
+}
+
+# Skill -> stat mapping (for character sheet display of stat abbrev in parens)
+# Per Cyberpunk RED Core Rulebook skill table
+SKILL_TO_STAT = {
+    "intelligence": [
+        "accounting", "animal_handling", "bureaucracy", "business", "composition",
+        "conceal_object", "criminology", "cryptography", "deduction", "education",
+        "gamble", "library_search", "lip_reading", "local_expert", "perception",
+        "physics", "biology", "chemistry", "neuroscience", "data_science",
+        "economics", "sociology", "political_science", "genetics", "anatomy",
+        "robotics", "nanotechnology", "stock_market", "tactics", "tracking",
+        "wilderness_survival", "zoology",
+    ],
+    "reflexes": [
+        "archery", "autofire", "handgun", "heavy_weapons", "shoulder_arms",
+        "drive_land", "pilot_air", "pilot_sea", "riding",
+    ],
+    "dexterity": [
+        "athletics", "brawling", "contortionist", "dance", "evasion",
+        "martial_arts", "melee", "pick_pocket", "stealth",
+    ],
+    "technology": [
+        "air_vehicle_tech", "artistry", "basic_tech", "cybertech", "demolitions",
+        "electronics", "electronics_security_tech", "first_aid", "forgery",
+        "land_vehicle_tech", "paramedic", "photography", "pick_lock",
+        "play_instrument", "sea_vehicle_tech", "weaponstech",
+    ],
+    "cool": [
+        "acting", "bribery", "interrogation", "personal_grooming", "persuasion",
+        "streetwise", "style", "trading",
+    ],
+    "willpower": ["concentration", "endurance", "resist_torture_drugs"],
+    "empathy": ["conversation", "human_perception"],
+}
+
+# Build reverse: skill_key -> stat_key
+def _build_skill_to_stat_lookup():
+    lookup = {}
+    for stat, skills in SKILL_TO_STAT.items():
+        for sk in skills:
+            lookup[sk] = stat
+    return lookup
+
+SKILL_TO_STAT_LOOKUP = _build_skill_to_stat_lookup()
+
+# Override display names for skills on character sheet (internal_key -> display_name)
+SKILL_DISPLAY_OVERRIDES = {
+    "resist_torture_drugs": "Resist Torture/Drugs",
+    "electronics_security_tech": "Electronics/Security Tech",
+    "electronics": "Electronics/Security Tech",  # legacy alias
+    "conceal_object": "Conceal/Reveal Object",
+    "drive_land": "Drive Land Vehicle",
+    "pilot_sea": "Pilot Sea Vehicle",
+    "pilot_air": "Pilot Air Vehicle",
+    "melee": "Melee Weapon",
+}
+
+# Skill key -> stat key (for sheet display: "Skill (STAT)")
+# Covers CPR skill table; electronics_security_tech is the current field name (formerly electronics)
+SKILL_TO_STAT = {
+    "accounting": "intelligence",
+    "animal_handling": "intelligence",
+    "bureaucracy": "intelligence",
+    "business": "intelligence",
+    "composition": "intelligence",
+    "conceal_object": "intelligence",
+    "criminology": "intelligence",
+    "cryptography": "intelligence",
+    "deduction": "intelligence",
+    "education": "intelligence",
+    "gamble": "intelligence",
+    "library_search": "intelligence",
+    "lip_reading": "intelligence",
+    "local_expert": "intelligence",
+    "perception": "intelligence",
+    "stock_market": "intelligence",
+    "tactics": "intelligence",
+    "tracking": "intelligence",
+    "wilderness_survival": "intelligence",
+    "zoology": "intelligence",
+    "physics": "intelligence",
+    "biology": "intelligence",
+    "chemistry": "intelligence",
+    "neuroscience": "intelligence",
+    "data_science": "intelligence",
+    "economics": "intelligence",
+    "sociology": "intelligence",
+    "political_science": "intelligence",
+    "genetics": "intelligence",
+    "anatomy": "intelligence",
+    "robotics": "intelligence",
+    "nanotechnology": "intelligence",
+    "archery": "reflexes",
+    "autofire": "reflexes",
+    "handgun": "reflexes",
+    "heavy_weapons": "reflexes",
+    "shoulder_arms": "reflexes",
+    "drive_land": "reflexes",
+    "pilot_air": "reflexes",
+    "pilot_sea": "reflexes",
+    "riding": "reflexes",
+    "athletics": "dexterity",
+    "brawling": "dexterity",
+    "contortionist": "dexterity",
+    "dance": "dexterity",
+    "evasion": "dexterity",
+    "martial_arts": "dexterity",
+    "melee": "dexterity",
+    "pick_pocket": "dexterity",
+    "stealth": "dexterity",
+    "air_vehicle_tech": "technology",
+    "artistry": "technology",
+    "basic_tech": "technology",
+    "cybertech": "technology",
+    "demolitions": "technology",
+    "electronics": "technology",
+    "electronics_security_tech": "technology",
+    "first_aid": "technology",
+    "forgery": "technology",
+    "land_vehicle_tech": "technology",
+    "paramedic": "technology",
+    "photography": "technology",
+    "pick_lock": "technology",
+    "play_instrument": "technology",
+    "sea_vehicle_tech": "technology",
+    "weaponstech": "technology",
+    "acting": "cool",
+    "bribery": "cool",
+    "interrogation": "cool",
+    "personal_grooming": "cool",
+    "persuasion": "cool",
+    "streetwise": "cool",
+    "style": "cool",
+    "trading": "cool",
+    "concentration": "willpower",
+    "endurance": "willpower",
+    "resist_torture_drugs": "willpower",
+    "conversation": "empathy",
+    "human_perception": "empathy",
+}
+
+# Sheet display overrides: skill key -> display name
+SKILL_DISPLAY_OVERRIDES = {
+    "resist_torture_drugs": "Resist Torture/Drugs",
+    "electronics_security_tech": "Electronics/Security Tech",
+    "electronics": "Electronics/Security Tech",
+    "conceal_object": "Conceal/Reveal Object",
+    "drive_land": "Drive Land Vehicle",
+    "pilot_sea": "Pilot Sea Vehicle",
+    "pilot_air": "Pilot Air Vehicle",
+    "melee": "Melee Weapon",
 }
 
 # Role abilities (primary ability per role)

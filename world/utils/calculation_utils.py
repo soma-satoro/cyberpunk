@@ -82,7 +82,7 @@ SKILL_MAPPING = {
     'BT': 'basic_tech',
     'CT': 'cybertech',
     'DEM': 'demolitions',
-    'ES': 'electronics',
+    'ES': 'electronics_security_tech',
     'FA': 'first_aid',
     'FORG': 'forgery',
     'LVT': 'land_vehicle_tech',
@@ -107,7 +107,7 @@ SKILL_MAPPING = {
 
 def calculate_points_spent(character):
     stat_points = sum(getattr(character, attr, 0) for attr in STAT_MAPPING.values())
-    double_cost_skills = ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
+    double_cost_skills = ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics_security_tech', 'paramedic']
     from world.chargen_constants import ROLE_ABILITY_FREE_POINTS, ROLE_ABILITY_SKILLS
     from world.cyberpunk_constants import STATS
     core_stats = frozenset(STATS)

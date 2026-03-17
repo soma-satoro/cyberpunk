@@ -27,6 +27,7 @@ class CmdCyberware(MuxCommand):
       cyberware/install <name>
       cyberware/install "Popup Melee Weapon" = "<weapon>"
       cyberware/install "Popup Ranged Weapon" = "<weapon>"
+      cyberware/parent <cyberware child>=<cyberware parent>
 
     Activate/deactivate: cyberware weapons (Big Knucks, Rippers, Slice N Dice, Wolvers, Popup Melee/Ranged).
     """
@@ -85,6 +86,13 @@ class CmdCyberware(MuxCommand):
             else:
                 self.install_cyberware(character_sheet, raw, None)
             return
+        if self.switches and "parent" in self.switches:
+            if "=" not in raw:
+                self.caller.msg("Usage: cyberware/parent <cyberware child>=<cyberware parent>")
+                return
+            child_name, parent_name = raw.split("=", 1)
+            self._do_parent(character_sheet, child_name.strip(), parent_name.strip())
+            return
         if not raw:
             self.list_cyberware(character_sheet)
         else:
@@ -119,37 +127,86 @@ class CmdCyberware(MuxCommand):
                 return
         self.view_specific_cyberware(character_sheet, item_name)
 
-    def list_cyberware(self, character_sheet):
-        installed_cyberware = CyberwareInstance.objects.filter(character_sheet=character_sheet, installed=True)
+    def _do_parent(self, character_sheet, child_name, parent_name):
+        """Assign a cyberware option (child) to its parent limb."""
+        child_inst = CyberwareInstance.objects.filter(
+            character_sheet=character_sheet,
+            installed=True,
+            cyberware__name__iexact=child_name,
+        ).first()
+        if not child_inst:
+            self.caller.msg(f"You don't have installed cyberware named '{child_name}'.")
+            return
+        parent_inst = CyberwareInstance.objects.filter(
+            character_sheet=character_sheet,
+            installed=True,
+            cyberware__name__iexact=parent_name,
+        ).first()
+        if not parent_inst:
+            self.caller.msg(f"You don't have installed cyberware named '{parent_name}'.")
+            return
+        if child_inst.parent_id == parent_inst.id:
+            self.caller.msg(f"{child_inst.cyberware.name} is already assigned to {parent_inst.cyberware.name}.")
+            return
+        child_inst.parent = parent_inst
+        child_inst.save()
+        self.caller.msg(f"Assigned {child_inst.cyberware.name} to {parent_inst.cyberware.name}.")
 
-        if not installed_cyberware:
+    def list_cyberware(self, character_sheet):
+        installed = list(
+            CyberwareInstance.objects.filter(character_sheet=character_sheet, installed=True)
+            .select_related("cyberware", "parent", "paired_with")
+        )
+        if not installed:
             self.caller.msg("You have no cyberware installed.")
             return
 
-        W = 80
+        W = 78
         output = sheet_header("Installed Cyberware", width=W)
-        output += f"|y{'Name':<20}{'Type':<15}{'Humanity Loss':<15}{'Description':<25}|n\n"
+        output += f"|y{'Name':<30}{'Type':<20}{'Humanity Loss':<15}|n\n"
 
-        for instance in installed_cyberware:
-            cyberware = instance.cyberware
-            description = (cyberware.description[:22] + "...") if len(cyberware.description or "") > 25 else (cyberware.description or "")
-            output += f"|w{cyberware.name:<20}{cyberware.type:<15}{cyberware.humanity_loss:<15}{description:<25}|n\n"
+        # Roots: no parent, not paired (paired items are shown under their first-of-pair)
+        roots = [i for i in installed if i.parent_id is None and not getattr(i, "paired_with_id", None)]
+        shown_ids = set()
+
+        def render_instance(inst, indent=""):
+            cw = inst.cyberware
+            label = f"{cw.name} (Paired)" if getattr(inst, "paired_with_id", None) else cw.name
+            return f"{indent}|w{label:<30}{cw.type:<20}{cw.humanity_loss:<15}|n\n"
+
+        for root in roots:
+            if root.id in shown_ids:
+                continue
+            output += render_instance(root)
+            shown_ids.add(root.id)
+            for child in installed:
+                if child.parent_id == root.id:
+                    output += render_instance(child, "- ")
+            for paired in installed:
+                if getattr(paired, "paired_with_id", None) == root.id:
+                    output += render_instance(paired, "- ")
+                    shown_ids.add(paired.id)
+                    for pchild in installed:
+                        if pchild.parent_id == paired.id:
+                            output += render_instance(pchild, "- ")
 
         output += footer(width=W, fillchar="-")
-        output += "\nUse 'cyberware/info <name>' to view full details of a specific piece of cyberware."
+        output += "\nUse cyberware/info <cyberware name> for more information."
         self.caller.msg(output)
 
     def view_specific_cyberware(self, character_sheet, cyberware_name):
-        cyberware_name = cyberware_name.strip()  # Remove leading/trailing whitespace
-        try:
-            cyberware_instance = CyberwareInstance.objects.get(
+        cyberware_name = cyberware_name.strip()
+        instances = list(
+            CyberwareInstance.objects.filter(
                 character_sheet=character_sheet,
                 cyberware__name__iexact=cyberware_name,
-                installed=True
-            )
-        except CyberwareInstance.DoesNotExist:
+                installed=True,
+            ).select_related("cyberware", "parent", "paired_with")
+        )
+        if not instances:
             self.caller.msg(f"You don't have a piece of cyberware named '{cyberware_name}' installed.")
             return
+        cyberware_instance = instances[0]
 
         cyberware = cyberware_instance.cyberware
         

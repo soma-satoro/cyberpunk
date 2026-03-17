@@ -342,6 +342,8 @@ class CmdBuy(MuxCommand):
       buy <item name> from <merchant>   - Buy from an NPC vendor
       buy <item name>                   - In chargen or vendor room: buy equipment
       buy/cyberware <name>              - Buy body cyberware (implants)
+      buy/cyberware pair=<name>         - Buy paired Cybereye/Cyberarm/Cyberleg (requires existing)
+      buy/cyberware parent=<option>/<parent> - Buy option and attach to parent limb
       buy/stash <cyberware>             - Buy cyberware without installing (use with /cyberware)
 
     Vendor rooms are locations tagged with item categories (e.g. handguns, drugs, cyberware).
@@ -381,13 +383,18 @@ class CmdBuy(MuxCommand):
                 self.caller.msg(
                     "Usage: buy <item name> - Purchase equipment (weapons, armor, gear, cyberdecks). "
                     "Use buy/cyberware <name> for body cyberware. "
+                    "Use buy/cyberware pair=<name> for paired Cybereye/Cyberarm/Cyberleg. "
+                    "Use buy/cyberware parent=<option>/<parent> to attach options to a limb. "
                     "Use 'list chargen/weapons', 'list chargen/armor', 'list chargen/gear', "
                     "or 'list chargen/cyberware' to see available items."
                 )
             elif in_vendor_room:
                 self.caller.msg(
                     "Usage: buy <item name> - Purchase from this vendor. "
-                    "Use buy/cyberware <name> for cyberware. Use 'list' to see available items."
+                    "Use buy/cyberware <name> for cyberware. "
+                    "Use buy/cyberware pair=<name> for paired Cybereye/Cyberarm/Cyberleg. "
+                    "Use buy/cyberware parent=<option>/<parent> to attach options to a limb. "
+                    "Use 'list' to see available items."
                 )
             else:
                 self.caller.msg(
@@ -399,6 +406,16 @@ class CmdBuy(MuxCommand):
         """Handle purchase from tag-based vendor room (no NPC merchant)."""
         item_name = self.args.strip()
         cyberware_only = "cyberware" in (self.switches or [])
+        if cyberware_only and "=" in item_name:
+            lhs, rhs = item_name.split("=", 1)
+            lhs, rhs = lhs.strip().lower(), rhs.strip()
+            if lhs == "pair":
+                self._buy_cyberware_pair(rhs, chargen_purchase=False)
+                return
+            if lhs == "parent" and "/" in rhs:
+                opt, parent = rhs.split("/", 1)
+                self._buy_cyberware_with_parent(opt.strip(), parent.strip(), chargen_purchase=False)
+                return
         result = _find_vendor_item(self.caller.location, item_name, cyberware_only=cyberware_only)
         if not result:
             hint = "Use 'buy/cyberware <name>' for cyberware." if not cyberware_only else ""
@@ -492,9 +509,19 @@ class CmdBuy(MuxCommand):
 
     def _buy_from_chargen(self):
         """Handle chargen room purchase - only items 1000eb or under."""
-        item_name = self.args.strip().lower()
+        item_name = self.args.strip()
         cyberware_only = "cyberware" in (self.switches or [])
-        result = _find_chargen_item(item_name, cyberware_only=cyberware_only)
+        if cyberware_only and "=" in item_name:
+            lhs, rhs = item_name.split("=", 1)
+            lhs, rhs = lhs.strip().lower(), rhs.strip()
+            if lhs == "pair":
+                self._buy_cyberware_pair(rhs, chargen_purchase=True)
+                return
+            if lhs == "parent" and "/" in rhs:
+                opt, parent = rhs.split("/", 1)
+                self._buy_cyberware_with_parent(opt.strip(), parent.strip(), chargen_purchase=True)
+                return
+        result = _find_chargen_item(item_name.lower(), cyberware_only=cyberware_only)
         if not result:
             hint = "Use 'buy/cyberware <name>' for body cyberware." if not cyberware_only else ""
             self.caller.msg(
@@ -786,6 +813,158 @@ class CmdBuy(MuxCommand):
             self.caller.msg(f"You have purchased and installed {cyberware.name} for {final_cost} eb.")
         if not stash:
             self.caller.msg(f"Your new humanity is {character_sheet.humanity}.")
+
+    def _buy_cyberware_pair(self, cyberware_name, chargen_purchase=False):
+        """Buy a paired second Cybereye/Cyberarm/Cyberleg. Requires existing unpaired instance."""
+        PAIRABLE = ("cybereye", "cyberarm", "cyberleg")
+        name_lower = cyberware_name.lower()
+        if name_lower not in PAIRABLE:
+            self.caller.msg(
+                f"Only Cybereye, Cyberarm, and Cyberleg can be purchased as paired. "
+                f"Use buy/cyberware pair=Cybereye (or Cyberarm/Cyberleg)."
+            )
+            return
+        if chargen_purchase:
+            result = _find_chargen_item(cyberware_name, cyberware_only=True)
+        else:
+            result = _find_vendor_item(self.caller.location, cyberware_name, cyberware_only=True)
+        if not result:
+            self.caller.msg(f"'{cyberware_name}' is not available here.")
+            return
+        item = result[0]
+        cyberware = item["_cyberware"]
+        try:
+            character_sheet = self.caller.character_sheet
+        except AttributeError:
+            self.caller.msg("No character sheet found.")
+            return
+        inventory, _ = Inventory.get_or_create_for_character(self.caller)
+        first_instance = inventory.cyberware.filter(
+            cyberware__name__iexact=cyberware_name,
+            installed=True,
+            paired_with__isnull=True,
+        ).first()
+        if not first_instance:
+            self.caller.msg(
+                f"You don't have an unpaired {cyberware.name} to pair with. "
+                "Buy the first one with buy/cyberware <name>."
+            )
+            return
+        if inventory.cyberware.filter(
+            cyberware__name__iexact=cyberware_name,
+            installed=True,
+            paired_with=first_instance,
+        ).exists():
+            self.caller.msg(f"You already have a paired {cyberware.name}.")
+            return
+        base_cost = cyberware.cost
+        discount = get_purchase_discount_percent(self.caller, "cyberware", None)
+        final_cost = calculate_final_price(base_cost, discount)
+        is_fashionware = getattr(cyberware, "type", "") == "Fashionware"
+        if is_fashionware:
+            fashion_budget = CharacterMoneyService.get_fashion_budget(self.caller)
+            cash_balance = CharacterMoneyService.get_balance(self.caller)
+            fashion_to_spend = min(fashion_budget, final_cost)
+            cash_to_spend = final_cost - fashion_to_spend
+            if fashion_budget + cash_balance < final_cost:
+                self.caller.msg(f"Not enough for {cyberware.name}. It costs {final_cost} eb.")
+                return
+            if fashion_to_spend > 0 and not CharacterMoneyService.spend_fashion_money(self.caller, fashion_to_spend):
+                return
+            if cash_to_spend > 0 and not CharacterMoneyService.spend_money(self.caller, cash_to_spend):
+                if fashion_to_spend > 0:
+                    CharacterMoneyService.add_fashion_money(self.caller, fashion_to_spend)
+                self.caller.msg(f"Not enough Eurodollars for {cyberware.name}.")
+                return
+        elif not CharacterMoneyService.spend_money(self.caller, final_cost):
+            self.caller.msg(f"Not enough money for {cyberware.name}. It costs {final_cost} eb.")
+            return
+        instance = CyberwareInstance.objects.create(
+            cyberware=cyberware,
+            character_sheet=character_sheet,
+            character_object=self.caller,
+            installed=True,
+            paired_with=first_instance,
+        )
+        inventory.cyberware.add(instance)
+        character_sheet.calculate_humanity_loss()
+        if cyberware.name.lower() == "cyberarm":
+            character_sheet.has_cyberarm = True
+            character_sheet.recalculate_derived_stats()
+        if chargen_purchase:
+            purchased = inventory.chargen_purchased or []
+            purchased.append({"type": "cyberware", "name": cyberware.name, "paired": True})
+            inventory.chargen_purchased = purchased
+            inventory.save()
+        self.caller.msg(
+            f"You have purchased and installed {cyberware.name} (paired) for {final_cost} eb."
+        )
+        self.caller.msg(f"Your new humanity is {character_sheet.humanity}.")
+
+    def _buy_cyberware_with_parent(self, option_name, parent_name, chargen_purchase=False):
+        """Buy a cyberware option and attach it to an existing parent limb."""
+        if chargen_purchase:
+            result = _find_chargen_item(option_name, cyberware_only=True)
+        else:
+            result = _find_vendor_item(self.caller.location, option_name, cyberware_only=True)
+        if not result:
+            self.caller.msg(f"'{option_name}' is not available here.")
+            return
+        item = result[0]
+        cyberware = item["_cyberware"]
+        try:
+            character_sheet = self.caller.character_sheet
+        except AttributeError:
+            self.caller.msg("No character sheet found.")
+            return
+        inventory, _ = Inventory.get_or_create_for_character(self.caller)
+        parent_inst = inventory.cyberware.filter(
+            cyberware__name__iexact=parent_name,
+            installed=True,
+        ).first()
+        if not parent_inst:
+            self.caller.msg(f"You don't have {parent_name} installed. Install the parent limb first.")
+            return
+        base_cost = cyberware.cost
+        discount = get_purchase_discount_percent(self.caller, "cyberware", None)
+        final_cost = calculate_final_price(base_cost, discount)
+        is_fashionware = getattr(cyberware, "type", "") == "Fashionware"
+        if is_fashionware:
+            fashion_budget = CharacterMoneyService.get_fashion_budget(self.caller)
+            cash_balance = CharacterMoneyService.get_balance(self.caller)
+            fashion_to_spend = min(fashion_budget, final_cost)
+            cash_to_spend = final_cost - fashion_to_spend
+            if fashion_budget + cash_balance < final_cost:
+                self.caller.msg(f"Not enough for {cyberware.name}. It costs {final_cost} eb.")
+                return
+            if fashion_to_spend > 0 and not CharacterMoneyService.spend_fashion_money(self.caller, fashion_to_spend):
+                return
+            if cash_to_spend > 0 and not CharacterMoneyService.spend_money(self.caller, cash_to_spend):
+                if fashion_to_spend > 0:
+                    CharacterMoneyService.add_fashion_money(self.caller, fashion_to_spend)
+                self.caller.msg(f"Not enough Eurodollars for {cyberware.name}.")
+                return
+        elif not CharacterMoneyService.spend_money(self.caller, final_cost):
+            self.caller.msg(f"Not enough money for {cyberware.name}. It costs {final_cost} eb.")
+            return
+        instance = CyberwareInstance.objects.create(
+            cyberware=cyberware,
+            character_sheet=character_sheet,
+            character_object=self.caller,
+            installed=True,
+            parent=parent_inst,
+        )
+        inventory.cyberware.add(instance)
+        character_sheet.calculate_humanity_loss()
+        if chargen_purchase:
+            purchased = inventory.chargen_purchased or []
+            purchased.append({"type": "cyberware", "name": cyberware.name})
+            inventory.chargen_purchased = purchased
+            inventory.save()
+        self.caller.msg(
+            f"You have purchased and installed {cyberware.name} (on {parent_name}) for {final_cost} eb."
+        )
+        self.caller.msg(f"Your new humanity is {character_sheet.humanity}.")
 
     def _buy_from_vendor(self):
         """Handle vendor purchase - block items over 1000eb unless role allows."""
@@ -1306,6 +1485,10 @@ class CmdListItems(MuxCommand):
                 output.append(self._format_chargen_cyberdecks(cyberdecks))
         elif main_cat == "cyberware":
             output.append(self._format_chargen_cyberware(catalog))
+            output.append(
+                "|wCyberware pairs:|n buy/cyberware pair=Cybereye | "
+                "|wAttach option:|n buy/cyberware parent=Image Enhance/Cybereye"
+            )
 
         output.append(footer())
         self.caller.msg("\n".join(filter(None, output)))
@@ -1517,6 +1700,7 @@ class CmdListItems(MuxCommand):
             nm = crop(str(name), width=28, suffix="...")
             out.append(f"|c{nm:<28}|n |gType:|n {str(ctype):<20} |gSlots:|n {slots} |gHL:|n {hl} |gValue:|n |y{value} eb|n")
         out.append(section_header("", width=78))
+        out.append("|wBuy:|n buy/cyberware <name> | buy/cyberware pair=<Cybereye/Cyberarm/Cyberleg> | buy/cyberware parent=<option>/<parent>")
         return "\n".join(out) + "\n"
 
 class CleanExitEvMenu(EvMenu):
