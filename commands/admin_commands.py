@@ -201,10 +201,11 @@ class CmdStat(AdminCommand):
       stat Eve=paramedic/4
       stat John=humanity/49
 
-    Supports abbreviations (INT, ATH, MED, HUM, etc.) and full names.
+    Supports abbreviations (INT, ATH, MED, HUM, MAKF, etc.) and full names.
     Values are 0-10 for stats/skills. Humanity: 0-100, capped by 10*Empathy
     (e.g. Empathy 7 = max Humanity 70). Medicine specialties: medicine_surgery,
-    medicine_pharma, medicine_cryo (e.g. stat Bob=medicine_surgery/2).
+    medicine_pharma, medicine_cryo. Maker specialties: maker_field, maker_upgrade,
+    maker_fabrication, maker_invention (e.g. stat Bob=maker_field/4).
     """
     key = "stat"
     aliases = ["staffstat", "modstat"]
@@ -233,7 +234,7 @@ class CmdStat(AdminCommand):
             return
 
         # Resolve stat name (abbreviations, spaces, ROLE_SKILL_NAME_MAP, etc.)
-        from world.utils.character_utils import get_full_attribute_name, MEDICINE_SPECIALTY_ATTRIBUTES
+        from world.utils.character_utils import get_full_attribute_name, MEDICINE_SPECIALTY_ATTRIBUTES, MAKER_SPECIALTY_ATTRIBUTES
         from world.cyberpunk_constants import ROLE_SKILL_NAME_MAP
         from world.improvement_points import IP_ATTRIBUTES, set_character_stat_value
 
@@ -283,12 +284,12 @@ class CmdStat(AdminCommand):
             self.caller.msg("Level must be between 0 and 10.")
             return
 
-        # Medicine specialties are stored on character.db, not in skills
-        if full_key in MEDICINE_SPECIALTY_ATTRIBUTES:
+        # Medicine specialties (Medtech) and Maker specialties (Tech) are stored on character.db, not in skills
+        if full_key in MEDICINE_SPECIALTY_ATTRIBUTES or full_key in MAKER_SPECIALTY_ATTRIBUTES:
             setattr(char.db, full_key, new_value)
             # Mirror to sheet if it has the field
             sheet = char.character_sheet
-            if hasattr(sheet, full_key):
+            if sheet and hasattr(sheet, full_key):
                 setattr(sheet, full_key, new_value)
                 if hasattr(sheet, 'save'):
                     sheet.save()
