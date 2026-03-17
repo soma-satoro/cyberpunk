@@ -19,7 +19,7 @@ own cmdsets by inheriting from them or directly from `evennia.CmdSet`.
 from evennia import default_cmds, CmdSet
 from .character_commands import CmdSheet, CmdRoll, CmdLuck, CmdShortDesc, CmdPlusOoc, CmdPlusIc, CmdMeet
 from .chargen import CmdChargen, CmdListCharacterSheets, CmdLifepath, CmdSelfStat, CmdSetLanguage, CmdSellYourSoul
-from .admin_commands import CmdStat, CmdHeal, CmdHarm, CmdApprove, CmdUnapprove, CmdSpawnRipperdoc, CmdGradientName, CmdClearAllStates, CmdClearRental, CmdCleanupDuplicates, CmdExamine, CmdAssociateAllCharacterSheets, CmdViewCharacterSheetID, CmdSetCharacterSheetID, CmdAllSheets, CmdViewSheetAttributes, CmdSyncLanguages, CmdJoin, CmdSummon
+from .admin_commands import CmdStat, CmdHeal, CmdHarm, CmdApprove, CmdUnapprove, CmdSpawnRipperdoc, CmdGradientName, CmdClearAllStates, CmdClearRental, CmdCleanupDuplicates, CmdExamine, CmdAssociateAllCharacterSheets, CmdViewCharacterSheetID, CmdSetCharacterSheetID, CmdAllSheets, CmdViewSheetAttributes, CmdSyncLanguages, CmdJoin, CmdSummon, CmdClearDb
 from .inventory_commands import CmdInventory, CmdWear
 from .voucher_commands import CmdVoucher, CmdConceal, CmdOwner
 from .equipment_commands import CmdAddItem, CmdAddVehicle, CmdRemoveVehicle, CmdPopulateWeapons, CmdPopulateArmor, CmdPopulateGear, CmdPopulateVehicles, CmdViewEquipment, CmdPopulateAllEquipment, CmdRemoveEquipment, CmdPopulateCyberware, CmdDepopulateAllEquipment
@@ -281,6 +281,7 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdSyncLanguages())
         self.add(CmdJoin())
         self.add(CmdSummon())
+        self.add(CmdClearDb())
 
 class EquipmentAdminCmdSet(CmdSet): # type: ignore
     """

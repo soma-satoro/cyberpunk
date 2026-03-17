@@ -13,6 +13,8 @@ from world.languages.models import Language, CharacterLanguage
 from evennia.utils import logger
 from world.inventory.models import Gear
 from world.equipment_data import populate_weapons, populate_armor, populate_gear, populate_all_equipment
+from world.cyberware.models import Cyberware
+from world.inventory.models import Weapon, Armor, Gear
 from world.cyberpunk_sheets.models import CharacterSheet
 from world.cyberpunk_sheets.merchants import create_cyberware_merchant
 from typeclasses.rental import RentableRoom
@@ -87,6 +89,78 @@ class CmdPopulate(MuxCommand):
         
         else:
             self.caller.msg("Invalid switch. See 'help populate' for options.")
+
+
+class CmdClearDb(MuxCommand):
+    """
+    Clear (delete) a database item so it can be re-populated with fresh data.
+
+    Usage:
+      cleardb <type> <name>
+      cleardb/cyberware Neuroport
+      cleardb/weapon "Medium Pistol"
+      cleardb/armor "Light Armorjack"
+      cleardb/gear "Scop"
+
+    Types: cyberware, weapon, armor, gear
+
+    Deleting a Cyberware record will also remove any installed instances from
+    characters (CASCADE).     Use this when you need to fix stale data (e.g. after
+    changing humanity_loss in Cyberware data) - clear the item, then run
+    |wpopulate_cyberware|n to re-create it with fresh values.
+    """
+
+    key = "cleardb"
+    aliases = ["@cleardb", "clear_db"]
+    locks = "cmd:perm(Admin)"
+    help_category = "Admin"
+
+    def func(self):
+        if not self.switches or not self.args:
+            self.caller.msg("Usage: cleardb/<type> <name>  (e.g. cleardb/cyberware Neuroport)")
+            self.caller.msg("Types: cyberware, weapon, armor, gear")
+            return
+
+        switch = self.switches[0].lower()
+        name = self.args.strip()
+
+        if switch == "cyberware":
+            qs = Cyberware.objects.filter(name__iexact=name)
+            if not qs.exists():
+                self.caller.msg(f"Cyberware '{name}' not found.")
+                return
+            cw = qs.first()
+            instance_count = cw.cyberware_app_instances.count()
+            cw.delete()
+            self.caller.msg(f"Deleted Cyberware '{cw.name}' ({instance_count} instances removed).")
+            self.caller.msg("Run |wpopulate_cyberware|n to re-create with fresh data.")
+        elif switch == "weapon":
+            qs = Weapon.objects.filter(name__iexact=name)
+            if not qs.exists():
+                self.caller.msg(f"Weapon '{name}' not found.")
+                return
+            w = qs.first()
+            w.delete()
+            self.caller.msg(f"Deleted Weapon '{w.name}'. Run |wpopulate_weapons|n to re-create.")
+        elif switch == "armor":
+            qs = Armor.objects.filter(name__iexact=name)
+            if not qs.exists():
+                self.caller.msg(f"Armor '{name}' not found.")
+                return
+            a = qs.first()
+            a.delete()
+            self.caller.msg(f"Deleted Armor '{a.name}'. Run |wpopulate_armor|n to re-create.")
+        elif switch == "gear":
+            qs = Gear.objects.filter(name__iexact=name)
+            if not qs.exists():
+                self.caller.msg(f"Gear '{name}' not found.")
+                return
+            g = qs.first()
+            g.delete()
+            self.caller.msg(f"Deleted Gear '{g.name}'. Run |wpopulate_gear|n to re-create.")
+        else:
+            self.caller.msg("Unknown type. Use: cyberware, weapon, armor, gear")
+
 
 class AdminCommand(MuxCommand):
     """
