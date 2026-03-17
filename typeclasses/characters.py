@@ -610,19 +610,19 @@ class Character(DefaultCharacter):
         self.calculate_humanity()
     
     def calculate_humanity(self):
-        """Calculate character's humanity based on empathy and installed cyberware."""
+        """Calculate character's humanity based on empathy and installed cyberware.
+        Preserves staff-set humanity by using current value + old losses as base."""
         # Get total humanity loss from cyberware
         total_humanity_loss = self.calculate_cyberware_humanity_loss()
         trauma_loss = getattr(self.db, "trauma_humanity_loss", 0) or 0
 
-        # Base humanity is empathy * 10
-        base_humanity = self.db.empathy * 10
-
-        # Current humanity is base minus losses (includes trauma from removed cyberware)
-        self.db.humanity = max(0, base_humanity - total_humanity_loss - trauma_loss)
+        # Preserve staff-set humanity: use current humanity + old losses as base, then apply new losses
+        old_total_hl = getattr(self.db, "total_cyberware_humanity_loss", 0) or 0
+        humanity_base = (getattr(self.db, "humanity", 0) or 0) + old_total_hl + trauma_loss
+        self.db.humanity = max(0, min(self.db.empathy * 10, humanity_base - total_humanity_loss - trauma_loss))
         
         # Only update empathy if it's been significantly reduced
-        if base_humanity <= total_humanity_loss + trauma_loss:
+        if self.db.empathy * 10 <= total_humanity_loss + trauma_loss:
             self.db.empathy = max(1, self.db.humanity // 10)
         
         # Store total loss for reference

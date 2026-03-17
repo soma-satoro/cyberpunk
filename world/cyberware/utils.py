@@ -78,15 +78,18 @@ def calculate_humanity_loss(sheet):
     from world.inventory.models import CyberwareInstance
     installed_cyberware = CyberwareInstance.objects.filter(character_sheet=sheet, installed=True)
     total_cyberware_hl = sum(cw.cyberware.humanity_loss for cw in installed_cyberware)
-    
+    trauma_hl = getattr(sheet, "trauma_humanity_loss", 0) or 0
+
     print(f"Debug: Total Cyberware Humanity Loss: {total_cyberware_hl}")
     print(f"Debug: Character's current Empathy: {sheet.empathy}")
-    
-    # Calculate new humanity
-    new_humanity = max(0, sheet.empathy * 10 - total_cyberware_hl)
-    
+
+    # Preserve staff-set humanity: use current humanity + old losses as base, then apply new losses
+    old_total_hl = getattr(sheet, "total_cyberware_humanity_loss", 0) or 0
+    humanity_base = sheet.humanity + old_total_hl + trauma_hl
+    new_humanity = max(0, min(sheet.empathy * 10, humanity_base - total_cyberware_hl - trauma_hl))
+
     print(f"Debug: Calculated New Humanity: {new_humanity}")
-    
+
     # Update humanity and empathy
     sheet.humanity = new_humanity
     sheet.empathy = max(1, new_humanity // 10)

@@ -29,6 +29,38 @@ from world.improvement_points import (
 )
 
 
+def _recalculate_derived_stats_for_bod_will(char):
+    """Recalculate HP, death save, serious wounds, unarmed dice when BODY or WILL change."""
+    if hasattr(char, "recalculate_derived_stats"):
+        char.recalculate_derived_stats()
+    sheet = getattr(char, "character_sheet", None)
+    if sheet and hasattr(sheet, "recalculate_derived_stats"):
+        for attr in ("body", "willpower"):
+            if hasattr(char.db, attr) and hasattr(sheet, attr):
+                setattr(sheet, attr, getattr(char.db, attr))
+        sheet.recalculate_derived_stats()
+        sheet.save(skip_recalculation=True)
+        if hasattr(sheet, "unarmed_damage_dice"):
+            char.db.unarmed_damage_dice = sheet.unarmed_damage_dice
+            char.db.unarmed_damage_die_type = sheet.unarmed_damage_die_type
+
+
+def _apply_empathy_humanity_change(char, delta):
+    """
+    When Empathy changes via IP, adjust humanity by delta (+10 on raise, -10 on refund).
+    Humanity is capped by 10*Empathy.
+    """
+    current = getattr(char.db, "humanity", 0) or 0
+    empathy = getattr(char.db, "empathy", 1) or 1
+    new_humanity = max(0, min(empathy * 10, current + delta))
+    char.db.humanity = new_humanity
+    if hasattr(char, "character_sheet") and char.character_sheet:
+        sheet = char.character_sheet
+        if hasattr(sheet, "humanity"):
+            sheet.humanity = new_humanity
+            sheet.save(skip_recalculation=True)
+
+
 def get_target_character(caller, name):
     """Resolve name to a puppetable character (typeclass)."""
     if not name:
@@ -417,6 +449,10 @@ class CmdIP(MuxCommand):
 
         # Perform purchase (normal flow)
         set_character_stat_value(char, purchase_stat if purchase_stat in ("medicine", "maker") else stat_name, next_level)
+        if stat_key == "empathy":
+            _apply_empathy_humanity_change(char, 10)
+        if stat_key in ("body", "willpower"):
+            _recalculate_derived_stats_for_bod_will(char)
         if stat_key == "medicine" and medicine_specialty and hasattr(char, "set_medicine_specialty"):
             current_spec = getattr(char.db, f"medicine_{medicine_specialty}", 0) or 0
             char.set_medicine_specialty(medicine_specialty, current_spec + 1)
@@ -474,6 +510,10 @@ class CmdIP(MuxCommand):
             return
 
         set_character_stat_value(char, stat_key, from_level)
+        if stat_key == "empathy":
+            _apply_empathy_humanity_change(char, -10)
+        if stat_key in ("body", "willpower"):
+            _recalculate_derived_stats_for_bod_will(char)
 
         # Medicine: also revert the specialty point that was added
         if stat_key == "medicine" and last.get("medicine_specialty"):

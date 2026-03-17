@@ -199,9 +199,11 @@ class CmdStat(AdminCommand):
       stat Charlie=cool/7
       stat David=medicine/6
       stat Eve=paramedic/4
+      stat John=humanity/49
 
-    Supports abbreviations (INT, ATH, MED, etc.) and full names.
-    Values are 0-10 for stats/skills. Medicine specialties: medicine_surgery,
+    Supports abbreviations (INT, ATH, MED, HUM, etc.) and full names.
+    Values are 0-10 for stats/skills. Humanity: 0-100, capped by 10*Empathy
+    (e.g. Empathy 7 = max Humanity 70). Medicine specialties: medicine_surgery,
     medicine_pharma, medicine_cryo (e.g. stat Bob=medicine_surgery/2).
     """
     key = "stat"
@@ -230,17 +232,6 @@ class CmdStat(AdminCommand):
             self.caller.msg(f"{char.name} doesn't have a character sheet.")
             return
 
-        # Parse value
-        try:
-            new_value = int(value_str)
-        except ValueError:
-            self.caller.msg(f"Level must be a number, got: {value_str}")
-            return
-
-        if new_value < 0 or new_value > 10:
-            self.caller.msg("Level must be between 0 and 10.")
-            return
-
         # Resolve stat name (abbreviations, spaces, ROLE_SKILL_NAME_MAP, etc.)
         from world.utils.character_utils import get_full_attribute_name, MEDICINE_SPECIALTY_ATTRIBUTES
         from world.cyberpunk_constants import ROLE_SKILL_NAME_MAP
@@ -256,6 +247,42 @@ class CmdStat(AdminCommand):
         # Apply ROLE_SKILL_NAME_MAP (e.g. diagnosis->medicine, melee_weapon->melee)
         full_key = ROLE_SKILL_NAME_MAP.get(full_key, full_key)
 
+        # Parse value
+        try:
+            new_value = int(value_str)
+        except ValueError:
+            self.caller.msg(f"Level must be a number, got: {value_str}")
+            return
+
+        # Humanity: 0-100, capped by 10*Empathy
+        if full_key == "humanity":
+            if new_value < 0 or new_value > 100:
+                self.caller.msg("Humanity must be between 0 and 100.")
+                return
+            empathy = getattr(char.db, "empathy", 1) or 1
+            humanity_cap = empathy * 10
+            if new_value > humanity_cap:
+                self.caller.msg(
+                    f"Humanity capped by Empathy ({empathy}): max {humanity_cap}. "
+                    f"Setting to {humanity_cap}."
+                )
+                new_value = humanity_cap
+            char.db.humanity = new_value
+            sheet = char.character_sheet
+            if sheet and hasattr(sheet, "humanity"):
+                sheet.humanity = new_value
+                sheet.save(skip_recalculation=True)
+            display_name = "Humanity"
+            self.caller.msg(f"Set {char.name}'s {display_name} to {new_value}.")
+            if char.sessions.all():
+                char.msg(f"Your {display_name} has been set to {new_value} by staff.")
+            return
+
+        # Stats/skills: 0-10
+        if new_value < 0 or new_value > 10:
+            self.caller.msg("Level must be between 0 and 10.")
+            return
+
         # Medicine specialties are stored on character.db, not in skills
         if full_key in MEDICINE_SPECIALTY_ATTRIBUTES:
             setattr(char.db, full_key, new_value)
@@ -266,10 +293,17 @@ class CmdStat(AdminCommand):
                 if hasattr(sheet, 'save'):
                     sheet.save()
         else:
+            # For Empathy: capture old value before setting (humanity +10 per point increase)
+            old_empathy = getattr(char.db, "empathy", 1) or 1 if full_key == "empathy" else None
             # Use set_character_stat_value: updates character and mirrors to sheet
             if not set_character_stat_value(char, full_key, new_value):
                 self.caller.msg(f"Could not set {full_key} on {char.name}.")
                 return
+            # Empathy change: +10 humanity per point increase, -10 per point decrease, capped by 10*Empathy
+            if full_key == "empathy" and old_empathy is not None and new_value != old_empathy:
+                delta = 10 * (new_value - old_empathy)
+                current = getattr(char.db, "humanity", 0) or 0
+                char.db.humanity = max(0, min(new_value * 10, current + delta))
 
         # Recalculate derived stats (HP, Death Save, Serious Wounds, Humanity)
         if hasattr(char, 'recalculate_derived_stats'):

@@ -761,14 +761,15 @@ class EdgerunnerChargen:
         total_humanity_loss = sum(cw.cyberware.humanity_loss for cw in cyberware_instances)
         trauma_loss = getattr(character.db, 'trauma_humanity_loss', 0) or 0
 
-        # Store total loss
-        character.db.total_cyberware_humanity_loss = total_humanity_loss
-
-        # Calculate humanity based on empathy (includes trauma)
+        # Preserve staff-set humanity: use current humanity + old losses as base, then apply new losses
         if not hasattr(character.db, 'empathy'):
             character.db.empathy = 1
+        old_total_hl = getattr(character.db, 'total_cyberware_humanity_loss', 0) or 0
 
-        character.db.humanity = max(0, character.db.empathy * 10 - total_humanity_loss - trauma_loss)
+        # Store total loss
+        character.db.total_cyberware_humanity_loss = total_humanity_loss
+        humanity_base = (getattr(character.db, 'humanity', 0) or 0) + old_total_hl + trauma_loss
+        character.db.humanity = max(0, min(character.db.empathy * 10, humanity_base - total_humanity_loss - trauma_loss))
 
         # Recalculate empathy if humanity reduction is significant
         if character.db.empathy * 10 <= total_humanity_loss + trauma_loss:

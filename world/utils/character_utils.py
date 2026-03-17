@@ -73,7 +73,8 @@ STAT_MAPPING = {
     'LUCK': 'luck',
     'MOVE': 'move',
     'BOD': 'body',
-    'EMP': 'empathy'
+    'EMP': 'empathy',
+    'HUM': 'humanity',
 }
 
 SKILL_MAPPING = {
