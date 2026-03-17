@@ -1,4 +1,6 @@
-import random, logging
+import copy
+import random
+import logging
 import traceback
 from world.cyberpunk_constants import ROLES, STATS, ROLE_SKILLS, ROLE_SKILL_NAME_MAP, EQUIPMENT, EQUIPMENT_OR_CHOICES, ROLE_STAT_TABLES, ROLE_CYBERWARE
 DOUBLE_COST_SKILLS = ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics', 'paramedic']
@@ -834,7 +836,8 @@ class EdgerunnerChargen:
 
     @classmethod
     def generate_stat_table(cls, role):
-        return ROLE_STAT_TABLES.get(role, [])
+        templates = ROLE_STAT_TABLES.get(role, [])
+        return copy.deepcopy(templates) if templates else []
 
     @classmethod
     def calculate_final_stats(cls, stat_templates):

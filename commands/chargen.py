@@ -369,7 +369,11 @@ class CmdChargen(MuxCommand):
             sheet.full_name = full_name
             sheet.handle = full_name  # Default Handle to full name; user can change later
             sheet.save()
-            
+
+            # Ensure inventory exists (assign_gear creates it for edgerunner; complete_package does not)
+            from world.inventory.models import Inventory
+            Inventory.objects.get_or_create(character_id=sheet.pk)
+
             # Generate character based on method
             char.db.chargen_method = method  # Store for point calculation (edgerunner vs complete_package)
             if method == "edgerunner":
