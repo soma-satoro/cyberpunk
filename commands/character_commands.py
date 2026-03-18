@@ -907,6 +907,10 @@ class CmdRoll(MuxCommand):
             out += f" - |{color}{result}|n"
 
         self.caller.msg(out)
+        loc = getattr(char, "location", None)
+        if loc:
+            room_out = out.replace("Rolling", f"|w{char.key}|n rolls", 1)
+            loc.msg_contents(room_out, exclude=[char])
 
     def _roll_into_job(self, args):
         """roll/job <job#>=<attribute> + <skill> [vs <DV>] - Roll and post result to job."""

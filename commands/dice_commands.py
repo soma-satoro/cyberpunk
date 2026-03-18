@@ -85,3 +85,7 @@ class CmdDice(Command):
                 out += f" - |g{successes} success|n, |r{failures} failure|n"
 
         self.caller.msg(out)
+        loc = getattr(self.caller, "location", None)
+        if loc:
+            room_out = out.replace("You roll", f"|w{self.caller.key}|n rolls", 1)
+            loc.msg_contents(room_out, exclude=[self.caller])
