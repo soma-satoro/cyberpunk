@@ -321,6 +321,25 @@ def fuzzy_match_skill(input_str):
         return legacy, None
     return None, []
 
+
+def fuzzy_match_stat_or_skill(input_str):
+    """
+    Fuzzy match input to a stat or skill (interchangeable for roll).
+    Tries stat first, then skill. Returns (full_name, None) if unique match,
+    or (None, [display_names]) if multiple matches. (None, []) if no match.
+    """
+    stat_match, stat_ambiguous = fuzzy_match_stat(input_str)
+    if stat_match:
+        return stat_match, None
+    skill_match, skill_ambiguous = fuzzy_match_skill(input_str)
+    if skill_match:
+        return skill_match, None
+    if stat_ambiguous or skill_ambiguous:
+        combined = list(dict.fromkeys((stat_ambiguous or []) + (skill_ambiguous or [])))
+        return None, combined
+    return None, []
+
+
 def get_character_sheet(character):
     if isinstance(character, (list, tuple)) and character:
         character = character[0]

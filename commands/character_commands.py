@@ -2,7 +2,7 @@ import random
 import re
 from evennia import Command, logger, search_object, default_cmds
 from typeclasses.rental import CharacterSheetMoneyService
-from world.utils.character_utils import get_full_attribute_name, fuzzy_match_stat, fuzzy_match_skill, ALL_ATTRIBUTES, TOPSHEET_MAPPING, is_staff
+from world.utils.character_utils import get_full_attribute_name, fuzzy_match_stat, fuzzy_match_skill, fuzzy_match_stat_or_skill, ALL_ATTRIBUTES, TOPSHEET_MAPPING, is_staff
 from world.list_data import STAT_DESCRIPTIONS, SKILL_TO_STAT_LOOKUP, SKILL_DISPLAY_OVERRIDES
 from world.utils.calculation_utils import get_remaining_points, STAT_MAPPING, SKILL_MAPPING
 from typeclasses.chargen import ChargenRoom
@@ -732,24 +732,25 @@ class CmdRoll(MuxCommand):
     Roll a skill check.
 
     Usage:
-      roll <attribute> + <skill> [<+/- modifier>]
-      roll <attribute> + <skill> [<+/- modifier>] vs <DV or difficulty name>
-      roll/luck <amount>=<attribute> + <skill> [<+/- modifier>] [vs <DV>]
+      roll <stat/skill> + <stat/skill> [<+/- modifier>]
+      roll <stat/skill> + <stat/skill> [<+/- modifier>] vs <DV or difficulty name>
+      roll/luck <amount>=<stat/skill> + <stat/skill> [<+/- modifier>] [vs <DV>]
 
-    Rolls 1d10 + attribute + skill + modifier (or raw values). Supports critical success
-    (natural 10: add another d10) and critical failure (natural 1: subtract another d10).
+    Stats and skills are interchangeable in either position. Rolls 1d10 + both values + modifier.
+    Supports critical success (natural 10: add another d10) and critical failure (natural 1: subtract another d10).
     With 'vs', shows success (total exceeds DV) or failure. Hitting the DV exactly fails.
 
     Use roll/luck <N>= to spend N luck points before rolling (+1 per point).
-    Use roll/job <#>=<stat> + <skill> [vs <DV>] to roll and post result to a job (e.g. repair).
+    Use roll/job <#>=<stat/skill> + <stat/skill> [vs <DV>] to roll and post result to a job (e.g. repair).
 
     Difficulty names: Simple (9), Everyday (13), Difficult (15), Professional (17),
     Heroic (21), Incredible (24), Legendary (29).
 
     Examples:
       roll Reflexes + Handgun
+      roll Credibility + Cool
+      roll Cool + Credibility
       roll Intelligence + Interface +1 vs 13
-      roll Reflexes + Shoulder Arms -3 vs Legendary
       roll/luck 3=intelligence + interface + 2 vs 20
     """
     key = "roll"
@@ -783,7 +784,7 @@ class CmdRoll(MuxCommand):
         luck_spend = 0
         if "luck" in self.switches:
             if "=" not in args:
-                self.caller.msg("Usage: roll/luck <amount>=<attribute> + <skill> [<+/- modifier>] [vs <DV>]")
+                self.caller.msg("Usage: roll/luck <amount>=<stat/skill> + <stat/skill> [<+/- modifier>] [vs <DV>]")
                 return
             luck_part, args = args.split("=", 1)
             luck_part = luck_part.strip()
@@ -793,12 +794,12 @@ class CmdRoll(MuxCommand):
                     self.caller.msg("Luck amount must be at least 1.")
                     return
             except ValueError:
-                self.caller.msg("Usage: roll/luck <amount>=<attribute> + <skill> [vs <DV>]")
+                self.caller.msg("Usage: roll/luck <amount>=<stat/skill> + <stat/skill> [vs <DV>]")
                 return
             args = args.strip()
 
         if not args:
-            self.caller.msg("Usage: roll <attribute> + <skill> [<+/- modifier>] [vs <DV or difficulty>]")
+            self.caller.msg("Usage: roll <stat/skill> + <stat/skill> [<+/- modifier>] [vs <DV or difficulty>]")
             return
 
         # Parse "vs" part (case-insensitive)
@@ -815,9 +816,9 @@ class CmdRoll(MuxCommand):
         # Parse "Stat + Skill" part (with optional modifier on skill)
         if " + " not in args:
             if re.match(r'^\s*\d*d\d+', args, re.IGNORECASE):
-                self.caller.msg("Syntax: roll <stat> + <skill> vs <difficulty>. To roll dice without a skill check, use the +dice command.")
+                self.caller.msg("Syntax: roll <stat/skill> + <stat/skill> vs <difficulty>. To roll dice without a skill check, use the +dice command.")
                 return
-            self.caller.msg("Usage: roll <attribute> + <skill> [<+/- modifier>] [vs <DV or difficulty>]")
+            self.caller.msg("Usage: roll <stat/skill> + <stat/skill> [<+/- modifier>] [vs <DV or difficulty>]")
             return
 
         parts = args.split(" + ", 1)
@@ -838,30 +839,30 @@ class CmdRoll(MuxCommand):
         except ValueError:
             pass
 
-        # Fall back to character sheet lookup (with fuzzy matching)
+        # Fall back to character sheet lookup (stats and skills interchangeable)
         if attr_value is None:
-            full_attr_name, attr_ambiguous = fuzzy_match_stat(attr_input)
-            full_skill_name, skill_ambiguous = fuzzy_match_skill(skill_input)
+            full_first, first_ambiguous = fuzzy_match_stat_or_skill(attr_input)
+            full_second, second_ambiguous = fuzzy_match_stat_or_skill(skill_input)
 
-            if full_attr_name is None and attr_ambiguous:
-                self.caller.msg(f"Ambiguous attribute '{attr_input}'. Did you mean: {', '.join(attr_ambiguous)}?")
+            if full_first is None and first_ambiguous:
+                self.caller.msg(f"Ambiguous '{attr_input}'. Did you mean: {', '.join(first_ambiguous)}?")
                 return
-            if full_attr_name is None:
-                self.caller.msg(f"Invalid attribute. Choose from: {', '.join(STAT_MAPPING.values())}, or use raw values 0-10.")
+            if full_first is None:
+                self.caller.msg(f"Invalid stat/skill '{attr_input}'. Use a stat or skill name, or raw values 0-10.")
                 return
 
-            if full_skill_name is None and skill_ambiguous:
-                self.caller.msg(f"Ambiguous skill '{skill_input}'. Did you mean: {', '.join(skill_ambiguous)}?")
+            if full_second is None and second_ambiguous:
+                self.caller.msg(f"Ambiguous '{skill_input}'. Did you mean: {', '.join(second_ambiguous)}?")
                 return
-            if full_skill_name is None:
-                self.caller.msg(f"Invalid skill. Choose from: {', '.join(SKILL_MAPPING.values())}, or use raw values 0-10.")
+            if full_second is None:
+                self.caller.msg(f"Invalid stat/skill '{skill_input}'. Use a stat or skill name, or raw values 0-10.")
                 return
 
             char = self.caller
-            attr_value = self._get_stat_value(char, full_attr_name, is_stat=True)
-            skill_value = self._get_stat_value(char, full_skill_name, is_stat=False)
-            attr_display = full_attr_name.replace('_', ' ').title()
-            skill_display = full_skill_name.replace('_', ' ').title()
+            attr_value = self._get_stat_value(char, full_first, is_stat=True)
+            skill_value = self._get_stat_value(char, full_second, is_stat=False)
+            attr_display = full_first.replace('_', ' ').title()
+            skill_display = full_second.replace('_', ' ').title()
 
         # Luck check
         if luck_spend > 0:
@@ -910,7 +911,7 @@ class CmdRoll(MuxCommand):
     def _roll_into_job(self, args):
         """roll/job <job#>=<attribute> + <skill> [vs <DV>] - Roll and post result to job."""
         if not args or "=" not in args:
-            self.caller.msg("Usage: roll/job <job#>=<attribute> + <skill> [vs <DV>]")
+            self.caller.msg("Usage: roll/job <job#>=<stat/skill> + <stat/skill> [vs <DV>]")
             return
 
         job_part, roll_part = args.split("=", 1)
@@ -949,33 +950,33 @@ class CmdRoll(MuxCommand):
             vs_info = parse_dv(vs_str)
 
         if " + " not in roll_part:
-            self.caller.msg("Roll format: <stat> + <skill> [vs <DV>]")
+            self.caller.msg("Roll format: <stat/skill> + <stat/skill> [vs <DV>]")
             return
 
         parts = roll_part.split(" + ", 1)
         attr_input = parts[0].strip()
         skill_input, modifier = self._parse_modifier(parts[1])
 
-        full_attr_name, attr_ambiguous = fuzzy_match_stat(attr_input)
-        full_skill_name, skill_ambiguous = fuzzy_match_skill(skill_input)
-        if full_attr_name is None and attr_ambiguous:
-            self.caller.msg(f"Ambiguous attribute '{attr_input}'. Did you mean: {', '.join(attr_ambiguous)}?")
+        full_first, first_ambiguous = fuzzy_match_stat_or_skill(attr_input)
+        full_second, second_ambiguous = fuzzy_match_stat_or_skill(skill_input)
+        if full_first is None and first_ambiguous:
+            self.caller.msg(f"Ambiguous '{attr_input}'. Did you mean: {', '.join(first_ambiguous)}?")
             return
-        if full_attr_name is None:
-            self.caller.msg(f"Invalid attribute: {attr_input}")
+        if full_first is None:
+            self.caller.msg(f"Invalid stat/skill: {attr_input}")
             return
-        if full_skill_name is None and skill_ambiguous:
-            self.caller.msg(f"Ambiguous skill '{skill_input}'. Did you mean: {', '.join(skill_ambiguous)}?")
+        if full_second is None and second_ambiguous:
+            self.caller.msg(f"Ambiguous '{skill_input}'. Did you mean: {', '.join(second_ambiguous)}?")
             return
-        if full_skill_name is None:
-            self.caller.msg(f"Invalid skill: {skill_input}")
+        if full_second is None:
+            self.caller.msg(f"Invalid stat/skill: {skill_input}")
             return
 
         char = self.caller
-        attr_value = self._get_stat_value(char, full_attr_name, is_stat=True)
-        skill_value = self._get_stat_value(char, full_skill_name, is_stat=False)
-        attr_display = full_attr_name.replace("_", " ").title()
-        skill_display = full_skill_name.replace("_", " ").title()
+        attr_value = self._get_stat_value(char, full_first, is_stat=True)
+        skill_value = self._get_stat_value(char, full_second, is_stat=False)
+        attr_display = full_first.replace("_", " ").title()
+        skill_display = full_second.replace("_", " ").title()
 
         from world.utils.roll_utils import roll_skill_check, check_success, format_roll_details
         from world.wound_utils import get_action_penalty
