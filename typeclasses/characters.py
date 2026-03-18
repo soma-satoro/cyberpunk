@@ -558,7 +558,7 @@ class Character(DefaultCharacter):
             self.attributes.add(attr_name, value)
     
     def get_skill(self, skill_name):
-        """Get a skill value by name."""
+        """Get a skill value by name. Checks db.skills first, then character_sheet (for role abilities)."""
         skill_key = skill_name.lower().replace(' ', '_')
         # Medtech: Surgery and Medical Tech are derived from Medicine specialties
         if (self.db.role or "").strip() == "Medtech":
@@ -568,7 +568,14 @@ class Character(DefaultCharacter):
             if skill_key == "medical_tech":
                 from world.chargen_constants import get_medical_tech_skill
                 return get_medical_tech_skill(self.db.medicine_pharma, self.db.medicine_cryo)
-        return self.db.skills.get(skill_key, 0)
+        val = (self.db.skills or {}).get(skill_key, 0)
+        if val:
+            return val
+        # Fallback to character_sheet for role abilities and other skills stored on sheet
+        if hasattr(self, "character_sheet") and self.character_sheet and hasattr(self.character_sheet, skill_key):
+            sheet_val = getattr(self.character_sheet, skill_key, 0)
+            return sheet_val if sheet_val is not None else 0
+        return val
     
     def get_medicine_specialties(self):
         """Return (surgery, pharma, cryo) allocation for Medtech."""

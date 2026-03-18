@@ -20,6 +20,7 @@ from world.inventory.models import Weapon, Armor, Gear, Inventory
 from evennia.commands.default.muxcommand import MuxCommand
 from world.lifepath_dictionary import CULTURAL_ORIGINS, PERSONALITIES, CLOTHING_STYLES, HAIRSTYLES, AFFECTATIONS, MOTIVATIONS, LIFE_GOALS, ROLE_SPECIFIC_LIFEPATHS, VALUED_PERSON, VALUED_POSSESSION, FAMILY_BACKGROUND, ENVIRONMENT, FAMILY_CRISIS
 from world.utils.difficulty_values import parse_dv
+from world.improvement_points import get_character_stat_value
 from math import ceil
 
 class CmdSheet(MuxCommand):
@@ -757,14 +758,9 @@ class CmdRoll(MuxCommand):
     help_category = "Roleplay Utilities"
 
     def _get_stat_value(self, char, field_name, is_stat):
-        """Get stat or skill value from character sheet or fallback to char attributes/db."""
-        sheet = getattr(char, 'character_sheet', None)
-        if sheet and hasattr(sheet, field_name):
-            return getattr(sheet, field_name, 0)
-        if is_stat:
-            return char.attributes.get(field_name, 0)
-        skill_key = field_name.lower().replace(' ', '_')
-        return char.db.skills.get(skill_key, 0) if char.db.skills else 0
+        """Get stat or skill value using canonical get_character_stat_value (handles role abilities)."""
+        val = get_character_stat_value(char, field_name)
+        return val if val is not None else 0
 
     def _parse_modifier(self, s):
         """Extract trailing modifier (+1, -3, + 1, - 3) from string. Returns (stripped_string, modifier)."""

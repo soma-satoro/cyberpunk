@@ -145,6 +145,7 @@ def get_character_stat_value(character, stat_name):
     """Get current value of a stat from character (works with both typeclass and sheet).
     Missing skills are treated as level 0 (so buying them goes 0 -> 1).
     For local_expert and play_instrument, use get_skill_instance when instance is provided.
+    Checks db.skills first, then character_sheet (for role abilities and other skills stored on sheet).
     """
     base, instance = parse_skill_instance(stat_name)
     if not base:
@@ -159,6 +160,17 @@ def get_character_stat_value(character, stat_name):
     if hasattr(character, "db"):
         if key in IP_ATTRIBUTES:
             return getattr(character.db, key, 1)
+        if hasattr(character.db, "skills") and character.db.skills is not None:
+            val = character.db.skills.get(key, 0)
+            if val:
+                return val
+        # Fallback to character_sheet for skills (including role abilities) when db.skills is empty or 0
+        if hasattr(character, "character_sheet") and character.character_sheet:
+            sheet = character.character_sheet
+            if hasattr(sheet, key):
+                sheet_val = getattr(sheet, key, 0)
+                if sheet_val is not None:
+                    return sheet_val
         if hasattr(character.db, "skills") and character.db.skills is not None:
             return character.db.skills.get(key, 0)
         return getattr(character.db, key, 0)
