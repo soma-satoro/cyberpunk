@@ -28,6 +28,8 @@ class CmdCyberware(MuxCommand):
       cyberware/install "Popup Melee Weapon" = "<weapon>"
       cyberware/install "Popup Ranged Weapon" = "<weapon>"
       cyberware/parent <cyberware child>=<cyberware parent>
+      cyberware/unparent <cyberware child>     - Disconnect option from parent; uninstall and refund humanity
+      cyberware/unparent <name>/<child>       - Staff: unparent from another character
 
     Activate/deactivate: cyberware weapons (Big Knucks, Rippers, Slice N Dice, Wolvers, Popup Melee/Ranged).
     """
@@ -45,8 +47,8 @@ class CmdCyberware(MuxCommand):
             self._do_info(raw)
             return
 
-        # Staff can view another: cyberware <name> (list only). Skip when using activate/deactivate/install - args are cyberware names.
-        if raw and not any(s in (self.switches or []) for s in ("activate", "deactivate", "install")):
+        # Staff can view another: cyberware <name> (list only). Skip when using activate/deactivate/install/parent/unparent - args are cyberware names.
+        if raw and not any(s in (self.switches or []) for s in ("activate", "deactivate", "install", "parent", "unparent")):
             first_word = raw.split()[0]
             target_char, character_sheet = get_staff_target_character(
                 self.caller, first_word, quiet=True
@@ -89,6 +91,26 @@ class CmdCyberware(MuxCommand):
                 return
             child_name, parent_name = raw.split("=", 1)
             self._do_parent(character_sheet, child_name.strip(), parent_name.strip())
+            return
+        if self.switches and "unparent" in self.switches:
+            if not raw:
+                self.caller.msg("Usage: cyberware/unparent <cyberware child>")
+                return
+            # Staff: <name>/<child> to unparent from another character
+            from world.utils.character_utils import is_staff
+            if is_staff(self.caller) and "/" in raw:
+                name_part, child_name = raw.split("/", 1)
+                name_part = name_part.strip()
+                child_name = child_name.strip()
+                target_char, target_sheet = get_staff_target_character(
+                    self.caller, name_part, quiet=True
+                )
+                if target_char is None or target_sheet is None:
+                    self.caller.msg(f"No character named '{name_part}' found.")
+                    return
+                self._do_unparent(target_sheet, child_name)
+            else:
+                self._do_unparent(character_sheet, raw.strip())
             return
         if not raw:
             self.list_cyberware(character_sheet)
@@ -148,6 +170,47 @@ class CmdCyberware(MuxCommand):
         child_inst.parent = parent_inst
         child_inst.save()
         self.caller.msg(f"Assigned {child_inst.cyberware.name} to {parent_inst.cyberware.name}.")
+
+    def _do_unparent(self, character_sheet, child_name):
+        """Disconnect a cyberware option from its parent; uninstall and refund humanity."""
+        child_inst = CyberwareInstance.objects.filter(
+            character_sheet=character_sheet,
+            cyberware__name__iexact=child_name,
+            installed=True,
+            parent__isnull=False,
+        ).select_related("cyberware", "parent").first()
+
+        if not child_inst:
+            self.caller.msg(
+                f"No installed {child_name} with a parent found. "
+                "Use cyberware/parent to assign options to limbs."
+            )
+            return
+
+        cyberware = child_inst.cyberware
+        parent_name = child_inst.parent.cyberware.name if child_inst.parent else "?"
+
+        child_inst.parent = None
+        child_inst.installed = False
+        child_inst.active = False
+        child_inst.save()
+
+        character_sheet.calculate_humanity_loss()
+        char = getattr(character_sheet, "character", None)
+        if char and hasattr(char, "db"):
+            from world.cyberpunk_sheets.edgerunner import EdgerunnerChargen
+            EdgerunnerChargen.recalculate_humanity_for_typeclass(char)
+
+        self.caller.msg(
+            f"Unparented {cyberware.name} from {parent_name}. "
+            f"Humanity refunded ({cyberware.humanity_loss}). Use cyberware/parent to re-assign."
+        )
+        # Notify the character if different from caller (staff unparenting)
+        if char and char != self.caller and hasattr(char, "msg"):
+            char.msg(
+                f"Your {cyberware.name} has been disconnected from {parent_name} and uninstalled. "
+                f"Humanity refunded. Use cyberware/parent to re-assign it."
+            )
 
     def list_cyberware(self, character_sheet):
         # Use inventory.cyberware (same source as sheet display) so staff sees all installed items

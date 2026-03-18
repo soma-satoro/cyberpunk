@@ -38,7 +38,7 @@ from .mystery_commands import (
     CmdLinkClue,
     CmdMysteryLink,
 )
-from .cyberware_admin_commands import CmdAddCyberware, CmdUnparentCyberware
+from .cyberware_admin_commands import CmdAddCyberware, CmdParentCyberware, CmdUnparentCyberware
 from .staff_commands import CmdRemoveCyberware, CmdSetLifepath, CmdReputation, CmdNotoriety, CmdConfig
 from .economy import CmdAdminMoney, CmdGiveMoney, CmdBalance, CmdLeaveRental
 from .rent_commands import CmdRent, CmdHome
@@ -253,6 +253,7 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdDepopulateAllEquipment())
         self.add(CmdRemoveEquipment())
         self.add(CmdAddCyberware())
+        self.add(CmdParentCyberware())
         self.add(CmdUnparentCyberware())
         self.add(CmdRemoveCyberware())
         self.add(CmdAddClue())

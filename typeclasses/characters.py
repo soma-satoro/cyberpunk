@@ -978,7 +978,8 @@ class Character(DefaultCharacter):
                                   'humanity', 'humanity_loss', 'total_cyberware_humanity_loss',
                                   'trauma_humanity_loss', 'death_save', 'serious_wounds',
                                   'notoriety_points', 'notoriety', 'is_complete',
-                                  'unarmed_damage_dice', 'unarmed_damage_die_type', 'has_cyberarm']):
+                                  'unarmed_damage_dice', 'unarmed_damage_die_type', 'has_cyberarm',
+                                  'fashion_budget_remaining']):  # Chargen-only, not a skill
                 skills[field_name] = getattr(sheet, field_name)
         
         self.db.skills = skills

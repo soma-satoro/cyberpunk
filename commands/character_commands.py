@@ -525,10 +525,11 @@ class CmdSheet(MuxCommand):
 
         return " / ".join(roles_ordered) if roles_ordered else "None"
 
-    # Keys in db.skills that are derived stats, not actual skills (exclude from SKILLS section)
+    # Keys in db.skills that are derived stats or chargen-only, not actual skills (exclude from SKILLS section)
     NON_SKILL_KEYS = frozenset({
         'total_cyberware_humanity_loss', 'humanity', 'death_save', 'serious_wounds',
         'unarmed_damage_die_type', 'unarmed_damage_dice',
+        'fashion_budget_remaining',  # Chargen-only; use-it-or-lose-it for clothing/fashionware
     })
 
     # Role ability keys - displayed in Role Abilities section, excluded from SKILLS

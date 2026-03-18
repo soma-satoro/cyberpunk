@@ -135,6 +135,122 @@ class CmdAddCyberware(MuxCommand):
         )
 
 
+class CmdParentCyberware(MuxCommand):
+    """
+    Assign a cyberware option to its parent limb/suite (staff only).
+
+    Usage:
+      parentcyberware <character name>=<child cyberware>/<parent cyberware>
+
+    Examples:
+      parentcyberware Soma=Anti-Dazzle/Cybereye
+      parentcyberware Soma="Popup Ranged Weapon"/Cyberarm
+
+    Assigns the child option to the parent. Both must belong to the character.
+    Child can be installed (reassign) or uninstalled (install and assign).
+    """
+
+    key = "parentcyberware"
+    aliases = ["parentcyber", "assigncyberware"]
+    locks = "cmd:perm(Admin)"
+    help_category = "Admin"
+
+    def func(self):
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: parentcyberware <character name>=<child cyberware>/<parent cyberware>")
+            return
+
+        character_name = self.lhs.strip().strip('"')
+        rhs = self.rhs.strip().strip('"')
+
+        if "/" not in rhs:
+            self.caller.msg("Usage: parentcyberware <character name>=<child cyberware>/<parent cyberware>")
+            return
+
+        child_name, parent_name = rhs.split("/", 1)
+        child_name = child_name.strip()
+        parent_name = parent_name.strip()
+
+        if not character_name or not child_name or not parent_name:
+            self.caller.msg("Usage: parentcyberware <character name>=<child cyberware>/<parent cyberware>")
+            return
+
+        # Find the character
+        character = self.caller.search(
+            character_name, typeclass="typeclasses.characters.Character", global_search=True
+        )
+        if not character:
+            character = self.caller.search(character_name, global_search=True)
+        if not character:
+            return
+
+        char_sheet = getattr(character, "character_sheet", None)
+        if not char_sheet:
+            self.caller.msg(f"{character.key} does not have a character sheet.")
+            return
+
+        # Find parent instance (must be installed)
+        parent_inst = CyberwareInstance.objects.filter(
+            character_sheet=char_sheet,
+            cyberware__name__iexact=parent_name,
+            installed=True,
+        ).first()
+
+        if not parent_inst:
+            self.caller.msg(
+                f"{character.key} does not have installed cyberware named '{parent_name}'."
+            )
+            return
+
+        # Find child instance (installed or uninstalled)
+        child_inst = CyberwareInstance.objects.filter(
+            character_sheet=char_sheet,
+            cyberware__name__iexact=child_name,
+        ).first()
+
+        if not child_inst:
+            inventory, _ = Inventory.get_or_create_for_character(character)
+            child_inst = inventory.cyberware.filter(
+                cyberware__name__iexact=child_name,
+            ).first()
+
+        if not child_inst:
+            self.caller.msg(
+                f"{character.key} does not have cyberware named '{child_name}' in inventory."
+            )
+            return
+
+        if child_inst.parent_id == parent_inst.id:
+            self.caller.msg(
+                f"{child_inst.cyberware.name} is already assigned to {parent_inst.cyberware.name}."
+            )
+            return
+
+        child_inst.parent = parent_inst
+        was_uninstalled = not child_inst.installed
+        if was_uninstalled:
+            child_inst.installed = True
+            inventory, _ = Inventory.get_or_create_for_character(character)
+            inventory.cyberware.add(child_inst)
+        child_inst.save()
+        if was_uninstalled:
+            char_sheet.calculate_humanity_loss()
+            EdgerunnerChargen.recalculate_humanity_for_typeclass(character)
+            self.caller.msg(
+                f"Assigned {child_inst.cyberware.name} to {parent_inst.cyberware.name} on {character.key} "
+                f"(installed). Humanity recalculated."
+            )
+        else:
+            child_inst.save()
+            self.caller.msg(
+                f"Assigned {child_inst.cyberware.name} to {parent_inst.cyberware.name} on {character.key}."
+            )
+
+        character.msg(
+            f"Your {child_inst.cyberware.name} has been assigned to {parent_inst.cyberware.name}."
+        )
+
+
 class CmdUnparentCyberware(MuxCommand):
     """
     Unparent a cyberware option from its parent (staff only).
