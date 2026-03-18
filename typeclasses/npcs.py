@@ -121,7 +121,8 @@ class NPC(DefaultCharacter):
         """Recalculate max_hp, death_save, serious_wounds, humanity."""
         bod = self.attributes.get("body", 1)
         wil = self.attributes.get("willpower", 1)
-        self.db.max_hp = 10 + (5 * ((bod + wil) // 2))
+        from world.hp_chart import get_hp_from_chart
+        self.db.max_hp = get_hp_from_chart(bod, wil)
         self.db.current_hp = min(max(0, self.db.current_hp), self.db.max_hp)
         if self.db.current_hp == 0:
             self.db.current_hp = self.db.max_hp

@@ -20,7 +20,7 @@ from world.inventory.models import Weapon, Armor, Gear, Inventory
 from evennia.commands.default.muxcommand import MuxCommand
 from world.lifepath_dictionary import CULTURAL_ORIGINS, PERSONALITIES, CLOTHING_STYLES, HAIRSTYLES, AFFECTATIONS, MOTIVATIONS, LIFE_GOALS, ROLE_SPECIFIC_LIFEPATHS, VALUED_PERSON, VALUED_POSSESSION, FAMILY_BACKGROUND, ENVIRONMENT, FAMILY_CRISIS
 from world.utils.difficulty_values import parse_dv
-from world.improvement_points import get_character_stat_value
+from world.improvement_points import get_character_stat_value, get_stat_display_name
 from math import ceil
 
 class CmdSheet(MuxCommand):
@@ -746,6 +746,10 @@ class CmdRoll(MuxCommand):
     Difficulty names: Simple (9), Everyday (13), Difficult (15), Professional (17),
     Heroic (21), Incredible (24), Legendary (29).
 
+    For skills with instances (Local Expert, Play Instrument, Martial Arts), specify the instance:
+      roll Cool + local expert (The Net)
+      roll Cool + local expert (Night City)
+
     Examples:
       roll Reflexes + Handgun
       roll Credibility + Cool
@@ -861,8 +865,8 @@ class CmdRoll(MuxCommand):
             char = self.caller
             attr_value = self._get_stat_value(char, full_first, is_stat=True)
             skill_value = self._get_stat_value(char, full_second, is_stat=False)
-            attr_display = full_first.replace('_', ' ').title()
-            skill_display = full_second.replace('_', ' ').title()
+            attr_display = get_stat_display_name(full_first) or full_first.replace('_', ' ').title()
+            skill_display = get_stat_display_name(full_second) or full_second.replace('_', ' ').title()
 
         # Luck check
         if luck_spend > 0:
@@ -979,8 +983,8 @@ class CmdRoll(MuxCommand):
         char = self.caller
         attr_value = self._get_stat_value(char, full_first, is_stat=True)
         skill_value = self._get_stat_value(char, full_second, is_stat=False)
-        attr_display = full_first.replace("_", " ").title()
-        skill_display = full_second.replace("_", " ").title()
+        attr_display = get_stat_display_name(full_first) or full_first.replace("_", " ").title()
+        skill_display = get_stat_display_name(full_second) or full_second.replace("_", " ").title()
 
         from world.utils.roll_utils import roll_skill_check, check_success, format_roll_details
         from world.wound_utils import get_action_penalty

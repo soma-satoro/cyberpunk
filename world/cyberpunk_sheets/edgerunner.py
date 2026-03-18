@@ -189,8 +189,12 @@ class EdgerunnerChargen:
         character.db.maker_invention = 0
 
         # Reset derived stats
-        character.db.max_hp = 10
-        character.db.current_hp = 10
+        from world.hp_chart import get_hp_from_chart
+        character.db.max_hp = get_hp_from_chart(
+            getattr(character.db, 'body', 1),
+            getattr(character.db, 'willpower', 1),
+        )
+        character.db.current_hp = character.db.max_hp
         character.db.humanity = 10  # Will be recalculated based on empathy
         character.db.humanity_loss = 0
         character.db.total_cyberware_humanity_loss = 0
@@ -790,7 +794,8 @@ class EdgerunnerChargen:
         if not hasattr(character.db, 'willpower'):
             character.db.willpower = 1
             
-        character.db.max_hp = 10 + (5 * ((character.db.body + character.db.willpower) // 2))
+        from world.hp_chart import get_hp_from_chart
+        character.db.max_hp = get_hp_from_chart(character.db.body, character.db.willpower)
         
         # Set current HP to max if not set
         if not hasattr(character.db, 'current_hp') or character.db.current_hp == 0:
@@ -1194,8 +1199,12 @@ class EdgerunnerChargen:
         
         # Reset other attributes
         sheet.total_cyberware_humanity_loss = 0
-        sheet._max_hp = 10
-        sheet._current_hp = 10
+        from world.hp_chart import get_hp_from_chart
+        sheet._max_hp = get_hp_from_chart(
+            getattr(sheet, 'body', 1),
+            getattr(sheet, 'willpower', 1),
+        )
+        sheet._current_hp = sheet._max_hp
         sheet.fashion_budget_remaining = 0
         sheet.sell_your_soul = False
         sheet.sell_your_soul_employer_type = ""

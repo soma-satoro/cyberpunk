@@ -566,7 +566,8 @@ class CharacterSheet(SharedMemoryModel):
             logger.info("CharacterSheet saved")
 
     def recalculate_derived_stats(self):
-        self._max_hp = 10 + (5 * ((self.body + self.willpower) // 2))
+        from world.hp_chart import get_hp_from_chart
+        self._max_hp = get_hp_from_chart(self.body, self.willpower)
         self.death_save = self.body
         self.serious_wounds = self.body
 
@@ -753,7 +754,8 @@ class CharacterSheet(SharedMemoryModel):
         super().save(*args, **kwargs)
 
     def recalculate_derived_stats(self):
-        self._max_hp = 10 + (5 * ((self.body + self.willpower) // 2))
+        from world.hp_chart import get_hp_from_chart
+        self._max_hp = get_hp_from_chart(self.body, self.willpower)
         self.death_save = self.body
         self.serious_wounds = self.body
 
