@@ -37,6 +37,7 @@ class CmdPopulate(MuxCommand):
       /gear      - Populate gear database
       /cyberware - Populate cyberware database
       /all       - Populate all equipment types
+      /attachments - Populate core weapon attachments
       /cleanup   - Clean up duplicate gear items
 
     This command initializes the database with equipment from Cyberpunk RED.
@@ -73,6 +74,10 @@ class CmdPopulate(MuxCommand):
         elif "all" in self.switches:
             populate_all_equipment()
             self.caller.msg("All equipment databases populated successfully.")
+        elif "attachments" in self.switches:
+            from world.weapon_constants import populate_core_attachments
+            n = populate_core_attachments()
+            self.caller.msg(f"Core weapon attachments populated ({n} attachments).")
         
         elif "cleanup" in self.switches:
             duplicates = Gear.objects.values('name').annotate(name_count=Count('id')).filter(name_count__gt=1)
@@ -200,6 +205,7 @@ class CmdStat(AdminCommand):
       stat David=medicine/6
       stat Eve=paramedic/4
       stat John=humanity/49
+      stat Ryan=dead/0   - Staff: clear dead state (revive)
 
     Supports abbreviations (INT, ATH, MED, HUM, MAKF, etc.) and full names.
     Values are 0-10 for stats/skills. Humanity: 0-100, capped by 10*Empathy
@@ -277,6 +283,38 @@ class CmdStat(AdminCommand):
             self.caller.msg(f"Set {char.name}'s {display_name} to {new_value}.")
             if char.sessions.all():
                 char.msg(f"Your {display_name} has been set to {new_value} by staff.")
+            return
+
+        # death_save_penalty: integer (staff can clear or set)
+        if full_key == "death_save_penalty":
+            sheet = char.character_sheet
+            if sheet and hasattr(sheet, "death_save_penalty"):
+                sheet.death_save_penalty = new_value
+                sheet.save(skip_recalculation=True)
+            if hasattr(char, "db"):
+                char.db.death_save_penalty = new_value
+            self.caller.msg(f"Set {char.name}'s Death Save Penalty to {new_value}.")
+            if char.sessions.all():
+                char.msg(f"Your Death Save Penalty has been set to {new_value} by staff.")
+            return
+
+        # base_death_save_penalty: integer (from critical injuries; staff can modify)
+        if full_key == "base_death_save_penalty":
+            sheet = char.character_sheet
+            if sheet and hasattr(sheet, "base_death_save_penalty"):
+                sheet.base_death_save_penalty = new_value
+                sheet.save(skip_recalculation=True)
+            self.caller.msg(f"Set {char.name}'s Base Death Save Penalty to {new_value}.")
+            if char.sessions.all():
+                char.msg(f"Your Base Death Save Penalty has been set to {new_value} by staff.")
+            return
+
+        # dead: 0 or 1 (staff can clear death state)
+        if full_key == "dead":
+            char.db.dead = bool(new_value)
+            self.caller.msg(f"Set {char.name}'s dead state to {bool(new_value)}.")
+            if char.sessions.all():
+                char.msg(f"Your dead state has been {'cleared' if not new_value else 'set'} by staff.")
             return
 
         # Stats/skills: 0-10
@@ -485,15 +523,62 @@ class CmdHeal(AdminCommand):
         except Exception as e:
             self.caller.msg(f"Error healing {target.name}: {str(e)}")
 
+def _harm_death_save_callback(caller, prompt_input, target, harm_caller):
+    """Callback for harm death save prompt: automate (yes) or manual (no)."""
+    from world.wound_utils import make_death_save, requires_death_save, is_dead
+
+    if not prompt_input:
+        caller.msg("No response. Use |wdeathsave|n to roll manually when ready.")
+        return
+
+    choice = str(prompt_input).strip().lower()
+    if choice in ("yes", "y", "1"):
+        # Automate: run death save now
+        if is_dead(target):
+            harm_caller.msg(f"{target.name} is already dead.")
+            return
+        if not requires_death_save(target):
+            harm_caller.msg(f"{target.name} is not mortally wounded.")
+            return
+
+        success, roll, total, penalty = make_death_save(target)
+        body = getattr(target.db, "death_save", 0) or 0
+        if hasattr(target, "character_sheet") and target.character_sheet:
+            body = getattr(target.character_sheet, "death_save", body) or body
+
+        loc = target.location
+        if success:
+            msg = f"|w{target.key}|n makes a Death Save! 1d10 [{roll}] + {penalty} = {total} < BODY {body} - |gSURVIVES!|n"
+        else:
+            msg = f"|w{target.key}|n makes a Death Save! 1d10 [{roll}] + {penalty} = {total} - |rFAILED!|n |r{target.key} is DEAD.|n"
+            target.db.dead = True
+            if hasattr(target, "character_sheet") and target.character_sheet:
+                target.character_sheet.save(skip_recalculation=True)
+
+        if loc:
+            loc.msg_contents(msg)
+        if target != harm_caller:
+            target.msg(f"You {'survive' if success else 'have failed'} the Death Save.")
+    else:
+        # Manual: tell them to use deathsave or +roll
+        target.msg("|yYou are mortally wounded!|n Use |wdeathsave|n to roll, or |w+roll 1d10|n and compare to BODY + death_save_penalty.")
+        if harm_caller != target:
+            harm_caller.msg(f"{target.name} will roll the death save manually (deathsave or +roll).")
+
+
 class CmdHarm(AdminCommand):
     """
-    Inflict damage on yourself or another character.
+    Inflict damage or set injuries. Manual alternative to combat.
 
     Usage:
       harm <name>=<amount>   (staff: any character; player: own characters only)
       harm <amount>         (players: harm yourself)
+      harm/injury <name>=<injury>   (staff: add critical injury)
+      harm/removeinjury <name>=<injury>   (staff: remove critical injury)
+      harm/injuries   (staff: list valid injury names)
 
-    Players can harm only their own characters. Staff can harm any character.
+    HP can go below 0. At 0 or below, the target is prompted for a death save.
+    /injury and /removeinjury bypass combat - staff can set injuries directly.
     """
 
     key = "harm"
@@ -502,6 +587,20 @@ class CmdHarm(AdminCommand):
     help_category = "Admin"
 
     def func(self):
+        switches = self.switches or []
+
+        # harm/removeinjury - staff remove injury
+        if "removeinjury" in switches:
+            self._do_injury(add=False)
+            return
+        # harm/injury - staff add injury, or list valid injuries if no args
+        if "injury" in switches:
+            if not self.args:
+                self._list_injuries()
+            else:
+                self._do_injury(add=True)
+            return
+
         if not self.args:
             self.caller.msg("Usage: harm <name>=<amount> or harm <amount>")
             return
@@ -544,22 +643,81 @@ class CmdHarm(AdminCommand):
             return
 
         try:
+            from world.wound_utils import is_dead
+            from evennia.utils.evmenu import get_input
+
             cs = target.character_sheet
             old_hp = cs._current_hp
-            cs._current_hp = max(0, cs._current_hp - damage)
-            cs.save()
-            target.db.current_hp = cs._current_hp  # Sync to character for display
+            # Allow HP to go below 0 (mortally wounded)
+            cs._current_hp = cs._current_hp - damage
+            cs.save(skip_recalculation=True)
+            target.db.current_hp = cs._current_hp
 
             actual_damage = old_hp - cs._current_hp
 
-            self.caller.msg(f"You harmed {target.name} for {actual_damage} damage.")
-            target.msg(f"{self.caller.name} harmed you for {actual_damage} damage.")
+            self.caller.msg(f"You harmed {target.name} for {actual_damage} damage. HP: {old_hp} -> {cs._current_hp}.")
+            target.msg(f"{self.caller.name} harmed you for {actual_damage} damage. HP: {old_hp} -> {cs._current_hp}.")
 
-            if cs._current_hp == 0:
-                self.caller.msg(f"{target.name} has been incapacitated!")
-                target.msg("You have been incapacitated!")
+            if cs._current_hp <= 0 and not is_dead(target):
+                base = getattr(cs, "base_death_save_penalty", 0) or 0
+                cs.death_save_penalty = base
+                cs.save(skip_recalculation=True)
+                target.db.death_save_penalty = base
+                target.msg("|rYou are mortally wounded!|n Death save required.")
+                self.caller.msg(f"{target.name} is mortally wounded (HP {cs._current_hp}). Death save required.")
+                get_input(
+                    target,
+                    "|yAutomate death save?|n (yes/no): ",
+                    lambda c, p: _harm_death_save_callback(c, p, target, self.caller),
+                )
         except Exception as e:
             self.caller.msg(f"Error harming {target.name}: {str(e)}")
+
+    def _list_injuries(self):
+        """List valid injury names for harm/injury. Staff only."""
+        if not self.caller.check_permstring("Admin"):
+            self.caller.msg("Only staff can list injuries.")
+            return
+        from world.wound_data import CRITICAL_INJURIES_BODY, CRITICAL_INJURIES_HEAD
+        body = [d["name"] for d in CRITICAL_INJURIES_BODY.values()]
+        head = [d["name"] for d in CRITICAL_INJURIES_HEAD.values()]
+        self.caller.msg("|yBody injuries:|n " + ", ".join(body))
+        self.caller.msg("|yHead injuries:|n " + ", ".join(head))
+
+    def _do_injury(self, add=True):
+        """Add or remove injury (harm/injury or harm/removeinjury). Staff only."""
+        if not self.caller.check_permstring("Admin"):
+            self.caller.msg("Only staff can set or remove injuries.")
+            return
+        if not self.args or "=" not in self.args:
+            self.caller.msg(
+                "Usage: harm/injury <name>=<injury> or harm/removeinjury <name>=<injury>"
+            )
+            return
+        target_name, injury_part = self.args.split("=", 1)
+        target_name = target_name.strip()
+        injury_part = injury_part.strip().strip('"')
+        if not target_name or not injury_part:
+            self.caller.msg("Usage: harm/injury <name>=<injury> or harm/removeinjury <name>=<injury>")
+            return
+        target = self.caller.search(target_name, global_search=True)
+        if not target:
+            return
+        if not hasattr(target, "character_sheet") or not target.character_sheet:
+            self.caller.msg(f"{target.name} has no character sheet.")
+            return
+        from world.wound_utils import add_injury_to_character, remove_injury_from_character
+        if add:
+            ok, result = add_injury_to_character(target, injury_part)
+        else:
+            ok, result = remove_injury_from_character(target, injury_part)
+        if ok:
+            action = "added" if add else "removed"
+            self.caller.msg(f"|g{action.capitalize()}|n {result} on {target.name}.")
+            if target != self.caller:
+                target.msg(f"Staff {action} {result} from you.")
+        else:
+            self.caller.msg(f"|r{result}|n")
 
 class CmdApprove(AdminCommand):
     """

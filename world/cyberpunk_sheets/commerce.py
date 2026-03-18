@@ -5,8 +5,8 @@ from evennia.utils.search import search_object
 from evennia.utils.utils import crop
 from evennia.utils import gametime
 from world.cyberpunk_sheets.services import CharacterMoneyService
-from world.inventory.models import Weapon, Armor, Gear, Vehicle as VehicleModel, CyberwareInstance, Inventory
-from world.equipment_data import weapons, armors, gears, cyberdecks as cyberdecks_data, vehicles as vehicles_data
+from world.inventory.models import Weapon, Armor, Gear, Vehicle as VehicleModel, CyberwareInstance, Inventory, Ammunition
+from world.equipment_data import weapons, armors, gears, cyberdecks as cyberdecks_data, vehicles as vehicles_data, ammunition as ammunition_data
 from world.cyberware.models import Cyberware
 from world.cyberware.merchants import check_cyberware_requirements
 from world.cyberware.cyberware_data import BODYCULPT_PACKAGES
@@ -143,6 +143,17 @@ def _get_chargen_catalog(category=None, subcategory=None):
                 entry["_type"] = "gear"
                 entry["_merchant_type"] = "gear_merchant"
                 catalog.append(entry)
+    if category is None or category == "ammo":
+        for a in ammunition_data:
+            cost = a.get("cost", 10)
+            if cost * 10 <= CHARGEN_MAX_PRICE:
+                catalog.append({
+                    "name": a["name"],
+                    "ammo_type": a.get("ammo_type", "Basic"),
+                    "cost": cost,
+                    "_type": "ammo",
+                    "_ammo_data": a,
+                })
     return catalog
 
 
@@ -252,6 +263,19 @@ def _get_vendor_catalog(room, main_cat=None, subcategory=None):
             if subcategory:
                 continue
             catalog.append(entry)
+    # Ammunition (cost per 10 rounds; buy <ammo>=<units> adds units*10 rounds)
+    if main_cat is None or main_cat == "ammo":
+        for a in ammunition_data:
+            entry = {
+                "name": a["name"],
+                "ammo_type": a.get("ammo_type", "Basic"),
+                "cost": a.get("cost", 10),
+                "_type": "ammo",
+                "_ammo_data": a,
+            }
+            if not item_matches_vendor_filters(entry, filters):
+                continue
+            catalog.append(entry)
     return catalog
 
 
@@ -292,10 +316,14 @@ def _find_vendor_item(room, item_name, cyberware_only=False):
         return None
     catalog = _get_vendor_catalog(room)
     for item in catalog:
-        if item.get("name", "").lower() == item_name_lower:
-            itype = item.get("_type")
+        name = item.get("name", "")
+        itype = item.get("_type")
+        if name.lower() == item_name_lower:
             gear_cat = item.get("category") if itype == "gear" else None
             return (item, itype, gear_cat)
+        # Fuzzy ammo: "hollow point" matches "Hollow Point Ammo"
+        if itype == "ammo" and item_name_lower in name.lower():
+            return (item, "ammo", None)
     return None
 
 
@@ -331,6 +359,15 @@ def _find_chargen_item(item_name, cyberware_only=False):
                 "weight": 0.5,
                 "_type": "cyberdeck",
             }, "cyberdeck", "Cyberdeck")
+    for a in ammunition_data:
+        if a.get("name", "").lower() == item_name_lower or item_name_lower in a.get("name", "").lower():
+            return ({
+                "name": a["name"],
+                "ammo_type": a.get("ammo_type", "Basic"),
+                "cost": a.get("cost", 10),
+                "_type": "ammo",
+                "_ammo_data": a,
+            }, "ammo", None)
     return None
 
 
@@ -352,7 +389,7 @@ class CmdBuy(MuxCommand):
     """
 
     key = "buy"
-    switches = [("stash", "stash"), ("cyberware", "cyberware")]
+    switches = [("stash", "stash"), ("cyberware", "cyberware"), ("quality", "quality")]
     locks = "cmd:all()"
     help_category = "Economy"
 
@@ -369,6 +406,12 @@ class CmdBuy(MuxCommand):
         in_chargen = isinstance(self.caller.location, ChargenRoom)
         in_vendor_room = is_vendor_room(self.caller.location)
 
+        if "quality" in (self.switches or []) or (
+            self.args and "=" in self.args
+            and self.args.split("=", 1)[1].strip().lower() in ("poor", "standard", "excellent")
+        ):
+            self._buy_weapon_with_quality(in_chargen, in_vendor_room)
+            return
         if " from " in self.args:
             # Vendor purchase: buy <item> from <merchant>
             self._buy_from_vendor()
@@ -405,9 +448,16 @@ class CmdBuy(MuxCommand):
     def _buy_from_vendor_room(self):
         """Handle purchase from tag-based vendor room (no NPC merchant)."""
         item_name = self.args.strip()
-        cyberware_only = "cyberware" in (self.switches or [])
-        if cyberware_only and "=" in item_name:
+        ammo_units = 1
+        if "=" in item_name:
             lhs, rhs = item_name.split("=", 1)
+            lhs, rhs = lhs.strip(), rhs.strip()
+            if rhs.isdigit():
+                ammo_units = max(1, int(rhs))
+                item_name = lhs
+        cyberware_only = "cyberware" in (self.switches or [])
+        if cyberware_only and "=" in self.args:
+            lhs, rhs = self.args.strip().split("=", 1)
             lhs, rhs = lhs.strip().lower(), rhs.strip()
             if lhs == "pair":
                 self._buy_cyberware_pair(rhs, chargen_purchase=False)
@@ -425,6 +475,10 @@ class CmdBuy(MuxCommand):
             return
 
         item, item_type, gear_category = result
+
+        if item_type == "ammo":
+            self._buy_ammo_from_vendor(item, ammo_units, chargen_purchase=False)
+            return
 
         if item_type == "cyberware_implant":
             stash = "stash" in (self.switches or [])
@@ -510,9 +564,16 @@ class CmdBuy(MuxCommand):
     def _buy_from_chargen(self):
         """Handle chargen room purchase - only items 1000eb or under."""
         item_name = self.args.strip()
-        cyberware_only = "cyberware" in (self.switches or [])
-        if cyberware_only and "=" in item_name:
+        ammo_units = 1
+        if "=" in item_name:
             lhs, rhs = item_name.split("=", 1)
+            lhs, rhs = lhs.strip(), rhs.strip()
+            if rhs.isdigit():
+                ammo_units = max(1, int(rhs))
+                item_name = lhs
+        cyberware_only = "cyberware" in (self.switches or [])
+        if cyberware_only and "=" in self.args and not (self.args.split("=", 1)[1].strip().isdigit()):
+            lhs, rhs = item_name.split("=", 1) if "=" in item_name else (item_name, "")
             lhs, rhs = lhs.strip().lower(), rhs.strip()
             if lhs == "pair":
                 self._buy_cyberware_pair(rhs, chargen_purchase=True)
@@ -521,7 +582,7 @@ class CmdBuy(MuxCommand):
                 opt, parent = rhs.split("/", 1)
                 self._buy_cyberware_with_parent(opt.strip(), parent.strip(), chargen_purchase=True)
                 return
-        result = _find_chargen_item(item_name.lower(), cyberware_only=cyberware_only)
+        result = _find_chargen_item(item_name, cyberware_only=cyberware_only)
         if not result:
             hint = "Use 'buy/cyberware <name>' for body cyberware." if not cyberware_only else ""
             self.caller.msg(
@@ -533,6 +594,10 @@ class CmdBuy(MuxCommand):
 
         item, item_type, gear_category = result
 
+        if item_type == "ammo":
+            self._buy_ammo_from_vendor(item, ammo_units, chargen_purchase=True)
+            return
+
         if item_type == "cyberware_implant":
             stash = "stash" in (self.switches or [])
             self._buy_cyberware_from_chargen(item, stash=stash, chargen_purchase=True)
@@ -542,8 +607,9 @@ class CmdBuy(MuxCommand):
         merchant_type = merchant_type_map.get(item_type) or item.get("_merchant_type", "gear_merchant")
 
         base_price = item["value"]
-        discount = get_purchase_discount_percent(self.caller, item_type, gear_category)
-        price = calculate_final_price(base_price, discount)
+        # Chargen purchases use full price - no role discounts
+        discount = 0
+        price = base_price
 
         try:
             inventory, _ = Inventory.get_or_create_for_character(self.caller)
@@ -621,7 +687,8 @@ class CmdBuy(MuxCommand):
             return
         inventory, _ = Inventory.get_or_create_for_character(self.caller)
         base_cost = pkg_data["cost"]
-        discount = get_purchase_discount_percent(self.caller, "cyberware", None)
+        # Chargen purchases use full price - no role discounts
+        discount = 0 if chargen_purchase else get_purchase_discount_percent(self.caller, "cyberware", None)
         final_cost = calculate_final_price(base_cost, discount)
         if not CharacterMoneyService.spend_money(self.caller, final_cost):
             self.caller.msg(
@@ -685,7 +752,8 @@ class CmdBuy(MuxCommand):
                 f"Use: cyberware/install \"{cyberware.name}\" = \"<weapon>\""
             )
         base_cost = cyberware.cost
-        discount = get_purchase_discount_percent(self.caller, "cyberware", None)
+        # Chargen purchases use full price - no role discounts
+        discount = 0 if chargen_purchase else get_purchase_discount_percent(self.caller, "cyberware", None)
         final_cost = calculate_final_price(base_cost, discount)
 
         try:
@@ -858,7 +926,8 @@ class CmdBuy(MuxCommand):
             self.caller.msg(f"You already have a paired {cyberware.name}.")
             return
         base_cost = cyberware.cost
-        discount = get_purchase_discount_percent(self.caller, "cyberware", None)
+        # Chargen purchases use full price - no role discounts
+        discount = 0 if chargen_purchase else get_purchase_discount_percent(self.caller, "cyberware", None)
         final_cost = calculate_final_price(base_cost, discount)
         is_fashionware = getattr(cyberware, "type", "") == "Fashionware"
         if is_fashionware:
@@ -926,7 +995,8 @@ class CmdBuy(MuxCommand):
             self.caller.msg(f"You don't have {parent_name} installed. Install the parent limb first.")
             return
         base_cost = cyberware.cost
-        discount = get_purchase_discount_percent(self.caller, "cyberware", None)
+        # Chargen purchases use full price - no role discounts
+        discount = 0 if chargen_purchase else get_purchase_discount_percent(self.caller, "cyberware", None)
         final_cost = calculate_final_price(base_cost, discount)
         is_fashionware = getattr(cyberware, "type", "") == "Fashionware"
         if is_fashionware:
@@ -1080,6 +1150,11 @@ class CmdBuy(MuxCommand):
         inventory, _ = Inventory.get_or_create_for_character(character)
         
         if merchant_type == "arms_dealer":
+            from world.weapon_constants import DEFAULT_RANGED_ATTACHMENT_SLOTS
+            clip = item.get('clip', 0)
+            slots = item.get('attachment_slots')
+            if slots is None and item.get('category') in ('handgun', 'shoulder_arms', 'heavy_weapons'):
+                slots = DEFAULT_RANGED_ATTACHMENT_SLOTS
             weapon, created = Weapon.objects.get_or_create(
                 name=item['name'],
                 defaults={
@@ -1090,6 +1165,13 @@ class CmdBuy(MuxCommand):
                     'weight': item['weight'],
                     'value': item['value'],
                     'category': item.get('category', 'handgun'),
+                    'quality': item.get('quality', 'standard'),
+                    'weapon_type': item.get('weapon_type', ''),
+                    'ammo_type': item.get('ammo_type', 'Basic'),
+                    'clip': clip,
+                    'max_ammo': clip,
+                    'current_ammo': 0,
+                    'attachment_slots': slots or 0,
                 }
             )
             inventory.weapons.add(weapon)
@@ -1155,6 +1237,132 @@ class CmdBuy(MuxCommand):
             purchased.append({"type": item_type, "name": item["name"]})
             inventory.chargen_purchased = purchased
             inventory.save()
+
+    def _buy_ammo_from_vendor(self, item, units, chargen_purchase=False):
+        """Buy ammunition. Each unit = 10 rounds. cost is per 10 rounds."""
+        cost_per_unit = item.get("cost", 10)
+        total_cost = cost_per_unit * units
+        rounds = units * 10
+        ammo_type = item.get("ammo_type", "Basic")
+        ammo_name = item.get("name", "")
+        if chargen_purchase:
+            total_cost = cost_per_unit * units
+        else:
+            discount = get_purchase_discount_percent(self.caller, "gear", None)
+            total_cost = calculate_final_price(total_cost, discount)
+        if not CharacterMoneyService.spend_money(self.caller, total_cost):
+            self.caller.msg(f"You need {total_cost} eb for {rounds} rounds of {ammo_name}.")
+            return
+        inventory, _ = Inventory.get_or_create_for_character(self.caller)
+        existing = inventory.ammunition.filter(ammo_type=ammo_type).first()
+        if existing:
+            existing.quantity += rounds
+            existing.save()
+        else:
+            ammo = Ammunition.objects.create(
+                name=ammo_name,
+                ammo_type=ammo_type,
+                quantity=rounds,
+                cost=cost_per_unit,
+                weapon_type=item.get("weapon_type", "Generic"),
+            )
+            inventory.ammunition.add(ammo)
+        self.caller.msg(f"You purchased {rounds} rounds of {ammo_name} for {total_cost} eb.")
+
+    def _get_quality_price(self, base_value, quality):
+        """Get price for weapon with quality. Uses weapon_constants.get_quality_price."""
+        from world.weapon_constants import get_quality_price
+        return get_quality_price(base_value, quality)
+
+    def _buy_weapon_with_quality(self, in_chargen, in_vendor_room):
+        """buy/quality <weapon>=<quality> or buy <weapon>=<quality> - Buy weapon with Poor/Standard/Excellent.
+        Standard-quality weapons can be bought at any quality. Fixed-quality weapons only at their quality."""
+        if not self.args:
+            self.caller.msg("Usage: buy <weapon> [=poor|standard|excellent] or buy/quality <weapon>=<quality>")
+            return
+        weapon_name = self.args.strip()
+        quality = None
+        if "=" in weapon_name:
+            weapon_name, quality = weapon_name.split("=", 1)
+            weapon_name = weapon_name.strip()
+            quality = quality.strip().lower() if quality else None
+        if quality and quality not in ("poor", "standard", "excellent"):
+            self.caller.msg("Quality must be Poor, Standard, or Excellent.")
+            return
+
+        # Find weapon in equipment_data (fuzzy match)
+        base_weapon = None
+        for w in weapons:
+            if (w.get("name") or "").lower() == weapon_name.lower():
+                base_weapon = dict(w)
+                break
+        if not base_weapon:
+            # Fuzzy: startswith
+            for w in weapons:
+                if (w.get("name") or "").lower().startswith(weapon_name.lower()):
+                    base_weapon = dict(w)
+                    break
+        if not base_weapon:
+            self.caller.msg(f"'{weapon_name}' is not available.")
+            return
+
+        base_quality = (base_weapon.get("quality") or "standard").strip().lower()
+        if quality is None:
+            quality = base_quality
+
+        # Fixed-quality weapons: only that quality
+        if base_quality in ("poor", "excellent"):
+            if quality != base_quality:
+                self.caller.msg(
+                    f"{base_weapon.get('name')} is only available in {base_quality} quality."
+                )
+                return
+            quality = base_quality
+
+        base_value = base_weapon.get("value", 0)
+        price = self._get_quality_price(base_value, quality)
+
+        if not (in_chargen or in_vendor_room):
+            self.caller.msg("Weapon purchase is only available in chargen or vendor rooms.")
+            return
+
+        if in_vendor_room:
+            filters = get_vendor_catalog_filters(self.caller.location)
+            item_info = {"_type": "weapon", "category": base_weapon.get("category")}
+            if not item_matches_vendor_filters(item_info, filters):
+                self.caller.msg(f"'{base_weapon.get('name')}' is not available at this vendor.")
+                return
+
+        if not CharacterMoneyService.spend_money(self.caller, price):
+            self.caller.msg(f"You need {price} eb for {base_weapon.get('name')} ({quality} quality).")
+            return
+
+        inventory, _ = Inventory.get_or_create_for_character(self.caller)
+        clip = base_weapon.get("clip", 0)
+        weapon = Weapon.objects.create(
+            name=base_weapon["name"],
+            damage=base_weapon.get("damage", "2d6"),
+            rof=base_weapon.get("rof", "1"),
+            hands=base_weapon.get("hands", 1),
+            concealable=base_weapon.get("concealable", False),
+            weight=base_weapon.get("weight", 1),
+            value=price,
+            category=base_weapon.get("category", "handgun"),
+            quality=quality,
+            weapon_type=base_weapon.get("weapon_type", ""),
+            ammo_type=base_weapon.get("ammo_type", "Basic"),
+            clip=clip,
+            max_ammo=clip,
+            current_ammo=0,
+        )
+        inventory.weapons.add(weapon)
+        if in_chargen:
+            purchased = inventory.chargen_purchased or []
+            purchased.append({"type": "weapon", "name": base_weapon["name"]})
+            inventory.chargen_purchased = purchased
+            inventory.save()
+        qual_str = f" ({quality} quality)" if quality != "standard" else ""
+        self.caller.msg(f"You purchased {weapon.name}{qual_str} for {price} eb.")
 
 
 class CmdRefund(MuxCommand):

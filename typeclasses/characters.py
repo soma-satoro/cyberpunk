@@ -495,6 +495,28 @@ class Character(DefaultCharacter):
         """Calculate and return the character's humanity."""
         return self.character_sheet.current_humanity if self.character_sheet else None
 
+    @property
+    def focus(self):
+        """Return (current_focus, max_focus) for investigation system (Interface RED)."""
+        try:
+            from world.mystery.models import CharacterFocus
+            from world.mystery.mystery_data import get_max_focus
+            focus_obj = CharacterFocus.objects.filter(
+                character_object=self
+            ).first() or (
+                CharacterFocus.objects.filter(
+                    character_sheet=self.character_sheet
+                ).first() if self.character_sheet else None
+            )
+            if focus_obj:
+                return focus_obj.current_focus, focus_obj.get_max_focus()
+            int_val = getattr(self.db, "intelligence", 5) or 5
+            will_val = getattr(self.db, "willpower", 5) or 5
+            max_f = get_max_focus(int_val, will_val)
+            return max_f, max_f  # Default full if no record
+        except Exception:
+            return 0, 0
+
     def adjust_humanity(self, amount):
         """Adjust the character's humanity."""
         if self.character_sheet:

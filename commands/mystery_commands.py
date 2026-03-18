@@ -7,7 +7,15 @@ from datetime import date
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia import Command
 from world.utils.formatting import header, footer, divider, section_header
-from world.mystery.models import Mystery, MysteryClue, CharacterFocus, ClueAttempt, ClueLocation
+from world.mystery.models import (
+    Mystery,
+    MysteryClue,
+    MysteryObstacle,
+    CharacterFocus,
+    ClueAttempt,
+    ClueLocation,
+    ObstacleAttempt,
+)
 from world.mystery.mystery_data import (
     get_max_focus,
     CLUE_TYPES,
@@ -91,7 +99,7 @@ class CmdMystery(MuxCommand):
         if current <= 0:
             out.append("  |rYou cannot make Evidence Checks until Focus recovers.|n")
         out.append("")
-        out.append("  Focus recovers every 24 hours (half your max).")
+        out.append("  Focus recovers INT + WILL every 24 hours. Use +rest/concentrate for +5 bonus.")
         out.append(footer())
         self.caller.msg("\n".join(out))
 
@@ -205,8 +213,10 @@ class CmdInvestigate(MuxCommand):
         stat_val = getattr(char.db, stat_name, 5) or 5
 
         from world.utils.roll_utils import roll_skill_check, check_success
+        from world.wound_utils import get_action_penalty
 
-        total, details = roll_skill_check(stat_val, skill_val)
+        action_penalty = get_action_penalty(char)
+        total, details = roll_skill_check(stat_val, skill_val, modifier=action_penalty)
         target = clue.dv
         success = check_success(total, target)
         fumble = details.get("is_crit_failure", False)
@@ -246,7 +256,11 @@ class CmdInvestigate(MuxCommand):
             )
             msg = f"|rFailed.|n You lose {focus_damage} Focus. ({focus_obj.current_focus} remaining)"
             if fumble:
-                msg += " |rCritical Failure!|n Additional complications may apply."
+                fumble_effect = clue.fumble_effect or CLUE_TYPES.get(clue.clue_type, {}).get("fumble_effect")
+                if fumble_effect:
+                    msg += f" |rFumble!|n {fumble_effect}"
+                else:
+                    msg += " |rFumble!|n Additional complications may apply."
             self.caller.msg(msg)
 
     def do_hint(self):
@@ -264,7 +278,10 @@ class CmdInvestigate(MuxCommand):
         skill_val = getattr(char.db, "deduction", 0) or 0
         stat_val = getattr(char.db, "intelligence", 5) or 5
         from world.utils.roll_utils import roll_skill_check, check_success
-        total, details = roll_skill_check(stat_val, skill_val)
+        from world.wound_utils import get_action_penalty
+
+        action_penalty = get_action_penalty(char)
+        total, details = roll_skill_check(stat_val, skill_val, modifier=action_penalty)
         success = check_success(total, 15)
         focus_damage = _roll_dice("1d6")
         focus_obj.current_focus -= focus_damage
@@ -275,6 +292,90 @@ class CmdInvestigate(MuxCommand):
             )
         else:
             self.caller.msg(f"Nothing comes to mind. Lost {focus_damage} Focus.")
+
+
+class CmdOvercome(MuxCommand):
+    """
+    Attempt to overcome an Obstacle (Interface RED).
+
+    Usage:
+      +overcome <obstacle id>
+
+    Success: 1d6 Focus damage. Failure: 2d6 Focus damage.
+    One attempt per obstacle per character per day.
+    """
+
+    key = "+overcome"
+    aliases = ["overcome"]
+    lock = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        if not self.args:
+            self.caller.msg("Usage: +overcome <obstacle id>")
+            return
+        char = _get_character_for_caller(self.caller)
+        if not char:
+            self.caller.msg("You must be playing a character to overcome obstacles.")
+            return
+        if not is_character_approved(char):
+            self.caller.msg("You must be approved by staff before using the mystery system.")
+            return
+
+        try:
+            obs_id = int(self.args.strip())
+            obstacle = MysteryObstacle.objects.get(id=obs_id)
+        except (ValueError, MysteryObstacle.DoesNotExist):
+            self.caller.msg("Obstacle not found.")
+            return
+
+        focus_obj = _get_or_create_focus(char)
+        if focus_obj.current_focus <= 0:
+            self.caller.msg("Your Focus is depleted. Rest before attempting obstacles.")
+            return
+
+        today = date.today()
+        existing = ObstacleAttempt.objects.filter(
+            obstacle=obstacle, character=char, attempted_date=today
+        ).first()
+        if existing:
+            self.caller.msg("You've already attempted this obstacle today.")
+            return
+
+        skill_name = obstacle.skill_used or "streetwise"
+        skill_val = getattr(char.db, skill_name, 0) or 0
+        if hasattr(char, "get_skill"):
+            skill_val = char.get_skill(skill_name)
+        stat_name = _skill_to_stat(skill_name)
+        stat_val = getattr(char.db, stat_name, 5) or 5
+
+        from world.utils.roll_utils import roll_skill_check, check_success
+        from world.wound_utils import get_action_penalty
+
+        action_penalty = get_action_penalty(char)
+        total, _ = roll_skill_check(stat_val, skill_val, modifier=action_penalty)
+        success = check_success(total, obstacle.dv)
+        focus_damage = _roll_dice("1d6") if success else _roll_dice("2d6")
+
+        focus_obj.current_focus = max(0, focus_obj.current_focus - focus_damage)
+        focus_obj.save()
+        ObstacleAttempt.objects.create(
+            obstacle=obstacle,
+            character=char,
+            attempted_date=today,
+            success=success,
+            focus_lost=focus_damage,
+        )
+        if success:
+            self.caller.msg(
+                f"|gYou overcome the obstacle!|n You push through but take {focus_damage} Focus damage. "
+                f"({focus_obj.current_focus} remaining)"
+            )
+        else:
+            self.caller.msg(
+                f"|rYou fail to overcome the obstacle.|n You take {focus_damage} Focus damage. "
+                f"({focus_obj.current_focus} remaining)"
+            )
 
 
 class CmdClues(MuxCommand):
@@ -309,9 +410,17 @@ class CmdClues(MuxCommand):
         lines = [header("Investigation Clues")]
         for m in mysteries:
             clues = m.clues.all().order_by("id")
+            obstacles = m.obstacles.all().order_by("id")
             lines.append(section_header(m.name))
             lines.append(f"  Goal: {m.goal[:60]}{'...' if len(m.goal) > 60 else ''}")
-            lines.append(f"  Complexity: {m.current_complexity}/{m.max_complexity}  Solved: {m.is_solved}")
+            lines.append(
+                f"  Difficulty: {getattr(m, 'difficulty_level', 'average')} | "
+                f"Complexity: {m.current_complexity}/{m.max_complexity} | Solved: {m.is_solved}"
+            )
+            if obstacles.exists():
+                lines.append("  Obstacles:")
+                for o in obstacles:
+                    lines.append(f"    |y#{o.id}|n {o.obstacle_type} DV{o.dv} ({o.skill_used or 'any'})")
             for c in clues:
                 reqs = list(c.required_clues.values_list("id", flat=True))
                 locs = ClueLocation.objects.filter(clue=c)
@@ -330,12 +439,85 @@ class CmdClues(MuxCommand):
         self.caller.msg("\n".join(lines))
 
 
+class CmdRest(MuxCommand):
+    """
+    Rest and attempt DV15 Concentration for +5 Focus (Interface RED).
+
+    Usage:
+      +rest                - Attempt Concentration check for +5 Focus (once per day)
+      +rest/concentrate    - Same as +rest
+
+    Per Interface RED: With a successful DV15 Concentration Check while resting,
+    you recover an additional 5 Focus. Usable once per day. Base Focus recovery
+    (INT + WILL) happens automatically every 24 hours.
+    """
+
+    key = "+rest"
+    aliases = ["rest"]
+    lock = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        char = _get_character_for_caller(self.caller)
+        if not char:
+            self.caller.msg("You must be playing a character to rest.")
+            return
+        if not is_character_approved(char):
+            self.caller.msg("You must be approved by staff before using the mystery system.")
+            return
+
+        focus_obj = _get_or_create_focus(char)
+        today = date.today()
+        if focus_obj.last_concentrate_date == today:
+            self.caller.msg("You've already attempted to concentrate today. Try again tomorrow.")
+            return
+
+        max_focus = focus_obj.get_max_focus()
+        room = max(0, max_focus - focus_obj.current_focus)
+        if room == 0:
+            self.caller.msg("Your Focus is already full.")
+            focus_obj.last_concentrate_date = today
+            focus_obj.save()
+            return
+
+        skill_val = getattr(char.db, "concentration", 0) or 0
+        if hasattr(char, "get_skill"):
+            skill_val = char.get_skill("concentration")
+        stat_val = getattr(char.db, "willpower", 5) or 5
+        from world.utils.roll_utils import roll_skill_check, check_success
+        from world.wound_utils import get_action_penalty
+
+        action_penalty = get_action_penalty(char)
+        total, details = roll_skill_check(stat_val, skill_val, modifier=action_penalty)
+        success = check_success(total, 15)
+
+        focus_obj.last_concentrate_date = today
+        if success:
+            gain = min(5, room)
+            focus_obj.current_focus = min(max_focus, focus_obj.current_focus + gain)
+            focus_obj.save()
+            self.caller.msg(
+                f"|gSuccess!|n You focus your mind. Recovered {gain} Focus. "
+                f"({focus_obj.current_focus}/{max_focus})"
+            )
+        else:
+            focus_obj.save()
+            self.caller.msg(
+                "You try to concentrate but can't quite clear your head. "
+                "No bonus Focus this time."
+            )
+
+
 class CmdCreateMystery(MuxCommand):
     """
     Create a new mystery (staff).
 
     Usage:
       +createmystery <name>=<goal>,<complexity>
+      +createmystery <name>=<goal>,<tier>
+
+    Tier: easy (25), average (50), challenging (100), difficult (150), legendary (200)
+    Or use a raw number for complexity.
     """
 
     key = "+createmystery"
@@ -345,25 +527,38 @@ class CmdCreateMystery(MuxCommand):
 
     def func(self):
         if not self.args or "=" not in self.args:
-            self.caller.msg("Usage: +createmystery <name>=<goal>,<complexity>")
+            self.caller.msg(
+                "Usage: +createmystery <name>=<goal>,<complexity or tier>"
+            )
             return
         name = self.lhs.strip()
         rhs = self.rhs.strip()
         parts = [p.strip() for p in rhs.split(",", 1)]
         goal = parts[0] if parts else ""
-        try:
-            complexity = int(parts[1]) if len(parts) > 1 else 50
-        except (ValueError, IndexError):
-            complexity = 50
+        complexity_arg = (parts[1] if len(parts) > 1 else "50").strip().lower()
+        tier_data = COMPLEXITY_TIERS.get(complexity_arg)
+        if tier_data:
+            complexity = tier_data["value"]
+            difficulty_level = complexity_arg
+        else:
+            try:
+                complexity = int(complexity_arg)
+                difficulty_level = "average"
+            except ValueError:
+                complexity = 50
+                difficulty_level = "average"
         char = _get_character_for_caller(self.caller)
         m = Mystery.objects.create(
             name=name,
             goal=goal,
+            difficulty_level=difficulty_level,
             max_complexity=complexity,
             current_complexity=complexity,
             created_by=char,
         )
-        self.caller.msg(f"Created Mystery #{m.id}: {m.name} (complexity {complexity})")
+        self.caller.msg(
+            f"Created Mystery #{m.id}: {m.name} ({difficulty_level}, complexity {complexity})"
+        )
 
 
 class CmdCreateClue(MuxCommand):
@@ -371,9 +566,10 @@ class CmdCreateClue(MuxCommand):
     Create a new clue and add it to a mystery (staff).
 
     Usage:
-      +createclue <mystery id>=<clue_type>,<skills>,<dv>,<obfuscation>
+      +createclue <mystery id>=<clue_type>,<skills>,<dv>,<obfuscation>[,description]
     Example:
       +createclue 1=forensics,criminology;deduction,13,2
+      +createclue 1=forensics,criminology;deduction,13,2,The safe was forced open
     """
 
     key = "+createclue"
@@ -407,6 +603,8 @@ class CmdCreateClue(MuxCommand):
         defaults = CLUE_TYPES.get(clue_type, {})
         damage_dice = defaults.get("damage_dice", "3d6")
         focus_damage_dice = defaults.get("focus_damage_dice", "2d6")
+        fumble_effect = defaults.get("fumble_effect") or ""
+        description = ", ".join(parts[4:]) if len(parts) > 4 else ""
         c = MysteryClue.objects.create(
             mystery=mystery,
             clue_type=clue_type,
@@ -415,10 +613,65 @@ class CmdCreateClue(MuxCommand):
             obfuscation=obfuscation,
             damage_dice=damage_dice,
             focus_damage_dice=focus_damage_dice,
+            fumble_effect=fumble_effect,
+            description=description,
         )
         self.caller.msg(
             f"Created Clue #{c.id} ({c.clue_type}) for {mystery.name}. "
             f"Use +addclue <target>={c.id} to attach to a location."
+        )
+
+
+class CmdAddObstacle(MuxCommand):
+    """
+    Add an Obstacle to a mystery (staff).
+
+    Usage:
+      +addobstacle <mystery id>=<type>,<skill>,<dv>[,description]
+    Example:
+      +addobstacle 1=Authority,persuasion,15,Corporations impede progress
+      +addobstacle 1=Ticking Clock,,,Building locks down at midnight
+
+    Types: Authority, Digital, Distraction, Fatigue, Legal, Location, etc.
+    """
+
+    key = "+addobstacle"
+    aliases = ["addobstacle"]
+    lock = "cmd:perm(builders)"
+    help_category = "Building"
+
+    def func(self):
+        if not self.args or "=" not in self.args:
+            self.caller.msg(
+                "Usage: +addobstacle <mystery id>=<type>,<skill>,<dv>[,description]"
+            )
+            return
+        try:
+            mid = int(self.lhs.strip())
+            mystery = Mystery.objects.get(id=mid)
+        except (ValueError, Mystery.DoesNotExist):
+            self.caller.msg("Mystery not found.")
+            return
+        parts = [p.strip() for p in self.rhs.split(",", 3)]
+        obs_type = parts[0] if parts else "Distraction"
+        skill = parts[1] if len(parts) > 1 else "streetwise"
+        try:
+            dv = int(parts[2]) if len(parts) > 2 and parts[2] else 13
+        except (ValueError, TypeError):
+            dv = 13
+        description = parts[3] if len(parts) > 3 else ""
+        is_ticking = "ticking" in obs_type.lower() or "clock" in obs_type.lower()
+        obs = MysteryObstacle.objects.create(
+            mystery=mystery,
+            obstacle_type=obs_type,
+            skill_used=skill,
+            dv=dv,
+            description=description,
+            is_ticking_clock=is_ticking,
+        )
+        self.caller.msg(
+            f"Added Obstacle #{obs.id} ({obs_type}) to {mystery.name}. "
+            f"Use +overcome {obs.id} to attempt."
         )
 
 

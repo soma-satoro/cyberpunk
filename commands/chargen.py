@@ -1366,5 +1366,13 @@ class CmdLifepath(Command):
     help_category = "Character"
 
     def func(self):
+        from world.utils.character_utils import is_character_approved, is_staff
         from commands.lifepath_menu import start_lifepath_menu
+
+        # Approved characters cannot change lifepath (chargen-only)
+        if is_character_approved(self.caller) and not is_staff(self.caller):
+            self.caller.msg(
+                "Your character has been approved. Lifepath cannot be changed after approval."
+            )
+            return
         start_lifepath_menu(self.caller)

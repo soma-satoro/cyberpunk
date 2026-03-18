@@ -6,11 +6,12 @@ Investigation system based on Cyberpunk RED Interface Volume 5 ("Did Someone Say
 
 == Overview ==
 
-'''Mysteries''' are investigations with a goal and a complexity value. '''Clues''' are attached to rooms, NPCs, or objects. Players make '''Evidence Checks''' (skill rolls) to decipher clues; success reduces the mystery's complexity; failure costs Focus. When complexity reaches 0, the mystery is solved.
+'''Mysteries''' are investigations with a goal and a complexity value. '''Clues''' are attached to rooms, NPCs, or objects. Players make '''Evidence Checks''' (skill rolls) to decipher clues; success reduces the mystery's complexity; failure costs Focus. '''Obstacles''' add complications and cost Focus to overcome or fail. When complexity reaches 0, the mystery is solved.
 
 '''Key concepts:'''
-* '''Focus''' – Pool based on INT + WILL; depletes on failed checks; recovers every 24 hours (half max)
-* '''Evidence Check''' – Stat + Skill + 1d10 vs clue DV; success = damage to complexity; failure = lose Focus
+* '''Focus''' – Pool = 10 + 5[(INT+WILL)/2 round up]; depletes on failed checks; recovers INT+WILL every 24h; +5 with DV15 Concentration (+rest)
+* '''Evidence Check''' – Stat + Skill + 1d10 vs clue DV; success = damage to complexity (minus Obfuscation); failure = lose Focus
+* '''Obstacles''' – Overcome = 1d6 Focus damage; fail = 2d6 Focus damage
 * '''Clue order''' – Some clues require others to be deciphered first
 
 ----
@@ -29,7 +30,7 @@ Investigation system based on Cyberpunk RED Interface Volume 5 ("Did Someone Say
 +mystery/focus        - Detailed Focus info
 </pre>
 
-Focus recovers every 24 hours (half your max). If Focus is 0, you cannot make Evidence Checks until it recovers.
+Focus recovers INT + WILL every 24 hours. Use '''+rest''' for an optional DV15 Concentration check (+5 Focus on success, once per day). If Focus is 0, you cannot make Evidence Checks until it recovers.
 
 === Investigating ===
 
@@ -53,6 +54,21 @@ Focus recovers every 24 hours (half your max). If Focus is 0, you cannot make Ev
 
 '''Hint:''' <code>+investigate/hint</code> – Roll DV15 Deduction; success = GM provides a nudge; always costs 1d6 Focus.
 
+=== Rest & Concentration ===
+
+<pre>
++rest                - DV15 Concentration for +5 Focus (once per day)
++rest/concentrate    - Same as +rest
+</pre>
+
+=== Overcoming Obstacles ===
+
+<pre>
++overcome &lt;obstacle id&gt;   - Attempt to overcome an obstacle
+</pre>
+
+Success: 1d6 Focus damage. Failure: 2d6 Focus damage. One attempt per obstacle per day.
+
 === Clue Attempt Limits ===
 
 One attempt per clue per character per day. If you fail, you can try again tomorrow.
@@ -64,12 +80,15 @@ One attempt per clue per character per day. If you fail, you can try again tomor
 === Creating a Mystery ===
 
 <pre>
-+createmystery &lt;name&gt;=&lt;goal&gt;,&lt;complexity&gt;
++createmystery &lt;name&gt;=&lt;goal&gt;,&lt;complexity or tier&gt;
 </pre>
 
-'''Example:''' <code>+createmystery "Warehouse Murder"=Find who killed the guard,50</code>
+'''Examples:'''
+* <code>+createmystery "Warehouse Murder"=Find who killed the guard,50</code>
+* <code>+createmystery "Warehouse Murder"=Find who killed the guard,easy</code>
 
-* '''Complexity''' – Typically 50 or 100; when reduced to 0, mystery is solved
+* '''Tiers''' – easy (25), average (50), challenging (100), difficult (150), legendary (200)
+* '''Complexity''' – Raw number or tier; when reduced to 0, mystery is solved
 * '''Goal''' – Short description of what solving means
 
 === Creating Clues ===
@@ -84,6 +103,16 @@ One attempt per clue per character per day. If you fail, you can try again tomor
 * '''skills''' – Semicolon-separated (e.g. criminology;deduction)
 * '''dv''' – Difficulty value for the Evidence Check (e.g. 13)
 * '''obfuscation''' – Reduces damage dealt on success (e.g. 2)
+
+=== Adding Obstacles ===
+
+<pre>
++addobstacle &lt;mystery id&gt;=&lt;type&gt;,&lt;skill&gt;,&lt;dv&gt;[,description]
+</pre>
+
+'''Example:''' <code>+addobstacle 1=Authority,persuasion,15,Corporations impede progress</code>
+
+Types: Authority, Digital, Distraction, Fatigue, Legal, Location, Ticking Clock, etc.
 
 === Placing Clues ===
 
@@ -149,13 +178,19 @@ When a mystery is solved, linked missions and jobs are updated automatically.
 |-
 | View Focus || <code>+mystery</code>
 |-
+| Rest (Concentration +5) || <code>+rest</code>
+|-
 | Investigate || <code>+investigate &lt;target&gt;</code>
 |-
 | Get hint || <code>+investigate/hint</code>
 |-
-| Create mystery (Staff) || <code>+createmystery &lt;name&gt;=&lt;goal&gt;,&lt;complexity&gt;</code>
+| Overcome obstacle || <code>+overcome &lt;obstacle id&gt;</code>
+|-
+| Create mystery (Staff) || <code>+createmystery &lt;name&gt;=&lt;goal&gt;,&lt;tier&gt;</code>
 |-
 | Create clue (Staff) || <code>+createclue &lt;mystery id&gt;=&lt;type&gt;,&lt;skills&gt;,&lt;dv&gt;,&lt;obfuscation&gt;</code>
+|-
+| Add obstacle (Staff) || <code>+addobstacle &lt;mystery id&gt;=&lt;type&gt;,&lt;skill&gt;,&lt;dv&gt;</code>
 |-
 | Place clue (Staff) || <code>+addclue &lt;target&gt;=&lt;clue id&gt;</code>
 |-

@@ -57,7 +57,7 @@ CLUE_TYPES = {
         "fumble_effect": None,
     },
     "autopsy": {
-        "skills": ["paramedic"],
+        "skills": ["paramedic", "surgery"],
         "damage_dice": "4d6",
         "focus_damage_dice": "3d6",
         "fumble_effect": "Body damaged; further Evidence Checks -4.",

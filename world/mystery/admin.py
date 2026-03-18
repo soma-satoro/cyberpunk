@@ -1,7 +1,15 @@
 """Admin for Investigation System."""
 
 from django.contrib import admin
-from .models import Mystery, MysteryClue, CharacterFocus, ClueAttempt, ClueLocation
+from .models import (
+    Mystery,
+    MysteryClue,
+    MysteryObstacle,
+    CharacterFocus,
+    ClueAttempt,
+    ClueLocation,
+    ObstacleAttempt,
+)
 
 
 class ClueLocationInline(admin.TabularInline):
@@ -14,11 +22,16 @@ class MysteryClueInline(admin.TabularInline):
     extra = 1
 
 
+class MysteryObstacleInline(admin.TabularInline):
+    model = MysteryObstacle
+    extra = 0
+
+
 @admin.register(Mystery)
 class MysteryAdmin(admin.ModelAdmin):
-    list_display = ("name", "mission", "current_complexity", "max_complexity", "is_solved", "created_at")
-    list_filter = ("is_solved",)
-    inlines = [MysteryClueInline]
+    list_display = ("name", "difficulty_level", "mission", "current_complexity", "max_complexity", "is_solved", "created_at")
+    list_filter = ("is_solved", "difficulty_level")
+    inlines = [MysteryClueInline, MysteryObstacleInline]
 
 
 @admin.register(MysteryClue)
@@ -41,3 +54,13 @@ class CharacterFocusAdmin(admin.ModelAdmin):
 @admin.register(ClueAttempt)
 class ClueAttemptAdmin(admin.ModelAdmin):
     list_display = ("character", "clue", "attempted_date", "success", "damage_dealt", "focus_lost")
+
+
+@admin.register(MysteryObstacle)
+class MysteryObstacleAdmin(admin.ModelAdmin):
+    list_display = ("mystery", "obstacle_type", "skill_used", "dv", "is_ticking_clock")
+
+
+@admin.register(ObstacleAttempt)
+class ObstacleAttemptAdmin(admin.ModelAdmin):
+    list_display = ("character", "obstacle", "attempted_date", "success", "focus_lost")

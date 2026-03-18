@@ -25,6 +25,11 @@ class CharacterFocus(SharedMemoryModel):
         default=0,
         help_text="Depletes on failed Evidence Checks. At 0 or below, cannot make Evidence Checks.",
     )
+    last_concentrate_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Last date +rest/concentrate was used (once per day for +5 bonus).",
+    )
 
     class Meta:
         constraints = [
@@ -50,9 +55,14 @@ class CharacterFocus(SharedMemoryModel):
 
 
 class Mystery(SharedMemoryModel):
-    """An investigation mystery with Goal and Complexity."""
+    """An investigation mystery with Goal and Complexity (Interface RED)."""
     name = models.CharField(max_length=255)
     goal = models.TextField(help_text="End state: e.g., who stole the cyberware.")
+    difficulty_level = models.CharField(
+        max_length=30,
+        default="average",
+        help_text="easy, average, challenging, difficult, legendary",
+    )
     max_complexity = models.PositiveIntegerField(
         default=50,
         help_text="Initial Complexity. When reduced to 0, mystery is solved.",
@@ -107,6 +117,10 @@ class MysteryClue(SharedMemoryModel):
     focus_damage_dice = models.CharField(max_length=20, default="2d6")
     obfuscation = models.PositiveIntegerField(default=0)
     description = models.TextField(blank=True)
+    fumble_effect = models.TextField(
+        blank=True,
+        help_text="Special consequence on Fumble (roll 1 and fail). Overrides CLUE_TYPES default.",
+    )
     # Clues that must be successfully deciphered before this clue can be attempted
     required_clues = models.ManyToManyField(
         "self",
@@ -147,6 +161,56 @@ class ClueLocation(SharedMemoryModel):
 
     def __str__(self):
         return f"{self.clue} @ {self.location_object}"
+
+
+class MysteryObstacle(SharedMemoryModel):
+    """Obstacle linked to a Mystery. Overcome = 1d6 Focus damage; fail = 2d6 Focus damage."""
+    mystery = models.ForeignKey(
+        Mystery,
+        on_delete=models.CASCADE,
+        related_name="obstacles",
+    )
+    obstacle_type = models.CharField(
+        max_length=50,
+        help_text="Authority, Digital, Distraction, etc.",
+    )
+    description = models.TextField(blank=True)
+    skill_used = models.CharField(
+        max_length=80,
+        blank=True,
+        help_text="Skill for overcoming (e.g. streetwise, persuasion).",
+    )
+    dv = models.PositiveIntegerField(
+        default=13,
+        help_text="Difficulty Value for overcoming.",
+    )
+    is_ticking_clock = models.BooleanField(
+        default=False,
+        help_text="Time-sensitive obstacle.",
+    )
+
+    def __str__(self):
+        return f"{self.mystery.name}: {self.obstacle_type}"
+
+
+class ObstacleAttempt(SharedMemoryModel):
+    """Tracks Obstacle overcome attempts (one per Obstacle per character per day)."""
+    character = models.ForeignKey(
+        ObjectDB,
+        on_delete=models.CASCADE,
+        related_name="obstacle_attempts",
+    )
+    obstacle = models.ForeignKey(
+        MysteryObstacle,
+        on_delete=models.CASCADE,
+        related_name="attempts",
+    )
+    attempted_date = models.DateField()
+    success = models.BooleanField(default=False)
+    focus_lost = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        unique_together = [["obstacle", "character", "attempted_date"]]
 
 
 class ClueAttempt(SharedMemoryModel):

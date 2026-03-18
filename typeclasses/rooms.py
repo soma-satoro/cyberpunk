@@ -592,7 +592,12 @@ class Room(DefaultRoom):
         # If this is a Quiet Room, notify the character they're leaving
         if self.db.roomtype == "Quiet Room" and moved_obj.has_account:
             moved_obj.msg("|gYou have left the Quiet Room. Communication commands are now available.|n")
-            
+
+        # Expire pending attacks when attacker or target leaves (prevents stale dodge prompts)
+        if getattr(moved_obj, "has_account", False) or getattr(moved_obj, "character_sheet", None):
+            from commands.attack_commands import _clear_pending_attacks_on_leave
+            _clear_pending_attacks_on_leave(moved_obj, self)
+
         super().at_object_leave(moved_obj, target_location, **kwargs)
 
     def is_command_restricted_in_quiet_room(self, cmdname, switches=None):

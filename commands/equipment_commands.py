@@ -53,7 +53,7 @@ class CmdAddItem(Command):
             self.caller.msg(f"{player.name} doesn't have a character sheet.")
             return
 
-        inventory, _ = Inventory.objects.get_or_create(character=character_sheet)
+        inventory, _ = Inventory.get_or_create_for_character(player)
 
         # Try weapon, armor, gear, vehicle in order
         try:
@@ -95,7 +95,42 @@ class CmdAddItem(Command):
         except VehicleModel.DoesNotExist:
             pass
 
-        self.caller.msg(f"Item '{item_name}' not found. Check weapon, armor, gear, and vehicle names (e.g. equipdb weapons).")
+        # Ammunition: additem <player>=<ammo type>/<units> (each unit = 10 rounds)
+        if "/" in item_name:
+            ammo_part, units_part = item_name.split("/", 1)
+            ammo_part = ammo_part.strip()
+            try:
+                units = int(units_part.strip())
+                if units > 0:
+                    from world.inventory.models import Ammunition
+                    from world.equipment_data import ammunition as ammo_data
+                    ammo_match = None
+                    for a in ammo_data:
+                        if ammo_part.lower() in (a.get("name", "") or "").lower():
+                            ammo_match = a
+                            break
+                    if ammo_match:
+                        rounds = units * 10
+                        existing = inventory.ammunition.filter(ammo_type=ammo_match.get("ammo_type", "Basic")).first()
+                        if existing:
+                            existing.quantity += rounds
+                            existing.save()
+                        else:
+                            ammo = Ammunition.objects.create(
+                                name=ammo_match["name"],
+                                ammo_type=ammo_match.get("ammo_type", "Basic"),
+                                quantity=rounds,
+                                cost=ammo_match.get("cost", 10),
+                                weapon_type=ammo_match.get("weapon_type", "Generic"),
+                            )
+                            inventory.ammunition.add(ammo)
+                        self.caller.msg(f"Added {rounds} rounds of {ammo_match['name']} to {player.name}'s inventory.")
+                        player.msg(f"{rounds} rounds of {ammo_match['name']} have been added to your inventory.")
+                        return
+            except ValueError:
+                pass
+
+        self.caller.msg(f"Item '{item_name}' not found. Check weapon, armor, gear, vehicle names, or use ammo/units (e.g. hollow point/10).")
 
 class CmdAddVehicle(Command):
     """

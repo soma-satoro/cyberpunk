@@ -195,6 +195,15 @@ TOPSHEET_MAPPING = {
     'GENDER': 'gender'
 }
 
+# Wound system: staff can modify via stat command
+WOUND_STAT_MAPPING = {
+    'DSP': 'death_save_penalty',
+    'DEATH_SAVE_PENALTY': 'death_save_penalty',
+    'BASE_DSP': 'base_death_save_penalty',
+    'BASE_DEATH_SAVE_PENALTY': 'base_death_save_penalty',
+    'DEAD': 'dead',
+}
+
 ALL_ATTRIBUTES = {**STAT_MAPPING, **SKILL_MAPPING, **TOPSHEET_MAPPING}
 
 # Create a reverse mapping with multiple options
@@ -214,6 +223,12 @@ for mapping in [STAT_MAPPING, SKILL_MAPPING, TOPSHEET_MAPPING, MEDICINE_SPECIALT
             REVERSE_MAPPING[abbr[:i]] = full
         for i in range(3, len(full)):  # Start from 3 to avoid very short matches
             REVERSE_MAPPING[full[:i].upper()] = full
+# Wound stats: full keys only (no short abbrevs to avoid conflicts)
+for abbr, full in WOUND_STAT_MAPPING.items():
+    REVERSE_MAPPING[abbr] = full
+    REVERSE_MAPPING[full.upper()] = full
+    if '_' in full:
+        REVERSE_MAPPING[full.replace('_', ' ').upper()] = full
 
 def format_skill_display(name):
     """Convert internal skill/stat name (e.g. shoulder_arms) to display form (Shoulder Arms)."""
@@ -234,6 +249,77 @@ def get_full_attribute_name(input_str):
         # Try with spaces replaced by underscores
         result = REVERSE_MAPPING.get(normalized.replace(' ', '_'))
     return result
+
+
+def _fuzzy_match_from_pool(input_str, pool):
+    """
+    Fuzzy match input against a pool of full names (e.g. stat or skill names).
+    Input is matched as a prefix (case-insensitive) of the full name.
+    Returns (single_match, None) if exactly one match, or (None, [display_names]) if multiple.
+    Returns (None, []) if no matches.
+    """
+    if not input_str or not pool:
+        return None, []
+    inp = input_str.strip().lower().replace(' ', '_')
+    if not inp:
+        return None, []
+
+    def norm(name):
+        return (name or "").lower().replace(" ", "_")
+
+    matches = []
+    for full in pool:
+        n = norm(full)
+        display = format_skill_display(full)
+        # Exact match
+        if n == inp:
+            return full, None
+        # Prefix match: full name starts with input (require at least 2 chars)
+        if len(inp) >= 2 and n.startswith(inp):
+            matches.append((full, display))
+
+    if len(matches) == 1:
+        return matches[0][0], None
+    if len(matches) > 1:
+        return None, [m[1] for m in matches]
+    return None, []
+
+
+def fuzzy_match_stat(input_str):
+    """
+    Fuzzy match input to a stat. Returns (full_name, None) if unique match,
+    or (None, [display_names]) if multiple matches. (None, []) if no match.
+    Falls back to get_full_attribute_name for abbreviations (e.g. REF, DEX).
+    """
+    single, multi = _fuzzy_match_from_pool(input_str, list(STAT_MAPPING.values()))
+    if single:
+        return single, None
+    if multi:
+        return None, multi
+    # Fallback: try abbreviation mapping (e.g. REF -> reflexes)
+    legacy = get_full_attribute_name(input_str)
+    if legacy and legacy in STAT_MAPPING.values():
+        return legacy, None
+    return None, []
+
+
+def fuzzy_match_skill(input_str):
+    """
+    Fuzzy match input to a skill. Returns (full_name, None) if unique match,
+    or (None, [display_names]) if multiple matches. (None, []) if no match.
+    Falls back to get_full_attribute_name for abbreviations (e.g. HG, IF).
+    """
+    pool = list(SKILL_MAPPING.values()) + list(MEDICINE_SPECIALTY_MAPPING.values()) + list(MAKER_SPECIALTY_MAPPING.values())
+    single, multi = _fuzzy_match_from_pool(input_str, pool)
+    if single:
+        return single, None
+    if multi:
+        return None, multi
+    # Fallback: try abbreviation mapping
+    legacy = get_full_attribute_name(input_str)
+    if legacy and legacy in pool:
+        return legacy, None
+    return None, []
 
 def get_character_sheet(character):
     if isinstance(character, (list, tuple)) and character:

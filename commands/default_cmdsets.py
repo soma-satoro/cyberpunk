@@ -20,14 +20,17 @@ from evennia import default_cmds, CmdSet
 from .character_commands import CmdSheet, CmdRoll, CmdLuck, CmdShortDesc, CmdPlusOoc, CmdPlusIc, CmdMeet
 from .chargen import CmdChargen, CmdListCharacterSheets, CmdLifepath, CmdSelfStat, CmdSetLanguage, CmdSellYourSoul
 from .admin_commands import CmdStat, CmdHeal, CmdHarm, CmdApprove, CmdUnapprove, CmdSpawnRipperdoc, CmdGradientName, CmdClearAllStates, CmdClearRental, CmdCleanupDuplicates, CmdExamine, CmdAssociateAllCharacterSheets, CmdViewCharacterSheetID, CmdSetCharacterSheetID, CmdAllSheets, CmdViewSheetAttributes, CmdSyncLanguages, CmdJoin, CmdSummon, CmdClearDb
-from .inventory_commands import CmdInventory, CmdWear
+from .inventory_commands import CmdInventory, CmdWear, CmdEquipWeapon
 from .voucher_commands import CmdVoucher, CmdConceal, CmdOwner
 from .equipment_commands import CmdAddItem, CmdAddVehicle, CmdRemoveVehicle, CmdPopulateWeapons, CmdPopulateArmor, CmdPopulateGear, CmdPopulateVehicles, CmdViewEquipment, CmdPopulateAllEquipment, CmdRemoveEquipment, CmdPopulateCyberware, CmdDepopulateAllEquipment
 from .list_commands import CmdLookup
 from .mystery_commands import (
     CmdMystery,
     CmdInvestigate,
+    CmdRest,
+    CmdOvercome,
     CmdAddClue,
+    CmdAddObstacle,
     CmdClues,
     CmdCreateMystery,
     CmdCreateClue,
@@ -35,7 +38,7 @@ from .mystery_commands import (
     CmdLinkClue,
     CmdMysteryLink,
 )
-from .cyberware_admin_commands import CmdAddCyberware
+from .cyberware_admin_commands import CmdAddCyberware, CmdUnparentCyberware
 from .staff_commands import CmdRemoveCyberware, CmdSetLifepath, CmdReputation, CmdNotoriety, CmdConfig
 from .economy import CmdAdminMoney, CmdGiveMoney, CmdBalance, CmdLeaveRental
 from .rent_commands import CmdRent, CmdHome
@@ -54,8 +57,10 @@ from .cyberware_commands import CmdCyberware
 from .netrun_commands import CmdNet
 from .netrun_admin_commands import CmdArchitecture
 from .combat_system import CmdCombat
-from .attack_commands import CmdAttack, CmdDodge
+from .attack_commands import CmdAttack, CmdDodge, CmdDeathSave, CmdCover, CmdHud
 from .repair_commands import CmdRepair, CmdJuryrig
+from .treat_commands import CmdTreat
+from .health_commands import CmdHealth
 from .maker_commands import CmdMake
 from .language_commands import CmdLanguage
 from .building import CmdManageBuilding, CmdRoom, CmdAreaManage
@@ -121,6 +126,8 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdWear())
         self.add(CmdRepair())
         self.add(CmdJuryrig())
+        self.add(CmdTreat())
+        self.add(CmdHealth())
         self.add(CmdMake())
         self.add(CmdVoucher())
         self.add(CmdConceal())
@@ -129,6 +136,8 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdLookup())
         self.add(CmdMystery())
         self.add(CmdInvestigate())
+        self.add(CmdRest())
+        self.add(CmdOvercome())
         self.add(CmdChargen())
         self.add(CmdSellYourSoul())
         self.add(CmdManageBuilding())
@@ -137,6 +146,10 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdCombat())
         self.add(CmdAttack())
         self.add(CmdDodge())
+        self.add(CmdDeathSave())
+        self.add(CmdCover())
+        self.add(CmdHud())
+        self.add(CmdEquipWeapon())
         self.add(CmdAlts())
         self.add(CmdEmit())
         self.add(CmdPose())
@@ -240,8 +253,10 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdDepopulateAllEquipment())
         self.add(CmdRemoveEquipment())
         self.add(CmdAddCyberware())
+        self.add(CmdUnparentCyberware())
         self.add(CmdRemoveCyberware())
         self.add(CmdAddClue())
+        self.add(CmdAddObstacle())
         self.add(CmdClues())
         self.add(CmdCreateMystery())
         self.add(CmdCreateClue())

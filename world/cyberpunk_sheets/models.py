@@ -103,7 +103,7 @@ class CharacterSheet(SharedMemoryModel):
     weight = models.FloatField(default=0)
     current_luck = models.PositiveIntegerField(default=1)
     _max_hp = models.PositiveIntegerField(default=0)
-    _current_hp = models.PositiveIntegerField(default=0)
+    _current_hp = models.IntegerField(default=0)  # Can go negative when mortally wounded
     humanity = models.IntegerField(default=0)
     humanity_loss = models.IntegerField(default=0)
     total_cyberware_humanity_loss = models.IntegerField(default=0)
@@ -112,6 +112,10 @@ class CharacterSheet(SharedMemoryModel):
         help_text="Permanent humanity loss from removed/destroyed cyberware (e.g. plot removal)",
     )
     death_save = models.PositiveIntegerField(default=0)
+    death_save_penalty = models.IntegerField(default=0, help_text="Current death save penalty; increases each roll; resets to base when stabilized")
+    base_death_save_penalty = models.IntegerField(default=0, help_text="Base penalty from critical injuries; staff can modify via stat")
+    critical_injuries = models.JSONField(default=list, blank=True, help_text="List of critical injury names currently suffered")
+    critical_injury_quick_fixes = models.JSONField(default=dict, blank=True, help_text="Injury name -> expiry timestamp; effect suppressed until expiry")
     serious_wounds = models.PositiveIntegerField(default=0)
     eqweapon = models.ForeignKey('inventory.Weapon', on_delete=models.SET_NULL, null=True, blank=True, related_name='equipped_by')
     eqarmor = models.ForeignKey('inventory.Armor', on_delete=models.SET_NULL, null=True, blank=True, related_name='equipped_by')
@@ -130,6 +134,12 @@ class CharacterSheet(SharedMemoryModel):
     sell_your_soul_employer_type = models.CharField(max_length=50, blank=True)  # military, crime, corporation
     sell_your_soul_employer = models.CharField(max_length=100, blank=True)  # e.g. "NUSA Mechanised Combat Force"
     sell_your_soul_catch = models.CharField(max_length=100, blank=True)  # Hostages, Blackmail, etc.
+
+    medical_debt_entries = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of {amount, injuries, date} for debt from treat/hospital",
+    )
 
     # General lifepath fields
     cultural_origin = models.CharField(max_length=100, blank=True)
@@ -598,14 +608,9 @@ class CharacterSheet(SharedMemoryModel):
         self.humanity = max(0, min(self.empathy * 10, humanity_base - total_cyberware_hl - trauma_hl))
         self.total_cyberware_humanity_loss = total_cyberware_hl
 
-        # Ensure _current_hp doesn't exceed _max_hp
+        # Ensure _current_hp doesn't exceed _max_hp (allow negative for mortally wounded)
         if self._current_hp > self._max_hp:
             self._current_hp = self._max_hp
-        # If _current_hp is 0, set it to _max_hp
-        if self._current_hp == 0:
-            self._current_hp = self._max_hp
-        # Ensure _current_hp is never negative   
-        self._current_hp = max(0, self._current_hp)
 
         # Save without triggering another recalculation
         self.save(skip_recalculation=True)
@@ -627,10 +632,9 @@ class CharacterSheet(SharedMemoryModel):
         super().save(*args, **kwargs)
 
     def clean(self):
-                if self._current_hp < 0:
-                 self._current_hp = 0
-                elif self._current_hp > self._max_hp:
-                                  self._current_hp = self._max_hp
+        # Allow negative HP (mortally wounded); only cap at max
+        if self._current_hp > self._max_hp:
+            self._current_hp = self._max_hp
 
     def take_damage(self, amount):
                 """
@@ -791,14 +795,10 @@ class CharacterSheet(SharedMemoryModel):
         self.humanity = max(0, min(self.empathy * 10, humanity_base - total_cyberware_hl - trauma_hl))
         self.total_cyberware_humanity_loss = total_cyberware_hl
 
-        # Ensure _current_hp doesn't exceed _max_hp
+        # Ensure _current_hp doesn't exceed _max_hp (allow negative for mortally wounded)
         if self._current_hp > self._max_hp:
             self._current_hp = self._max_hp
-        # If _current_hp is 0, set it to _max_hp
-        if self._current_hp == 0:
-            self._current_hp = self._max_hp
-        # Ensure _current_hp is never negative
-        self._current_hp = max(0, self._current_hp)
+        # Do not clamp to 0 - mortally wounded can have negative HP
 
 @property
 def max_hp(self):

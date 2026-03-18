@@ -45,16 +45,13 @@ class CmdCyberware(MuxCommand):
             self._do_info(raw)
             return
 
-        # Staff can view another: cyberware <name> (list only)
-        if raw:
+        # Staff can view another: cyberware <name> (list only). Skip when using activate/deactivate/install - args are cyberware names.
+        if raw and not any(s in (self.switches or []) for s in ("activate", "deactivate", "install")):
             first_word = raw.split()[0]
             target_char, character_sheet = get_staff_target_character(
                 self.caller, first_word, quiet=True
             )
             if target_char is not None and character_sheet is not None:
-                if self.switches and any(s in self.switches for s in ("activate", "deactivate", "install")):
-                    self.caller.msg("You can only view another character's cyberware, not modify it.")
-                    return
                 self.list_cyberware(character_sheet)
                 return
             if len(raw.split()) == 1:
@@ -153,56 +150,64 @@ class CmdCyberware(MuxCommand):
         self.caller.msg(f"Assigned {child_inst.cyberware.name} to {parent_inst.cyberware.name}.")
 
     def list_cyberware(self, character_sheet):
-        installed = list(
-            CyberwareInstance.objects.filter(character_sheet=character_sheet, installed=True)
-            .select_related("cyberware", "parent", "paired_with")
-        )
+        # Use inventory.cyberware (same source as sheet display) so staff sees all installed items
+        from world.inventory.models import Inventory
+        try:
+            inv = character_sheet.inventory
+        except (Inventory.DoesNotExist, AttributeError):
+            sheet_pk = getattr(character_sheet, "pk", None)
+            if sheet_pk:
+                inv, _ = Inventory.objects.get_or_create(character_id=sheet_pk)
+            else:
+                inv = None
+        if inv:
+            installed = list(
+                inv.cyberware.filter(installed=True).select_related("cyberware", "parent", "paired_with")
+            )
+        else:
+            installed = list(
+                CyberwareInstance.objects.filter(character_sheet=character_sheet, installed=True)
+                .select_related("cyberware", "parent", "paired_with")
+            )
         if not installed:
             self.caller.msg("You have no cyberware installed.")
             return
 
+        from world.cyberware.utils import format_cyberware_for_display
+        rows = format_cyberware_for_display(installed, with_roots=True)
+
         W = 78
         output = sheet_header("Installed Cyberware", width=W)
-        output += f"|y{'Name':<30}{'Type':<20}{'Humanity Loss':<15}|n\n"
-
-        # Roots: no parent, not paired (paired items are shown under their first-of-pair)
-        roots = [i for i in installed if i.parent_id is None and not getattr(i, "paired_with_id", None)]
-        shown_ids = set()
-
-        def render_instance(inst, indent=""):
-            cw = inst.cyberware
-            label = f"{cw.name} (Paired)" if getattr(inst, "paired_with_id", None) else cw.name
-            return f"{indent}|w{label:<30}{cw.type:<20}{cw.humanity_loss:<15}|n\n"
-
-        for root in roots:
-            if root.id in shown_ids:
-                continue
-            output += render_instance(root)
-            shown_ids.add(root.id)
-            for child in installed:
-                if child.parent_id == root.id:
-                    output += render_instance(child, "- ")
-            for paired in installed:
-                if getattr(paired, "paired_with_id", None) == root.id:
-                    output += render_instance(paired, "- ")
-                    shown_ids.add(paired.id)
-                    for pchild in installed:
-                        if pchild.parent_id == paired.id:
-                            output += render_instance(pchild, "- ")
-
+        output += f"|y{'Name':<45}{'Type':<18}{'Humanity Loss':<12}|n\n"
+        for display_name, cw_type, humanity_loss in rows:
+            output += f"|w{display_name[:44]:<45}{cw_type:<18}{humanity_loss:<12}|n\n"
         output += footer(width=W, fillchar="-")
         output += "\nUse cyberware/info <cyberware name> for more information."
         self.caller.msg(output)
 
     def view_specific_cyberware(self, character_sheet, cyberware_name):
         cyberware_name = cyberware_name.strip()
-        instances = list(
-            CyberwareInstance.objects.filter(
-                character_sheet=character_sheet,
-                cyberware__name__iexact=cyberware_name,
-                installed=True,
-            ).select_related("cyberware", "parent", "paired_with")
-        )
+        # Use inventory.cyberware (same source as list) for consistency
+        from world.inventory.models import Inventory
+        try:
+            inv = character_sheet.inventory
+        except (Inventory.DoesNotExist, AttributeError):
+            inv = None
+        if inv:
+            instances = list(
+                inv.cyberware.filter(
+                    cyberware__name__iexact=cyberware_name,
+                    installed=True,
+                ).select_related("cyberware", "parent", "paired_with")
+            )
+        else:
+            instances = list(
+                CyberwareInstance.objects.filter(
+                    character_sheet=character_sheet,
+                    cyberware__name__iexact=cyberware_name,
+                    installed=True,
+                ).select_related("cyberware", "parent", "paired_with")
+            )
         if not instances:
             self.caller.msg(f"You don't have a piece of cyberware named '{cyberware_name}' installed.")
             return

@@ -11,14 +11,16 @@ to create a room that sells handguns and drugs.
 """
 
 # Tag -> (main_type, subcategory_or_filter)
-# main_type: weapons, armor, gear, cyberware
+# main_type: weapons, armor, gear, cyberware, ammo
 # subcategory: weapon category (handgun, shoulder_arms, etc.), gear category (Medical, Drugs, etc.),
 #   or cyberware type. None = all of that main type.
 #
 # For weapons, "ranged" and "melee" are broad tags that map to multiple subcategories.
+# "ranged" and "ranged_weapons" also include ammo.
 VENDOR_TAG_MAPPING = {
     # Broad weapon tags
     "ranged": ("weapons", ["handgun", "shoulder_arms", "archery", "heavy_weapons"]),
+    "ranged_weapons": ("weapons", ["handgun", "shoulder_arms", "archery", "heavy_weapons"]),
     "melee": ("weapons", ["melee", "brawling"]),
     "weapons": ("weapons", None),  # All weapons
     # Tight weapon tags (exact category match)
@@ -44,6 +46,9 @@ VENDOR_TAG_MAPPING = {
     # Cyberware (body implants - replaces ripperdoc NPCs)
     "cyberware": ("cyberware", None),
     "ripperdoc": ("cyberware", None),  # Alias for cyberware
+    # Ammunition (sold where ranged weapons are available)
+    "ammo": ("ammo", None),
+    "ammunition": ("ammo", None),
 }
 
 # Category for room tags used for vending (so we can distinguish from other tags)
@@ -105,6 +110,36 @@ def get_vendor_catalog_filters(room):
     return list(filters)
 
 
+def get_vendor_catalog_filters(room):
+    """
+    Given a vendor room, return a list of (main_type, subcategory) filters.
+    When room has ranged, ranged_weapons, or weapons, ammo is also included.
+    """
+    vendor_tags = get_room_vendor_tags(room)
+    if not vendor_tags:
+        return []
+
+    filters = set()
+    for tag in vendor_tags:
+        mapping = VENDOR_TAG_MAPPING.get(tag)
+        if not mapping:
+            continue
+        main_type, sub = mapping
+        if sub is None:
+            filters.add((main_type, None))
+        elif isinstance(sub, list):
+            for s in sub:
+                filters.add((main_type, s))
+        else:
+            filters.add((main_type, sub))
+    # Where ranged weapons are sold, ammo is also available
+    if "ranged" in vendor_tags or "ranged_weapons" in vendor_tags or "weapons" in vendor_tags or "handguns" in vendor_tags or "shoulder_arms" in vendor_tags or "heavy_weapons" in vendor_tags:
+        filters.add(("ammo", None))
+    if "ammo" in vendor_tags or "ammunition" in vendor_tags:
+        filters.add(("ammo", None))
+    return list(filters)
+
+
 def item_matches_vendor_filters(item_info, filters):
     """
     Check if an item (dict from catalog) matches any of the vendor filters.
@@ -112,7 +147,10 @@ def item_matches_vendor_filters(item_info, filters):
     filters: list of (main_type, subcategory) from get_vendor_catalog_filters.
     """
     for main_type, subcategory in filters:
-        if main_type == "weapons":
+        if main_type == "ammo":
+            if item_info.get("_type") == "ammo":
+                return True
+        elif main_type == "weapons":
             if item_info.get("_type") != "weapon":
                 continue
             cat = item_info.get("category", "")

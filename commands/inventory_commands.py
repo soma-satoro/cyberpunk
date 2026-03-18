@@ -2,7 +2,7 @@ from evennia import Command
 from evennia.utils.ansi import ANSIString
 from evennia.commands.default.muxcommand import MuxCommand
 from world.cyberpunk_sheets.models import CharacterSheet
-from world.inventory.models import Weapon, Armor, Gear, Inventory, Ammunition, CyberwareInstance, InventoryArmor
+from world.inventory.models import Weapon, Armor, Gear, Inventory, Ammunition, CyberwareInstance, InventoryArmor, InventoryWeapon, WeaponAttachment
 from world.cyberpunk_sheets.services import CharacterSheetMoneyService
 from world.utils.formatting import sheet_header, sheet_section, footer, header, divider
 from world.utils.character_utils import get_character_sheet, get_staff_target_character
@@ -23,6 +23,7 @@ class CmdInventory(MuxCommand):
       inv/unequip
       inv/wear <armor>
       inv/remove
+      inv/attach <weapon>=<attachment> - Attach an attachment to a weapon
 
     Switches:
       inv/equip, inv/unequip, inv/wear, inv/remove - Modify your equipment
@@ -75,6 +76,9 @@ class CmdInventory(MuxCommand):
         if self.switches and "remove" in self.switches:
             self.remove_armor()
             return
+        if self.switches and "attach" in self.switches:
+            self.attach_weapon()
+            return
 
         self._show_inventory(character_sheet, self.caller)
 
@@ -105,7 +109,7 @@ class CmdInventory(MuxCommand):
         # Search: weapons, armor, gear, ammunition, vehicles, cyberware
         for weapon in inv.weapons.all():
             if (weapon.name or "").lower() == item_name_lower:
-                self._format_weapon_info(weapon, display_char)
+                self._format_weapon_info(weapon, display_char, inv)
                 return
         for armor in inv.armor.all():
             if (armor.name or "").lower() == item_name_lower:
@@ -133,7 +137,7 @@ class CmdInventory(MuxCommand):
                 return
         self.caller.msg(f"No inventory item named '{item_name}' found.")
 
-    def _format_weapon_info(self, weapon, display_char):
+    def _format_weapon_info(self, weapon, display_char, inv=None):
         """Format weapon details for display."""
         name = getattr(display_char.db, 'full_name', None) or getattr(display_char, 'key', '')
         owner = f" ({name}'s)" if display_char != self.caller else ""
@@ -141,7 +145,15 @@ class CmdInventory(MuxCommand):
         out += f"|cDamage:|n {weapon.damage or 'N/A'}\n"
         out += f"|cROF:|n {weapon.rof or 'N/A'}\n"
         out += f"|cCategory:|n {weapon.category or 'N/A'}\n"
-        out += f"|cAmmo:|n {weapon.ammo_type or 'N/A'} (current: {weapon.current_ammo}/{weapon.max_ammo or weapon.clip})\n"
+        quality = getattr(weapon, 'quality', None) or 'standard'
+        out += f"|cQuality:|n {quality}\n"
+        hands = getattr(weapon, 'hands', None)
+        out += f"|cHands:|n {hands if hands is not None else 'N/A'}\n"
+        eff_clip = weapon.clip
+        if inv and weapon.category not in ("archery", "melee"):
+            from world.weapon_constants import get_effective_clip
+            eff_clip = get_effective_clip(weapon, inv)
+        out += f"|cAmmo:|n {weapon.ammo_type or 'N/A'} (current: {weapon.current_ammo or 0}/{eff_clip})\n"
         if weapon.description:
             out += divider("Description", width=78, fillchar="|m-|n") + "\n"
             out += f"{weapon.description}\n"
@@ -267,9 +279,22 @@ class CmdInventory(MuxCommand):
         output += sheet_section("Weapons", width=W)
         weapons = inv.weapons.all()
         if weapons:
-            output += f"|y{'Weapon':<25}{'Damage':<20}{'ROF':<20}|n\n"
+            from world.weapon_constants import get_effective_clip
+            output += f"|y{'Weapon':<25}{'Damage':<12}{'ROF':<8}{'Ammo':<12}|n\n"
             for weapon in weapons:
-                output += f"|w{weapon.name:<25}{weapon.damage or 'N/A':<20}{weapon.rof or 'N/A':<20}|n\n"
+                eq = "   (equipped)" if getattr(character_sheet, 'eqweapon', None) == weapon else ""
+                if getattr(weapon, "clip", 0) and weapon.category not in ("archery", "melee"):
+                    eff_clip = get_effective_clip(weapon, inv)
+                    ammo_display = f"{weapon.current_ammo or 0}/{eff_clip}"
+                else:
+                    ammo_display = "—"
+                output += f"|w{weapon.name:<25}{weapon.damage or 'N/A':<12}{weapon.rof or 'N/A':<8}|c{ammo_display:<12}|n{eq}\n"
+                try:
+                    iw = InventoryWeapon.objects.get(inventory=inv, weapon=weapon)
+                    for att in iw.installed_attachments.all():
+                        output += f"  |y-|n {att.name}\n"
+                except InventoryWeapon.DoesNotExist:
+                    pass
         else:
             output += "|wNo weapons in inventory.|n\n"
         output += "\n"
@@ -278,7 +303,7 @@ class CmdInventory(MuxCommand):
         output += sheet_section("Armor", width=W)
         armors = inv.armor.all()
         if armors:
-            output += f"|y{'Armor':<20}{'SP':<15}{'EV':<15}{'Locations':<20}|n\n"
+            output += f"|y{'Armor':<22}{'SP':<14}{'EV':<8}{'Locations':<18}|n\n"
             for armor in armors:
                 inst, _ = InventoryArmor.objects.get_or_create(
                     inventory=inv, armor=armor,
@@ -293,7 +318,7 @@ class CmdInventory(MuxCommand):
                 else:
                     sp_display = str(eff_sp) if eff_sp is not None else "N/A"
                 worn = " |y(worn)|n" if getattr(character_sheet, 'eqarmor', None) == armor else ""
-                output += f"|w{armor.name:<20}{sp_display:<25}{armor.ev or 'N/A':<15}{armor.locations or 'N/A':<20}{worn}|n\n"
+                output += f"|w{armor.name:<22}{sp_display:<14}{armor.ev or 'N/A':<8}{armor.locations or 'N/A':<18}{worn}|n\n"
         else:
             output += "|wNo armor in inventory.|n\n"
         output += "\n"
@@ -334,14 +359,15 @@ class CmdInventory(MuxCommand):
             output += "|wNo vehicles in inventory.|n\n"
         output += "\n"
 
-        # Cyberware
+        # Cyberware (hierarchical: parent + options, paired, borg ware)
         output += sheet_section("Cyberware", width=W)
-        cyberware = inv.cyberware.filter(installed=True)
+        cyberware = list(inv.cyberware.filter(installed=True).select_related("cyberware", "parent", "paired_with"))
         if cyberware:
-            output += f"|y{'Cyberware':<25}{'Type':<18}{'Status':<15}{'Humanity Loss':<15}|n\n"
-            for cw in cyberware:
-                status = "Installed" if cw.installed else "Uninstalled"
-                output += f"|w{cw.cyberware.name:<25}{cw.cyberware.type:<18}{status:<15}{cw.cyberware.humanity_loss:<15}|n\n"
+            from world.cyberware.utils import format_cyberware_for_display
+            rows = format_cyberware_for_display(cyberware, with_roots=True)
+            output += f"|y{'Cyberware':<45}{'Type':<18}{'Status':<12}{'Humanity Loss':<12}|n\n"
+            for display_name, cw_type, humanity_loss in rows:
+                output += f"|w{display_name[:44]:<45}{cw_type:<18}{'Installed':<12}{humanity_loss:<12}|n\n"
         else:
             output += "|wNo cyberware in inventory.|n\n"
         output += "\n"
@@ -367,13 +393,44 @@ class CmdInventory(MuxCommand):
         output += footer(width=W, fillchar="-")
         output += "\nUse 'inv/info <item>' to view detailed info on a specific item."
         self.caller.msg(output)
-        
+
+
+def _find_weapon_for_equip(caller, inventory, weapon_name):
+    """Find weapon by exact or fuzzy match. Returns Weapon or None (sends msg on failure)."""
+    if not weapon_name:
+        return None
+    weapon_name_lower = weapon_name.strip().lower()
+
+    # 1. Exact match (case-insensitive)
+    try:
+        return inventory.weapons.get(name__iexact=weapon_name_lower)
+    except Weapon.DoesNotExist:
+        pass
+    except Weapon.MultipleObjectsReturned:
+        caller.msg(f"You have multiple weapons named '{weapon_name}'. Please be more specific.")
+        return None
+
+    # 2. Fuzzy: weapons whose name starts with input
+    candidates = list(inventory.weapons.filter(name__istartswith=weapon_name_lower))
+    if not candidates:
+        # 3. Fuzzy: weapons whose name contains input
+        candidates = list(inventory.weapons.filter(name__icontains=weapon_name_lower))
+
+    if not candidates:
+        caller.msg(f"You don't have a weapon matching '{weapon_name}' in your inventory.")
+        return None
+    if len(candidates) > 1:
+        names = ", ".join(w.name for w in candidates)
+        caller.msg(f"Multiple weapons match: {names}. Please be more specific.")
+        return None
+    return candidates[0]
+
     def equip_item(self):
         if not self.args:
-            self.caller.msg("Usage: equip <weapon name>")
+            self.caller.msg("Usage: inv/equip <weapon name> or equip <weapon name>")
             return
 
-        weapon_name = self.args.strip().lower()
+        weapon_name = self.args.strip()
 
         if not hasattr(self.caller, 'character_sheet'):
             self.caller.msg("You don't have a character sheet.")
@@ -386,14 +443,8 @@ class CmdInventory(MuxCommand):
             return
 
         inventory = sheet.inventory
-
-        try:
-            weapon = inventory.weapons.get(name__iexact=weapon_name)
-        except Weapon.DoesNotExist:
-            self.caller.msg(f"You don't have a weapon named '{weapon_name}' in your inventory.")
-            return
-        except Weapon.MultipleObjectsReturned:
-            self.caller.msg(f"You have multiple weapons named '{weapon_name}'. Please be more specific.")
+        weapon = _find_weapon_for_equip(self.caller, inventory, weapon_name)
+        if weapon is None:
             return
 
         sheet.eqweapon = weapon
@@ -464,6 +515,88 @@ class CmdInventory(MuxCommand):
         sheet.save()
         self.caller.msg(f"You have removed your {armor_name}.")
 
+    def attach_weapon(self):
+        """inv/attach <weapon>=<attachment> - Attach an attachment to a weapon."""
+        from world.weapon_constants import (
+            populate_core_attachments,
+            get_clip_size,
+            DEFAULT_RANGED_ATTACHMENT_SLOTS,
+        )
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: inv/attach <weapon>=<attachment>")
+            return
+        weapon_name, attachment_name = self.args.split("=", 1)
+        weapon_name = weapon_name.strip()
+        attachment_name = attachment_name.strip()
+        if not weapon_name or not attachment_name:
+            self.caller.msg("Usage: inv/attach <weapon>=<attachment>")
+            return
+
+        if not hasattr(self.caller, 'character_sheet') or not self.caller.character_sheet:
+            self.caller.msg("You don't have a character sheet.")
+            return
+        sheet = self.caller.character_sheet
+        if not hasattr(sheet, 'inventory') or not sheet.inventory:
+            self.caller.msg("You don't have an inventory.")
+            return
+        inv = sheet.inventory
+
+        weapon = _find_weapon_for_equip(self.caller, inv, weapon_name)
+        if not weapon:
+            return
+
+        # Ensure core attachments exist
+        populate_core_attachments()
+
+        att = WeaponAttachment.objects.filter(name__iexact=attachment_name).first()
+        if not att:
+            candidates = list(WeaponAttachment.objects.filter(name__icontains=attachment_name)[:5])
+            if len(candidates) == 1:
+                att = candidates[0]
+            elif candidates:
+                self.caller.msg(f"Did you mean: {', '.join(a.name for a in candidates)}?")
+                return
+            else:
+                self.caller.msg(f"Attachment '{attachment_name}' not found. Use 'list equipment attachments' to see available.")
+                return
+
+        if not att.is_eligible_for_weapon(weapon):
+            self.caller.msg(f"{att.name} cannot be attached to {weapon.name}.")
+            return
+
+        try:
+            iw = InventoryWeapon.objects.get(inventory=inv, weapon=weapon)
+        except InventoryWeapon.DoesNotExist:
+            self.caller.msg("Weapon not found in your inventory.")
+            return
+
+        if att in iw.installed_attachments.all():
+            self.caller.msg(f"{att.name} is already attached to {weapon.name}.")
+            return
+
+        slots_used = sum(a.slot_cost for a in iw.installed_attachments.all())
+        weapon_slots = weapon.attachment_slots or (
+            DEFAULT_RANGED_ATTACHMENT_SLOTS if weapon.category in ("handgun", "shoulder_arms", "heavy_weapons") else 0
+        )
+        if slots_used + att.slot_cost > weapon_slots:
+            self.caller.msg(
+                f"Not enough attachment slots. {weapon.name} has {weapon_slots} slots, "
+                f"using {slots_used}, {att.name} needs {att.slot_cost}."
+            )
+            return
+
+        iw.installed_attachments.add(att)
+
+        # Apply clip modifier if Extended/Drum Magazine
+        if att.clip_modifier in ("extended", "drum"):
+            wt = weapon.weapon_type or weapon.category or "medium pistol"
+            new_clip = get_clip_size(wt, att.clip_modifier)
+            weapon.clip = new_clip
+            weapon.max_ammo = new_clip
+            weapon.save()
+
+        self.caller.msg(f"You attach {att.name} to {weapon.name}.")
+
 
 class CmdWear(MuxCommand):
     """
@@ -520,6 +653,65 @@ class CmdWear(MuxCommand):
         sheet.save()
         ev = armor.ev or 0
         self.caller.msg(f"You are now wearing {armor.name}." + (f" (EV {ev} penalty to evasion)" if ev else ""))
+
+
+class CmdEquipWeapon(MuxCommand):
+    """
+    Equip a weapon from your inventory for use with attack and dodge commands.
+
+    Usage:
+      equip <weapon name>
+      unequip
+
+    Examples:
+      equip Very Heavy Pistol
+      equip Kendachi Mono-Katana
+      unequip
+    """
+    key = "equip"
+    aliases = ["unequip"]
+    help_category = "Combat"
+
+    def func(self):
+        if self.cmdstring == "unequip":
+            self._unequip()
+            return
+
+        if not self.args:
+            self.caller.msg("Usage: equip <weapon name>")
+            return
+
+        if not hasattr(self.caller, 'character_sheet') or not self.caller.character_sheet:
+            self.caller.msg("You don't have a character sheet.")
+            return
+
+        sheet = self.caller.character_sheet
+        if not hasattr(sheet, 'inventory') or not sheet.inventory:
+            self.caller.msg("You don't have an inventory.")
+            return
+
+        weapon = _find_weapon_for_equip(self.caller, sheet.inventory, self.args.strip())
+        if weapon is None:
+            return
+
+        sheet.eqweapon = weapon
+        sheet.save()
+        self.caller.msg(f"You have equipped {weapon.name}.")
+
+    def _unequip(self):
+        if not hasattr(self.caller, 'character_sheet') or not self.caller.character_sheet:
+            self.caller.msg("You don't have a character sheet.")
+            return
+
+        sheet = self.caller.character_sheet
+        if not sheet.eqweapon:
+            self.caller.msg("You don't have any weapon equipped.")
+            return
+
+        weapon_name = sheet.eqweapon.name
+        sheet.eqweapon = None
+        sheet.save()
+        self.caller.msg(f"You have unequipped your {weapon_name}.")
 
 
 class CmdEquip(Command):

@@ -748,6 +748,19 @@ weapons = [
     },
     # Black Chrome - additional melee weapons
     {
+        "name": "Arasaka Weeping Reaver Katana",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 5000,
+        "category": "melee",
+        "weapon_type": "very heavy melee",
+        "quality": "excellent",
+        "description": "Arasaka's Weeping Reaver is a high-density, cryo-quenched, diamond steel katana capable of coating itself with substances stored in the grip. Pressure points on the palm ornament allow the wielder to select coatings from three separate chambers to coat the blade. Arasaka also sells a line of fluids of the exact viscosity required by the blade's mechanism in pressurized, branded cylinders. Currently available are Arasaka Fire, Arasaka Acid, and Arasaka Wound Salt but others are in development. The blade's pommel allows for easy reloading of the three chambers inside the grip. The Arasaka Weeping Reaver is an Excellent Quality Two-Handed Exotic Very Heavy Melee Weapon. Once per minute (20 Combat Rounds), as an Action, the user can direct the Weeping Reaver to coat itself with one or more fluids loaded into its handle. Multiple applications of the same fluid do nothing, but up to three different fluids can be combined at once as the user desires. Each fluid remains effective for 1 minute after application. Each fluid canister contains a single application and only fluids designed for use with the Weeping Reaver have any effect. The Weeping Reaver contains three chambers for storing fluid canisters. Reloading any combination of these chambers takes an Action. Each canister costs 100eb (Premium). When coated with Arasaka Fire, whenever a user deals damage to a target through their armor, they ignite the target. Until the target spends an Action to put themselves out, they take 2 damage to their HP whenever they end their Turn. Multiple instances of this effect cannot stack. When coated with Arasaka Acid, the Weeping Reaver ablates armor by 2 instead of 1 whenever it would ablate armor. When coated with Arasaka Wound Salt, whenever the weapon causes the Foreign Object Critical Injury, the victim rolls again on the Critical Injury table until they roll a Critical Injury that isn't Foreign Object. The victim then suffers that Critical Injury as well. This second injury deals no Bonus Damage."
+    },
+    {
         "name": "Solo Wolf and Bot Mono-Katana",
         "damage": "4d6",
         "rof": "1",
@@ -1156,6 +1169,7 @@ weapons = [
         "value": 5000,
         "category": "handgun",
         "clip": 25,
+        "quality": "excellent",
         "description": "Excellent Quality Exotic Heavy SMG. Autofire (4), Suppressive Fire, Smartgun Link. Unique AP ammo ablates 4/ hit."
     },
     {
@@ -1216,6 +1230,7 @@ weapons = [
         "value": 100,
         "category": "shoulder_arms",
         "clip": 20,
+        "quality": "poor",
         "description": "Poor Quality Exotic Assault Rifle. Autofire (4), Suppressive Fire. When jammed, 50% chance to fire and clear jam. Loads Non-Basic Ammunition."
     },
     {
@@ -1228,6 +1243,7 @@ weapons = [
         "value": 20,
         "category": "handgun",
         "clip": 10,
+        "quality": "poor",
         "description": "Poor Quality Exotic SMG. Autofire/Suppressive Fire (2+ bullets): drains clip, barrel melts and weapon destroyed."
     },
     # Interface RED Vol 3: Woodchipper's Garage
@@ -1291,6 +1307,7 @@ weapons = [
         "value": 1000,
         "category": "heavy_weapons",
         "clip": 8,
+        "quality": "poor",
         "description": "Poor Quality Exotic Shotgun. Battery-powered. Shotgun Shells, less-than-lethal. 8 charges, 1hr recharge. No Critical Injury, no armor ablation. Reduces to 1 HP Unconscious if would kill."
     },
     {
@@ -1303,6 +1320,7 @@ weapons = [
         "value": 5000,
         "category": "heavy_weapons",
         "clip": 1,
+        "quality": "excellent",
         "description": "Excellent Quality Exotic Rocket Launcher. Pilot Air Vehicle Skill. Smart Rockets only. Requires Targeting Scope. Includes 1 Smart Rocket."
     },
     {
@@ -1390,6 +1408,7 @@ weapons = [
         "category": "shoulder_arms",
         "clip": 8,
         "attachment_slots": 0,
+        "quality": "excellent",
         "description": "Excellent Shotgun. Autofire (Machine Pistol 4)."
     },
     {
@@ -1403,6 +1422,7 @@ weapons = [
         "category": "handgun",
         "clip": 40,
         "attachment_slots": 0,
+        "quality": "excellent",
         "description": "Excellent Heavy SMG. Autofire (SMG 4)."
     },
     {
@@ -1416,6 +1436,7 @@ weapons = [
         "category": "heavy_weapons",
         "clip": 200,
         "attachment_slots": 0,
+        "quality": "excellent",
         "description": "Excellent Machine Gun. Autofire (Machine Gun 5)."
     },
     {

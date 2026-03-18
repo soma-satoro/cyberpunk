@@ -2,7 +2,7 @@ import random
 import re
 from evennia import Command, logger, search_object, default_cmds
 from typeclasses.rental import CharacterSheetMoneyService
-from world.utils.character_utils import get_full_attribute_name, ALL_ATTRIBUTES, TOPSHEET_MAPPING, is_staff
+from world.utils.character_utils import get_full_attribute_name, fuzzy_match_stat, fuzzy_match_skill, ALL_ATTRIBUTES, TOPSHEET_MAPPING, is_staff
 from world.list_data import STAT_DESCRIPTIONS, SKILL_TO_STAT_LOOKUP, SKILL_DISPLAY_OVERRIDES
 from world.utils.calculation_utils import get_remaining_points, STAT_MAPPING, SKILL_MAPPING
 from typeclasses.chargen import ChargenRoom
@@ -13,6 +13,7 @@ from evennia.utils import create
 from world.cyberpunk_sheets.models import CharacterSheet
 from world.languages.models import Language
 from evennia.utils.evtable import EvTable
+from evennia.utils.ansi import strip_ansi
 from world.utils.formatting import footer, sheet_header, sheet_section
 from world.utils.ansi_utils import wrap_ansi, wrap_labeled_comma_list
 from world.inventory.models import Weapon, Armor, Gear, Inventory
@@ -364,16 +365,29 @@ class CmdSheet(MuxCommand):
             unarmed_dice = getattr(target.db, 'unarmed_damage_dice', 1)
         unarmed_die_display = f"d{unarmed_die}"
         hp_str = f"{target.db.current_hp or 0}/{target.db.max_hp or 0}"
+        death_save_penalty = 0
+        dead_str = "No"
+        if sheet and hasattr(sheet, "death_save_penalty"):
+            death_save_penalty = getattr(sheet, "death_save_penalty", 0) or 0
+        elif hasattr(target.db, "death_save_penalty"):
+            death_save_penalty = target.db.death_save_penalty or 0
+        if getattr(target.db, "dead", False):
+            dead_str = "|rYES|n"
         derived_stats = [
             ("Hit Points:", hp_str, "Death Save:", target.db.death_save),
+            ("Death Save Penalty:", death_save_penalty, "Dead:", dead_str),
             ("Serious Wounds:", target.db.serious_wounds, "Humanity:", target.db.humanity),
             ("Unarmed Damage:", unarmed_die_display, "Unarmed Dice:", unarmed_dice)
         ]
+        LABEL_W, VAL_W = 19, 18  # Fit 80-char width; "Death Save Penalty:" = 19
         for row in derived_stats:
-            output += "".join(
-                f"|y{label:<16}|n {(v if v is not None else ''):<18}"
-                for label, v in zip(row[::2], row[1::2])
-            ) + "\n"
+            parts = []
+            for label, v in zip(row[::2], row[1::2]):
+                val_str = str(v) if v is not None else ""
+                visible_len = len(strip_ansi(val_str))
+                padded_val = val_str + " " * max(0, VAL_W - visible_len)
+                parts.append(f"|y{label:<{LABEL_W}}|n {padded_val}")
+            output += "".join(parts) + "\n"
         output += "\n"
 
         # Equipment (use same inventory source as +inventory: character_sheet.inventory)
@@ -410,9 +424,11 @@ class CmdSheet(MuxCommand):
                     output += "|yGear:|n |wError retrieving gear|n\n"
 
                 try:
-                    cyberware = list(inv.cyberware.filter(installed=True)) if hasattr(inv, 'cyberware') else []
-                    cw_names = [c.cyberware.name for c in cyberware]
-                    cw_items = cw_names if cw_names else ["None"]
+                    cyberware = list(
+                        inv.cyberware.filter(installed=True).select_related("cyberware", "parent", "paired_with")
+                    ) if hasattr(inv, 'cyberware') else []
+                    from world.cyberware.utils import format_cyberware_for_display
+                    cw_items = format_cyberware_for_display(cyberware) if cyberware else ["None"]
                     output += wrap_labeled_comma_list("|yCyberware:|n ", cw_items, "|w", "|n", width=EQUIP_WIDTH, separator=",")
                 except Exception as cw_err:
                     logger.log_err(f"Error retrieving cyberware for {target}: {cw_err}", exc_info=True)
@@ -445,6 +461,26 @@ class CmdSheet(MuxCommand):
             catch = getattr(sheet, 'sell_your_soul_catch', '') or "Unknown"
             output += f"|yEmployer:|n {employer}\n"
             output += f"|yCatch:|n {catch}\n"
+
+        # Medical Debt (from treat/hospital)
+        if sheet:
+            entries = getattr(sheet, 'medical_debt_entries', None) or []
+            if entries:
+                total = sum((e.get("amount") or 0) for e in entries)
+                output += sheet_section("Medical Debt", width=W)
+                output += f"|yTotal:|n |r{total} eb|n\n"
+                for e in entries:
+                    amt = e.get("amount") or 0
+                    injs = e.get("injuries") or []
+                    cw = e.get("cyberware") or []
+                    dt = e.get("date") or "?"
+                    parts = []
+                    if injs:
+                        parts.append(", ".join(injs))
+                    if cw:
+                        parts.append(f"cyberware: {', '.join(cw)}")
+                    detail = "; ".join(parts) if parts else "—"
+                    output += f"  {amt} eb: {detail} ({dt})\n"
 
         output += footer(width=W, fillchar="-")
         self.caller.msg(output)
@@ -805,16 +841,22 @@ class CmdRoll(MuxCommand):
         except ValueError:
             pass
 
-        # Fall back to character sheet lookup
+        # Fall back to character sheet lookup (with fuzzy matching)
         if attr_value is None:
-            full_attr_name = get_full_attribute_name(attr_input)
-            full_skill_name = get_full_attribute_name(skill_input)
+            full_attr_name, attr_ambiguous = fuzzy_match_stat(attr_input)
+            full_skill_name, skill_ambiguous = fuzzy_match_skill(skill_input)
 
-            if not full_attr_name or full_attr_name not in STAT_MAPPING.values():
+            if full_attr_name is None and attr_ambiguous:
+                self.caller.msg(f"Ambiguous attribute '{attr_input}'. Did you mean: {', '.join(attr_ambiguous)}?")
+                return
+            if full_attr_name is None:
                 self.caller.msg(f"Invalid attribute. Choose from: {', '.join(STAT_MAPPING.values())}, or use raw values 0-10.")
                 return
 
-            if not full_skill_name or full_skill_name not in SKILL_MAPPING.values():
+            if full_skill_name is None and skill_ambiguous:
+                self.caller.msg(f"Ambiguous skill '{skill_input}'. Did you mean: {', '.join(skill_ambiguous)}?")
+                return
+            if full_skill_name is None:
                 self.caller.msg(f"Invalid skill. Choose from: {', '.join(SKILL_MAPPING.values())}, or use raw values 0-10.")
                 return
 
@@ -833,16 +875,23 @@ class CmdRoll(MuxCommand):
                 return
 
         from world.utils.roll_utils import roll_skill_check, check_success, format_roll_details
+        from world.wound_utils import get_action_penalty
+
+        char = self.caller
+        action_penalty = get_action_penalty(char)
+        effective_modifier = modifier + action_penalty
 
         total, details = roll_skill_check(
             attr_value, skill_value,
-            modifier=modifier,
+            modifier=effective_modifier,
             luck_spend=luck_spend,
-            character=self.caller if luck_spend else None,
+            character=char if luck_spend else None,
         )
 
-        breakdown = format_roll_details(details, attr_value, skill_value, modifier)
+        breakdown = format_roll_details(details, attr_value, skill_value, effective_modifier)
         out = f"Rolling {attr_display} + {skill_display} + 1d10: {breakdown} = |w{total}|n"
+        if action_penalty:
+            out += f" |y(wound {action_penalty})|n"
 
         if details.get("is_crit_success"):
             out += " |g(Critical Success!)|n"
@@ -910,12 +959,18 @@ class CmdRoll(MuxCommand):
         attr_input = parts[0].strip()
         skill_input, modifier = self._parse_modifier(parts[1])
 
-        full_attr_name = get_full_attribute_name(attr_input)
-        full_skill_name = get_full_attribute_name(skill_input)
-        if not full_attr_name or full_attr_name not in STAT_MAPPING.values():
+        full_attr_name, attr_ambiguous = fuzzy_match_stat(attr_input)
+        full_skill_name, skill_ambiguous = fuzzy_match_skill(skill_input)
+        if full_attr_name is None and attr_ambiguous:
+            self.caller.msg(f"Ambiguous attribute '{attr_input}'. Did you mean: {', '.join(attr_ambiguous)}?")
+            return
+        if full_attr_name is None:
             self.caller.msg(f"Invalid attribute: {attr_input}")
             return
-        if not full_skill_name or full_skill_name not in SKILL_MAPPING.values():
+        if full_skill_name is None and skill_ambiguous:
+            self.caller.msg(f"Ambiguous skill '{skill_input}'. Did you mean: {', '.join(skill_ambiguous)}?")
+            return
+        if full_skill_name is None:
             self.caller.msg(f"Invalid skill: {skill_input}")
             return
 
@@ -926,9 +981,13 @@ class CmdRoll(MuxCommand):
         skill_display = full_skill_name.replace("_", " ").title()
 
         from world.utils.roll_utils import roll_skill_check, check_success, format_roll_details
+        from world.wound_utils import get_action_penalty
 
-        total, details = roll_skill_check(attr_value, skill_value, modifier=modifier)
-        breakdown = format_roll_details(details, attr_value, skill_value, modifier)
+        action_penalty = get_action_penalty(char)
+        effective_modifier = modifier + action_penalty
+
+        total, details = roll_skill_check(attr_value, skill_value, modifier=effective_modifier)
+        breakdown = format_roll_details(details, attr_value, skill_value, effective_modifier)
         out = f"Roll: {attr_display} + {skill_display} + 1d10: {breakdown} = {total}"
         if details.get("is_crit_success"):
             out += " (Critical Success!)"

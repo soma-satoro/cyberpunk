@@ -1239,17 +1239,23 @@ class CmdNpc(MuxCommand):
         pending = _get_and_clear_pending_attacks(npc)
         if pending:
             _clear_last_dodge_dv(npc)
-            for attacker, staff_override in pending:
+            for attacker, override in pending:
                 kwargs = {}
-                if staff_override and staff_override.get("stat") is not None and staff_override.get("skill") is not None:
+                if override and override.get("stat") is not None and override.get("skill") is not None:
                     kwargs = {
-                        "staff_stat": staff_override["stat"],
-                        "staff_skill": staff_override["skill"],
-                        "staff_skill_display": staff_override.get("skill_display"),
-                        "staff_weapon_name": staff_override.get("weapon_name"),
-                        "staff_num_dice": staff_override.get("num_dice"),
-                        "staff_stat_field": staff_override.get("stat_field"),
+                        "staff_stat": override["stat"],
+                        "staff_skill": override["skill"],
+                        "staff_skill_display": override.get("skill_display"),
+                        "staff_weapon_name": override.get("weapon_name"),
+                        "staff_num_dice": override.get("num_dice"),
+                        "staff_stat_field": override.get("stat_field"),
                     }
-                aim_loc = staff_override.get("aim_location") if staff_override else None
+                aim_loc = override.get("aim_location") if override else None
+                luck_spend = override.get("luck_spend", 0) if override else 0
+                modifier = override.get("modifier", 0) if override else 0
+                force_melee = override.get("force_melee", False) if override else False
+                kwargs["luck_spend"] = luck_spend
+                kwargs["modifier"] = modifier
+                kwargs["force_melee"] = force_melee
                 execute_attack_roll(attacker, npc, total, f"{npc.key}'s dodge", npc.location,
                                    aim_location=aim_loc, **kwargs)

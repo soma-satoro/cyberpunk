@@ -2,6 +2,123 @@ from evennia import Command, logger
 from world.cyberware.models import Cyberware
 from .cyberware_data import CYBERWARE_DATA_LIST
 
+# Limb types that mount under borg ware (counted as "Cyberarm x3" etc.)
+LIMB_TYPE_NAMES = frozenset({"cyberarm", "neo-soviet cyberarm", "cyberleg", "cybereye"})
+# Borg ware that has child limbs or options (displayed as parent (child1, child2, ...))
+BORG_WARE_NAMES = frozenset({"artificial shoulder mount", "multioptic mount", "sensor array", "cyberaudio suite", "discount cyberaudio suite"})
+
+
+def format_cyberware_for_display(installed_instances, with_roots=False):
+    """
+    Build cyberware display from installed instances.
+
+    If with_roots=False: returns compact list of strings for character sheet:
+      "Cybereye (Paired, Anti-Dazzle, Color Shift)", "Light Tattoo", ...
+
+    If with_roots=True: returns expanded table rows, list of (display_name, type, humanity_loss):
+      ("Cyberaudio Suite", "Cyberaudio", 7),
+      (" - Amplified Hearing", "Cyberaudio", 3),
+      ("Cybereye", "Cyberoptics", 7),
+      (" - Paired Cybereye", "Cyberoptics", 7),
+      (" - Dartgun", "Cyberoptics", 3),
+    Each piece on its own line; children indented with " - ".
+    """
+    if not installed_instances:
+        return []
+    installed = list(installed_instances)
+    by_id = {i.id: i for i in installed}
+    paired_second_ids = {i.id for i in installed if getattr(i, "paired_with_id", None)}
+    roots = [i for i in installed if i.parent_id is None and i.id not in paired_second_ids]
+
+    if not with_roots:
+        # Compact format for character sheet
+        result = []
+        for root in roots:
+            cw = root.cyberware
+            name = (cw.name or "").strip()
+            name_lower = name.lower()
+            member_ids = {root.id}
+            for inst in installed:
+                if getattr(inst, "paired_with_id", None) == root.id:
+                    member_ids.add(inst.id)
+            to_process = list(member_ids)
+            while to_process:
+                pid = to_process.pop()
+                for inst in installed:
+                    if inst.parent_id == pid and inst.id not in member_ids:
+                        member_ids.add(inst.id)
+                        to_process.append(inst.id)
+            members = [by_id[i] for i in member_ids if i in by_id]
+            is_paired = any(getattr(m, "paired_with_id", None) for m in members)
+            if name_lower in BORG_WARE_NAMES:
+                limb_counts = {}
+                options = []
+                for m in members:
+                    if m.id == root.id:
+                        continue
+                    cname = (m.cyberware.name or "").strip().lower()
+                    if cname in LIMB_TYPE_NAMES:
+                        limb_counts[m.cyberware.name] = limb_counts.get(m.cyberware.name, 0) + 1
+                    else:
+                        opt = m.cyberware.name
+                        if getattr(m, "popup_weapon_name", None):
+                            opt = f"{opt} ({m.popup_weapon_name})"
+                        options.append(opt)
+                parts = [f"{ln} x{c}" if c > 1 else ln for ln, c in sorted(limb_counts.items())]
+                parts.extend(options)
+            else:
+                parts = ["Paired"] if is_paired else []
+                for m in members:
+                    if m.id == root.id:
+                        continue
+                    if m.parent_id in member_ids:
+                        opt = m.cyberware.name
+                        if getattr(m, "popup_weapon_name", None):
+                            opt = f"{opt} ({m.popup_weapon_name})"
+                        parts.append(opt)
+            result.append(f"{name} ({', '.join(parts)})" if parts else name)
+        return result
+
+    # Expanded format: each piece on its own line with indentation
+    result = []
+    for root in roots:
+        cw = root.cyberware
+        name = (cw.name or "").strip()
+        name_lower = name.lower()
+
+        member_ids = {root.id}
+        for inst in installed:
+            if getattr(inst, "paired_with_id", None) == root.id:
+                member_ids.add(inst.id)
+        to_process = list(member_ids)
+        while to_process:
+            pid = to_process.pop()
+            for inst in installed:
+                if inst.parent_id == pid and inst.id not in member_ids:
+                    member_ids.add(inst.id)
+                    to_process.append(inst.id)
+
+        members = [by_id[i] for i in member_ids if i in by_id]
+        paired_second = next((m for m in members if getattr(m, "paired_with_id", None) == root.id), None)
+        children = [m for m in members if m.id != root.id and m.id != (paired_second.id if paired_second else None)]
+
+        # Root line
+        result.append((name, cw.type, cw.humanity_loss))
+
+        # Paired second (e.g. " - Paired Cybereye")
+        if paired_second:
+            pname = f"Paired {paired_second.cyberware.name}"
+            result.append((f" - {pname}", paired_second.cyberware.type, paired_second.cyberware.humanity_loss))
+
+        # Children: options, limbs under borg ware, etc.
+        for m in children:
+            opt_name = m.cyberware.name
+            if getattr(m, "popup_weapon_name", None):
+                opt_name = f"{opt_name} ({m.popup_weapon_name})"
+            result.append((f" - {opt_name}", m.cyberware.type, m.cyberware.humanity_loss))
+
+    return result
+
 def populate_cyberware():
     existing_names = set(Cyberware.objects.values_list("name", flat=True))
     created = 0

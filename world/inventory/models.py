@@ -166,11 +166,13 @@ class WeaponAttachment(SharedMemoryModel):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     value = models.IntegerField(default=0)
-    # Eligible weapon categories: JSON list, e.g. ["handgun", "shoulder_arms"] or ["all_ranged_except_flamethrower"]
+    # Eligible: JSON list or "all_ranged", "shoulder_arms", "all_except_bow"
     eligible_categories = models.JSONField(default=list)
-    requires_slot = models.BooleanField(default=False)  # Most SoF attachments don't use a slot
-    slot_type = models.CharField(max_length=50, blank=True)  # e.g. "scope" for Compatibility Rail
-    install_dv = models.IntegerField(default=17)  # Weaponstech DV
+    requires_slot = models.BooleanField(default=False)
+    slot_cost = models.PositiveIntegerField(default=1)  # 1 or 2 attachment slots
+    slot_type = models.CharField(max_length=50, blank=True)
+    clip_modifier = models.CharField(max_length=20, blank=True)  # "extended", "drum", or blank
+    install_dv = models.IntegerField(default=17)
     install_skill = models.CharField(max_length=50, default="Weaponstech")
     effect_description = models.TextField(blank=True)
 
@@ -184,6 +186,12 @@ class WeaponAttachment(SharedMemoryModel):
             return False
         if "all_ranged_except_flamethrower" in cats:
             return weapon.category != "heavy_weapons" or "flamethrower" not in (weapon.name or "").lower()
+        if "all_ranged" in cats:
+            return weapon.category in ("handgun", "shoulder_arms", "heavy_weapons")
+        if "shoulder_arms" in cats:
+            return str(weapon.category or "").lower() == "shoulder_arms"
+        if "all_except_bow" in cats:
+            return weapon.category not in ("archery",) and "bow" not in (weapon.weapon_type or "").lower()
         return weapon.category in cats
 
 
@@ -195,6 +203,7 @@ class Weapon(Item):
     category = models.CharField(max_length=50, default='handgun')
     weapon_type = models.CharField(max_length=80, blank=True, default='')
     quality = models.CharField(max_length=20, default='standard')
+    jammed = models.BooleanField(default=False)
     ammo_type = models.CharField(max_length=20, choices=AmmoType.choices, default=AmmoType.BASIC)
     current_ammo = models.PositiveIntegerField(default=0)
     max_ammo = models.PositiveIntegerField(default=0)
