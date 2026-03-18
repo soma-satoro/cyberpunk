@@ -322,17 +322,31 @@ def fuzzy_match_skill(input_str):
     return None, []
 
 
+# Skills that require an instance for rolls (e.g. local_expert(The Net), play_instrument(Guitar))
+SKILLS_REQUIRING_INSTANCE = frozenset(["local_expert", "play_instrument", "martial_arts"])
+
+
 def fuzzy_match_stat_or_skill(input_str):
     """
     Fuzzy match input to a stat or skill (interchangeable for roll).
     Tries stat first, then skill. Returns (full_name, None) if unique match,
     or (None, [display_names]) if multiple matches. (None, []) if no match.
+    Supports skill instances: "local expert (The Net)" -> local_expert(The Net).
     """
-    stat_match, stat_ambiguous = fuzzy_match_stat(input_str)
+    base_input = input_str
+    instance_part = None
+    if input_str and "(" in input_str and ")" in input_str:
+        idx = input_str.index("(")
+        base_input = input_str[:idx].strip()
+        instance_part = input_str[idx + 1 : input_str.rindex(")")].strip()
+
+    stat_match, stat_ambiguous = fuzzy_match_stat(base_input)
     if stat_match:
         return stat_match, None
-    skill_match, skill_ambiguous = fuzzy_match_skill(input_str)
+    skill_match, skill_ambiguous = fuzzy_match_skill(base_input)
     if skill_match:
+        if skill_match in SKILLS_REQUIRING_INSTANCE and instance_part:
+            return f"{skill_match}({instance_part})", None
         return skill_match, None
     if stat_ambiguous or skill_ambiguous:
         combined = list(dict.fromkeys((stat_ambiguous or []) + (skill_ambiguous or [])))

@@ -277,25 +277,70 @@ class ChargenRoom(DefaultRoom):
         """
         if moved_obj.has_account:
             if not self.check_stats_complete(moved_obj):
-                moved_obj.msg("You must set all your stats before leaving this room.")
                 return False
         return True
 
     def check_stats_complete(self, character):
         """
-        Check if all necessary stats have been set.
+        Check if chargen can be finished. Stats may be 0 (players can clear them).
+        Required skills must be >= 2: Athletics, Brawling, Concentration, Conversation,
+        Education, Evasion, First Aid, Human Perception, Language (Streetslang),
+        Local Expert (Instance), Perception, Persuasion, Stealth.
         """
-        if not hasattr(character, 'character_sheet'):
+        if not hasattr(character, 'character_sheet') or not character.character_sheet:
+            character.msg("You don't have a character sheet. Please contact an admin.")
             return False
         cs = character.character_sheet
-        required_stats = ['intelligence', 'reflexes', 'dexterity', 'technology', 'cool', 
-                        'willpower', 'luck', 'move', 'body', 'empathy']
+        from world.chargen_constants import CHARGEN_REQUIRED_SKILLS, CHARGEN_REQUIRED_SKILL_MIN
+
+        # Stats: all must be set (>= 0 is valid; prefer character.db, fallback to sheet)
+        required_stats = ['intelligence', 'reflexes', 'dexterity', 'technology', 'cool',
+                         'willpower', 'luck', 'move', 'body', 'empathy']
         try:
-            return all(getattr(cs, stat, 0) > 0 for stat in required_stats)
+            for stat in required_stats:
+                val = getattr(character.db, stat, None)
+                if val is None:
+                    val = getattr(cs, stat, None)
+                if val is None:
+                    character.msg("You must set all stats before leaving. Use 'selfstat' to allocate.")
+                    return False
         except AttributeError:
-            # Log the error and return False if any attribute is missing
-            logger.error(f"AttributeError in is_character_complete for {character}") # type: ignore
+            logger.error(f"AttributeError in check_stats_complete for {character}")
             return False
+
+        # Required skills must be >= 2
+        missing = []
+        for skill_key in CHARGEN_REQUIRED_SKILLS:
+            if skill_key == "local_expert":
+                # Local Expert (Instance): need at least one instance >= 2
+                instances = character.db.skill_instances or {}
+                max_le = 0
+                for key, val in instances.items():
+                    if key.startswith("local_expert("):
+                        max_le = max(max_le, int(val) if val is not None else 0)
+                if max_le < CHARGEN_REQUIRED_SKILL_MIN:
+                    missing.append("Local Expert (Instance)")
+            else:
+                val = character.get_skill(skill_key) if hasattr(character, 'get_skill') else 0
+                val = val or 0
+                if val < CHARGEN_REQUIRED_SKILL_MIN:
+                    display = skill_key.replace('_', ' ').title()
+                    if skill_key == "human_perception":
+                        display = "Human Perception"
+                    missing.append(display)
+
+        # Language (Streetslang) >= 2
+        streetslang = character.get_language_level("Streetslang") if hasattr(character, 'get_language_level') else 0
+        if (streetslang or 0) < CHARGEN_REQUIRED_SKILL_MIN:
+            missing.append("Language (Streetslang)")
+
+        if missing:
+            character.msg(
+                f"The following skills must be at least {CHARGEN_REQUIRED_SKILL_MIN} to finish chargen: "
+                f"{', '.join(missing)}. Use 'selfstat' to set them."
+            )
+            return False
+        return True
         
         
 # To use this custom room, you would typically put this code in a file like

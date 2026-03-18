@@ -52,7 +52,8 @@ class Character(DefaultCharacter):
         self.db.empathy = 1
         
         # Derived stats
-        self.db.max_hp = 10 + (5 * ((self.db.body + self.db.willpower) // 2))
+        from world.hp_chart import get_hp_from_chart
+        self.db.max_hp = get_hp_from_chart(self.db.body, self.db.willpower)
         self.db.current_hp = self.db.max_hp
         self.db.humanity = self.db.empathy * 10
         self.db.humanity_loss = 0
@@ -202,6 +203,9 @@ class Character(DefaultCharacter):
      
         # Initialize skill instances dictionary
         self.db.skill_instances = {}
+
+        # Languages dict for add_language/languages property (chargen adds Streetslang via add_language)
+        self.db.languages = {}
 
         # Do NOT create character sheet here - it is created when the player runs chargen
         # for the first time. This prevents new characters from being prompted to reset.
@@ -617,8 +621,8 @@ class Character(DefaultCharacter):
     
     def recalculate_derived_stats(self):
         """Recalculate all derived statistics."""
-        # Calculate max HP
-        self.db.max_hp = 10 + (5 * ((self.db.body + self.db.willpower) // 2))
+        from world.hp_chart import get_hp_from_chart
+        self.db.max_hp = get_hp_from_chart(self.db.body, self.db.willpower)
         
         # Ensure current HP doesn't exceed max HP
         if self.db.current_hp > self.db.max_hp:
@@ -1061,26 +1065,27 @@ class Character(DefaultCharacter):
     # Language-related methods
     def add_language(self, language_name, level):
         """Add a language to the character."""
-        # Initialize languages dict if not exists
-        if not hasattr(self.db, 'languages'):
-            self.db.languages = {}
-        
+        # Initialize languages dict if not exists or is None (brand-new chars may not have at_object_creation run)
+        languages = getattr(self.db, 'languages', None)
+        if languages is None or not isinstance(languages, dict):
+            languages = {}
+            self.db.languages = languages
+
         # Add the language with its level
-        languages = self.db.languages
         languages[language_name] = level
         self.db.languages = languages
-        
+
         # For backward compatibility, also update CharacterSheet if it exists
         if self.character_sheet:
             self.character_sheet.add_language(language_name, level)
     
     def remove_language(self, language_name):
         """Remove a language from the character."""
-        if not hasattr(self.db, 'languages'):
+        languages = getattr(self.db, 'languages', None)
+        if not languages or not isinstance(languages, dict):
             return
-        
+
         # Remove the language if it exists
-        languages = self.db.languages
         if language_name in languages:
             del languages[language_name]
             self.db.languages = languages
@@ -1098,10 +1103,11 @@ class Character(DefaultCharacter):
     
     def update_language_level(self, language_name, new_level):
         """Update the level of a language the character knows."""
-        if not hasattr(self.db, 'languages'):
-            self.db.languages = {}
-        
-        languages = self.db.languages
+        languages = getattr(self.db, 'languages', None)
+        if languages is None or not isinstance(languages, dict):
+            languages = {}
+            self.db.languages = languages
+
         languages[language_name] = new_level
         self.db.languages = languages
         
@@ -1112,14 +1118,14 @@ class Character(DefaultCharacter):
     @property
     def languages(self):
         """Get a dictionary of all languages the character knows."""
-        if not hasattr(self.db, 'languages'):
-            self.db.languages = {}
-            
+        languages = getattr(self.db, 'languages', None)
+        if languages is None or not isinstance(languages, dict):
+            languages = {}
             # If we have a character sheet, initialize from it
             if self.character_sheet:
                 for lang_data in self.character_sheet.language_list:
-                    self.db.languages[lang_data['name']] = lang_data['level']
-                    
+                    languages[lang_data['name']] = lang_data['level']
+            self.db.languages = languages
         return self.db.languages
     
     @property
@@ -1169,15 +1175,16 @@ class Character(DefaultCharacter):
     # Language-related methods
     def add_language(self, language_name, level):
         """Add a language to the character."""
-        # Initialize languages dict if not exists
-        if not hasattr(self.db, 'languages'):
-            self.db.languages = {}
-        
+        # Initialize languages dict if not exists or is None (brand-new chars may not have at_object_creation run)
+        languages = getattr(self.db, 'languages', None)
+        if languages is None or not isinstance(languages, dict):
+            languages = {}
+            self.db.languages = languages
+
         # Add the language with its level
-        languages = self.db.languages
         languages[language_name] = level
         self.db.languages = languages
-        
+
         # For backward compatibility, also update CharacterSheet if it exists
         if self.character_sheet:
             self.character_sheet.add_language(language_name, level)
@@ -1239,18 +1246,41 @@ class Character(DefaultCharacter):
             pass  # Language or character-language relationship not found
 
     def get_skill_instance(self, skill_name, instance):
-        """Get a skill instance value by name and instance."""
+        """Get a skill instance value by name and instance. Lookup is case-insensitive."""
         if not self.db.skill_instances:
             return 0
-        skill_key = f"{skill_name.lower().replace(' ', '_')}({instance})"
-        return self.db.skill_instances.get(skill_key, 0)
+        base = skill_name.lower().replace(' ', '_')
+        instance_lower = (instance or "").lower().strip()
+        # Direct match first
+        skill_key = f"{base}({instance})"
+        if skill_key in (self.db.skill_instances or {}):
+            return self.db.skill_instances[skill_key]
+        # Case-insensitive match: find stored key with matching base and instance
+        for stored_key, value in (self.db.skill_instances or {}).items():
+            if "(" in stored_key and ")" in stored_key:
+                stored_base, _, stored_inst = stored_key.partition("(")
+                stored_inst = stored_inst.rstrip(")")
+                if stored_base.lower() == base and stored_inst.lower() == instance_lower:
+                    return value
+        return 0
     
     def set_skill_instance(self, skill_name, instance, value):
-        """Set a skill instance value."""
+        """Set a skill instance value. Instance is normalized to title case for consistency."""
         if not self.db.skill_instances:
             self.db.skill_instances = {}
-        skill_key = f"{skill_name.lower().replace(' ', '_')}({instance})"
-        skill_instances = self.db.skill_instances
+        base = skill_name.lower().replace(' ', '_')
+        # Normalize instance to title case so "the net" and "The Net" use the same key
+        inst_normalized = (instance or "").strip().title() if instance else ""
+        skill_key = f"{base}({inst_normalized})"
+        skill_instances = dict(self.db.skill_instances or {})
+        # Remove any existing key with same base+instance (case-insensitive) to avoid duplicates
+        for k in list(skill_instances):
+            if "(" in k and ")" in k:
+                kb, _, ki = k.partition("(")
+                ki = ki.rstrip(")")
+                if kb.lower() == base and ki.lower() == inst_normalized.lower():
+                    del skill_instances[k]
+                    break
         skill_instances[skill_key] = value
         self.db.skill_instances = skill_instances
     

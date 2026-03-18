@@ -655,7 +655,8 @@ class CmdChargen(MuxCommand):
         char.db.body = 1
         char.db.empathy = 1
 
-        char.db.max_hp = 10 + (5 * ((char.db.body + char.db.willpower) // 2))
+        from world.hp_chart import get_hp_from_chart
+        char.db.max_hp = get_hp_from_chart(char.db.body, char.db.willpower)
         char.db.current_hp = char.db.max_hp
         char.db.humanity = char.db.empathy * 10
         char.db.humanity_loss = 0

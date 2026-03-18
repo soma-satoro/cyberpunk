@@ -11,11 +11,21 @@ CHARGEN_EURODOLLARS_COMPLETE_PACKAGE = 2550
 # Edgerunner: stats from table, 86 skill points
 COMPLETE_PACKAGE_SKILL_POOL = 86
 EDGERUNNER_SKILL_POOL = 86
-# Stats and (non-role-ability) skills: min 2, max 8
-CHARGEN_STAT_MIN = 2
+# Stats: min 0 (allow clearing), max 8
+CHARGEN_STAT_MIN = 0
 CHARGEN_STAT_MAX = 8
-CHARGEN_SKILL_MIN = 2
+# Skills: min 0 (allow clearing), max 8; required skills must be >= 2 at chargen finish
+CHARGEN_SKILL_MIN = 0
 CHARGEN_SKILL_MAX = 8
+CHARGEN_REQUIRED_SKILL_MIN = 2
+
+# Skills that must be >= CHARGEN_REQUIRED_SKILL_MIN to finish chargen
+CHARGEN_REQUIRED_SKILLS = frozenset({
+    "athletics", "brawling", "concentration", "conversation", "education",
+    "evasion", "first_aid", "human_perception", "local_expert", "perception",
+    "persuasion", "stealth",
+})
+# Language (Streetslang) is required >= 2 - checked separately via get_language_level
 # Role ability: 4 free points (not deducted from skill pool), min 4, max 8
 ROLE_ABILITY_FREE_POINTS = 4
 CHARGEN_ROLE_ABILITY_MIN = 4
