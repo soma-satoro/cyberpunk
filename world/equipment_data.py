@@ -3435,6 +3435,73 @@ gears = [
         "weight": 0.5,
         "value": 500,
     },
+    # Core rulebook / premium catalog: cyberdeck hardware (install via +net/deck/install)
+    {
+        "name": "Backup Drive",
+        "category": "Deck Option",
+        "description": (
+            "While installed on a Cyberdeck, a Backup Drive 'saves' Non-Black ICE Attacker, Defender, or Booster "
+            "Programs that are destroyed by pulling them into the Backup Drive the instant before they meet their end. "
+            "As a Meat Action, a Netrunner can re-install all Programs 'saved' by the Backup Drive onto their deck, "
+            "if they have the Slots for them. If removed from a Cyberdeck, the Backup Drive erases its contents "
+            "automatically. Restored Programs with once-per-Netrun restrictions and the like are restored in the "
+            "exact state they were saved in, so you can't kill your own Armor to refresh it. Yeah, that means you. "
+            "Takes 2 Hardware Option Slots. (Premium)"
+        ),
+        "weight": 0,
+        "value": 100,
+    },
+    {
+        "name": "DNA Lock",
+        "category": "Deck Option",
+        "description": (
+            "A Cyberdeck with a DNA Lock can be locked and unlocked using a thumbprint, iris scan, blood sample, or "
+            "any other biometric method desired. The method varies depending on the model of the DNA Lock. A locked "
+            "Cyberdeck cannot be accessed without either its biometric key or a DV 17 Electronics/Security Tech Check. "
+            "Takes 2 Hardware Option Slots. (Premium)"
+        ),
+        "weight": 0,
+        "value": 100,
+    },
+    {
+        "name": "Hardened Circuitry",
+        "category": "Deck Option",
+        "description": (
+            "A Cyberdeck with Hardened Circuitry cannot be rendered temporarily disabled, rendered inoperable, or "
+            "destroyed by EMP effects like pulses, or Non-Black ICE Program Effects. (Premium)"
+        ),
+        "weight": 0,
+        "value": 100,
+    },
+    {
+        "name": "Insulated Wiring",
+        "category": "Deck Option",
+        "description": (
+            "A Cyberdeck with Insulated Wiring cannot catch fire or cause the user's clothing to catch fire as the "
+            "result of a Program effect. (Premium)"
+        ),
+        "weight": 0,
+        "value": 100,
+    },
+    {
+        "name": "KRASH Barrier",
+        "category": "Deck Option",
+        "description": (
+            "A Cyberdeck with a KRASH Barrier is immune to any Program Effect that force the Netrunner to Jack Out, "
+            "safely or unsafely. Takes 2 Hardware Option Slots. (Premium)"
+        ),
+        "weight": 0,
+        "value": 100,
+    },
+    {
+        "name": "Range Upgrade",
+        "category": "Deck Option",
+        "description": (
+            "A Cyberdeck with a Range Upgrade can connect to an access point from up to 8m away. (Premium)"
+        ),
+        "weight": 0,
+        "value": 100,
+    },
 ]
 
 # Extend with Cyberpunk RED fashion items (core rulebook)
@@ -3444,7 +3511,7 @@ gears.extend(build_fashion_gear_list())
 #Cyberdecks (External)
 cyberdecks = [
     {
-        "name": "Cyberdeck (Excellent Quality)",
+        "name": "Excellent Quality Cyberdeck",
         "description": (
             "A high-end modular platform that Programs and Hardware are installed on for the purpose of "
             "Netrunning. This cyberdeck has 9 slots to install Programs and Hardware. Requires Interface "
@@ -3456,7 +3523,7 @@ cyberdecks = [
         "value": 1000,
     },
     {
-        "name": "Cyberdeck (Poor Quality)",
+        "name": "Poor Quality Cyberdeck",
         "description": (
             "A cheap modular platform that Programs and Hardware are installed on for the purpose of "
             "Netrunning. This cyberdeck has 5 slots to install Programs and Hardware. Requires Interface "
@@ -3468,7 +3535,7 @@ cyberdecks = [
         "value": 100,
     },
     {
-        "name": "Cyberdeck (Standard Quality)",
+        "name": "Standard Quality Cyberdeck",
         "description": (
             "Modular platform that Programs and Hardware are installed on for the purpose of Netrunning. "
             "This cyberdeck has 7 slots to install Programs and Hardware. Requires Interface Plugs and "

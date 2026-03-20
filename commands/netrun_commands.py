@@ -25,6 +25,11 @@ from world.netrunning.red_netrunning import (
 from world.utils.permission_utils import check_builder_permission
 from world.utils.character_utils import is_character_approved
 from world.inventory.models import CyberwareInstance
+from world.netrunning.deck_loadout import (
+    format_deck_sheet,
+    install_deck_item,
+    remove_deck_item,
+)
 
 
 def _roll_dice(dice: str) -> int:
@@ -53,6 +58,9 @@ class CmdNet(MuxCommand):
         +net/zap [=target]              - target: ICE name or index when multiple
         +net/attack <program> [=target] - target: ICE name or index when multiple
         +net/slide [=target]             - target: ICE name or index when multiple
+        +net/deck                        - Same as |wdeck|n (full cyberdeck sheet)
+        +net/deck/install <deck>=<item> - Install program, Black ICE, or hardware
+        +net/deck/remove <deck>=<item> - Unload to inventory (|wdeck/...|n also works)
 
     Staff/Storyteller usage:
         +net/create <name>=<difficulty>[,<floors>]
@@ -76,6 +84,9 @@ class CmdNet(MuxCommand):
             return
 
         switch = self.switches[0].lower()
+        if switch == "deck":
+            self._cmd_deck()
+            return
         if switch in self.STAFF_SWITCHES and not check_builder_permission(self.caller):
             self.caller.msg("Only staff/storytellers can use that switch.")
             return
@@ -109,6 +120,36 @@ class CmdNet(MuxCommand):
             self.caller.msg(f"Unknown switch '{switch}'. See help +net.")
             return
         handler()
+
+    def _cmd_deck(self):
+        """Cyberdeck loadout (delegates to same logic as |wdeck|n)."""
+        subs = [s.lower() for s in (self.switches or [])[1:]]
+        if not subs:
+            self.caller.msg(format_deck_sheet(self.caller))
+            return
+        sub = subs[0]
+        raw = (self.args or "").strip()
+        if sub == "install":
+            if "=" not in raw:
+                self.caller.msg(
+                    "Usage: +net/deck/install <cyberdeck name>=<program, Black ICE, or hardware>"
+                )
+                return
+            left, right = raw.split("=", 1)
+            ok, msg = install_deck_item(self.caller, left.strip(), right.strip())
+            self.caller.msg(msg if ok else f"|r{msg}|n")
+            return
+        if sub == "remove":
+            if "=" not in raw:
+                self.caller.msg("Usage: +net/deck/remove <cyberdeck name>=<installed item>")
+                return
+            left, right = raw.split("=", 1)
+            ok, msg = remove_deck_item(self.caller, left.strip(), right.strip())
+            self.caller.msg(msg if ok else f"|r{msg}|n")
+            return
+        self.caller.msg(
+            "Use |wdeck|n or |w+net/deck|n for your sheet; |wdeck/install|n or |w+net/deck/install|n to load."
+        )
 
     def _get_state(self):
         return self.caller.db.netrun_state or {}

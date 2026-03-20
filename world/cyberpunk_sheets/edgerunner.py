@@ -12,7 +12,6 @@ from world.edgerunner_weapon_flavor import flavor_edgerunner_weapon, pick_ammuni
 from world.chargen_constants import (
     FASHION_BUDGET,
     FASHION_ITEM_NAMES,
-    NETRUNNER_7_SLOT_CYBERDECKS,
 )
 from world.cyberware.cyberware_data import CYBERWARE_DATA
 from world.cyberware.models import Cyberware, CYBERWARE_HUMANITY_LOSS, CYBERWARE_COSTS
@@ -333,11 +332,25 @@ class EdgerunnerChargen:
             if armor_stats:
                 total_cost += armor_stats.get("value", 0)
 
-        # Gear
-        for gear_name in role_equipment.get("gear", []):
+        # Gear (includes {"or": idx} resolved to first menu option for estimate)
+        for gear_entry in role_equipment.get("gear", []):
+            if isinstance(gear_entry, dict) and "or" in gear_entry:
+                or_idx = gear_entry["or"]
+                or_groups = EQUIPMENT_OR_CHOICES.get(role, [])
+                if or_idx >= len(or_groups):
+                    continue
+                gear_entry = or_groups[or_idx]["options"][0]
+            if isinstance(gear_entry, (list, tuple)):
+                gear_name, qty = gear_entry[0], int(gear_entry[1])
+            else:
+                gear_name, qty = gear_entry, 1
             gear_stats = next((g for g in gear_data if g["name"] == gear_name), None)
             if gear_stats:
-                total_cost += gear_stats.get("value", 0)
+                total_cost += gear_stats.get("value", 0) * qty
+            else:
+                cd = next((c for c in cyberdecks_data if c.get("name") == gear_name), None)
+                if cd:
+                    total_cost += cd.get("value", 0) * qty
 
         # Ammunition: 50 rounds per weapon that uses ammo
         for weapon_name in role_equipment.get("weapons", []):
@@ -386,8 +399,8 @@ class EdgerunnerChargen:
                 if _is_fashion_item("armor", armor_name, armor_stats):
                     fashion_cost += armor_stats.get("value", 0)
 
-        # Gear (skip Cyberdeck for Netrunner - handled separately with named deck)
-        # Support (name, qty) tuples, plain name (qty 1), or {"or": index} (use first option for cost)
+        # Gear — support {"or": index} (first option = default for estimates), tuples, plain names;
+        # cyberdeck template names come from equipment_data.cyberdecks when not in gears[]
         for gear_entry in role_equipment.get("gear", []):
             if isinstance(gear_entry, dict) and "or" in gear_entry:
                 or_idx = gear_entry["or"]
@@ -399,14 +412,17 @@ class EdgerunnerChargen:
                 gear_name, qty = gear_entry[0], int(gear_entry[1])
             else:
                 gear_name, qty = gear_entry, 1
-            if role == "Netrunner" and gear_name == "Cyberdeck":
-                continue
             gear_stats = next((g for g in gear_data if g["name"] == gear_name), None)
             if gear_stats:
                 item_val = gear_stats.get("value", 0) * qty
                 total_cost += item_val
                 if _is_fashion_item("gear", gear_name, gear_stats):
                     fashion_cost += item_val
+            else:
+                cd = next((c for c in cyberdecks_data if c.get("name") == gear_name), None)
+                if cd:
+                    item_val = cd.get("value", 0) * qty
+                    total_cost += item_val
 
         # Ammunition
         for weapon_name in role_equipment.get("weapons", []):
@@ -577,8 +593,8 @@ class EdgerunnerChargen:
                 inventory.armor.add(armor)
                 logger.info(f"Added armor: {armor_name}")
         
-        # Assign gear (Netrunner: skip generic "Cyberdeck", get random 7-slot named deck instead)
-        # Support (name, qty) tuples, plain name (qty 1), or {"or": index} for menu choices
+        # Assign gear — {"or": index} resolved via gear_choices (e.g. Netrunner starting cyberdeck)
+        # Support (name, qty) tuples, plain name (qty 1)
         for gear_entry in role_equipment.get('gear', []):
             if isinstance(gear_entry, dict) and "or" in gear_entry:
                 or_idx = gear_entry["or"]
@@ -594,8 +610,6 @@ class EdgerunnerChargen:
                 gear_name, qty = gear_entry[0], int(gear_entry[1])
             else:
                 gear_name, qty = gear_entry, 1
-            if role == "Netrunner" and gear_name == "Cyberdeck":
-                continue  # Handled separately below
             gear_stats = next((g for g in gear_data if g['name'] == gear_name), None)
             if gear_stats:
                 gear, created = Gear.objects.get_or_create(
@@ -609,23 +623,20 @@ class EdgerunnerChargen:
                 )
                 inventory.add_gear(gear, quantity=qty)
                 logger.info(f"Added gear: {gear_name} x{qty}")
-
-        # Netrunner: assign random 7-slot cyberdeck from equipment DB
-        if role == "Netrunner":
-            deck_name = random.choice(NETRUNNER_7_SLOT_CYBERDECKS)
-            cd_data = next((cd for cd in cyberdecks_data if cd["name"] == deck_name), None)
-            if cd_data:
-                gear, created = Gear.objects.get_or_create(
-                    name=deck_name,
-                    defaults={
-                        'category': 'Cyberdeck',
-                        'description': cd_data.get('description', ''),
-                        'weight': 0.5,
-                        'value': cd_data.get('value', 500)
-                    }
-                )
-                inventory.add_gear(gear)
-                logger.info(f"Added Netrunner cyberdeck: {deck_name}")
+            else:
+                cd_data = next((cd for cd in cyberdecks_data if cd.get("name") == gear_name), None)
+                if cd_data:
+                    gear, created = Gear.objects.get_or_create(
+                        name=gear_name,
+                        defaults={
+                            'category': 'Cyberdeck',
+                            'description': cd_data.get('description', ''),
+                            'weight': 0.5,
+                            'value': cd_data.get('value', 500),
+                        },
+                    )
+                    inventory.add_gear(gear, quantity=qty)
+                    logger.info(f"Added cyberdeck gear: {gear_name}")
         
         # Assign ammunition (use weapon.weapon_type — flavor names break name.split() matching)
         for weapon in inventory.weapons.all():
@@ -1024,23 +1035,6 @@ class EdgerunnerChargen:
                 gear_name, qty = gear_entry[0], int(gear_entry[1])
             else:
                 gear_name, qty = gear_entry, 1
-            # Netrunner: replace generic "Cyberdeck" with random 7-slot named cyberdeck
-            if role == "Netrunner" and gear_name == "Cyberdeck":
-                deck_name = random.choice(NETRUNNER_7_SLOT_CYBERDECKS)
-                deck_stats = next((d for d in cyberdecks_data if d.get("name") == deck_name), None)
-                if deck_stats:
-                    gear, created = Gear.objects.get_or_create(
-                        name=deck_name,
-                        defaults={
-                            'category': 'Cyberdeck',
-                            'description': deck_stats.get('description', ''),
-                            'weight': 0.5,
-                            'value': deck_stats.get('value', 500)
-                        }
-                    )
-                    inventory.add_gear(gear)
-                    logger.info(f"Added cyberdeck: {deck_name}")
-                continue
             gear_stats = next((g for g in gear_data if g['name'] == gear_name), None)
             if gear_stats:
                 gear, created = Gear.objects.get_or_create(
@@ -1054,6 +1048,20 @@ class EdgerunnerChargen:
                 )
                 inventory.add_gear(gear, quantity=qty)
                 logger.info(f"Added gear: {gear_name} x{qty}")
+            else:
+                deck_stats = next((d for d in cyberdecks_data if d.get("name") == gear_name), None)
+                if deck_stats:
+                    gear, created = Gear.objects.get_or_create(
+                        name=gear_name,
+                        defaults={
+                            'category': 'Cyberdeck',
+                            'description': deck_stats.get('description', ''),
+                            'weight': 0.5,
+                            'value': deck_stats.get('value', 500),
+                        },
+                    )
+                    inventory.add_gear(gear, quantity=qty)
+                    logger.info(f"Added cyberdeck gear: {gear_name} x{qty}")
         
         # Assign ammunition
         for weapon in inventory.weapons.all():

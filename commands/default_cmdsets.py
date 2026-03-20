@@ -55,6 +55,7 @@ from world.mail.commands import CmdMail, CmdMailbox, CmdMailDelete
 from .jobs.jobs_commands import CmdJobs
 from .cyberware_commands import CmdCyberware
 from .netrun_commands import CmdNet
+from .deck_commands import CmdDeck
 from .netrun_admin_commands import CmdArchitecture
 from .combat_system import CmdCombat
 from .initiative_commands import CmdInitiative
@@ -197,6 +198,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdSetLanguage())
         self.add(CmdCyberware())
         self.add(CmdNet())
+        self.add(CmdDeck())
         self.add(CmdArchitecture())
         self.add(CmdLanguage())
         # CmdSay, CmdPose, CmdEmit (added above) handle say/pose/emit with pose breaks and ~language
