@@ -416,7 +416,7 @@ def check_foundation_eye_exclusive_option_capacity(character_sheet, cyberware):
 def check_cyberlimb_exclusive_option_capacity(character_sheet, cyberware):
     """
     For items whose valid parents are *only* cyberlimb hosts (arms/legs from
-    _CYBERLIMB_OPTION_PARENTS — no cybereyes), ensure at least one installed
+    _CYBERLIMB_OPTION_PARENTS -- no cybereyes), ensure at least one installed
     limb can accept this option (per-limb slots). Covers coverings, shielding,
     reinforced, Extra-Jointed, Standard Hand/Foot, Modular Finger, etc. when
     bought without a disambiguated parent.
@@ -690,7 +690,7 @@ def select_balanced_parent_instance(parent_candidates, child_cyberware):
     to MultiOptic or other eyes.
 
     Chooses a candidate that passes ``validate_parent_for_new_child``, preferring
-    fewer installed children, then lower slot usage, then stable pk — so repeated
+    fewer installed children, then lower slot usage, then stable pk -- so repeated
     purchases spread across eyes/arms/legs instead of stacking on one instance.
     """
     if not parent_candidates:

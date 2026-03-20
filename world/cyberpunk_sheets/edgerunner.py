@@ -399,7 +399,7 @@ class EdgerunnerChargen:
                 if _is_fashion_item("armor", armor_name, armor_stats):
                     fashion_cost += armor_stats.get("value", 0)
 
-        # Gear — support {"or": index} (first option = default for estimates), tuples, plain names;
+        # Gear -- support {"or": index} (first option = default for estimates), tuples, plain names;
         # cyberdeck template names come from equipment_data.cyberdecks when not in gears[]
         for gear_entry in role_equipment.get("gear", []):
             if isinstance(gear_entry, dict) and "or" in gear_entry:
@@ -550,7 +550,7 @@ class EdgerunnerChargen:
         
         role_equipment = EQUIPMENT.get(role, {})
         
-        # Assign weapons (random flavor name per generic type — same stats as template)
+        # Assign weapons (random flavor name per generic type -- same stats as template)
         for weapon_name in role_equipment.get('weapons', []):
             weapon_stats = next((w for w in weapon_data if w['name'] == weapon_name), None)
             if weapon_stats:
@@ -593,7 +593,7 @@ class EdgerunnerChargen:
                 inventory.armor.add(armor)
                 logger.info(f"Added armor: {armor_name}")
         
-        # Assign gear — {"or": index} resolved via gear_choices (e.g. Netrunner starting cyberdeck)
+        # Assign gear -- {"or": index} resolved via gear_choices (e.g. Netrunner starting cyberdeck)
         # Support (name, qty) tuples, plain name (qty 1)
         for gear_entry in role_equipment.get('gear', []):
             if isinstance(gear_entry, dict) and "or" in gear_entry:
@@ -638,7 +638,7 @@ class EdgerunnerChargen:
                     inventory.add_gear(gear, quantity=qty)
                     logger.info(f"Added cyberdeck gear: {gear_name}")
         
-        # Assign ammunition (use weapon.weapon_type — flavor names break name.split() matching)
+        # Assign ammunition (use weapon.weapon_type -- flavor names break name.split() matching)
         for weapon in inventory.weapons.all():
             ammo = pick_ammunition_for_weapon(ammunition, weapon)
             if ammo:
@@ -980,7 +980,7 @@ class EdgerunnerChargen:
         
         role_equipment = EQUIPMENT.get(role, {})
         
-        # Assign weapons (random flavor name per generic type — same stats as template)
+        # Assign weapons (random flavor name per generic type -- same stats as template)
         for weapon_name in role_equipment.get('weapons', []):
             weapon_stats = next((w for w in weapon_data if w['name'] == weapon_name), None)
             if weapon_stats:

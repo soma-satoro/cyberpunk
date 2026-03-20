@@ -653,7 +653,7 @@ def format_cyberware_by_category(installed_instances, character_sheet):
                                     break
                             else:
                                 parent_groups[cat].append((parent_inst, [(m, [])]))
-                            # Do not add (m, []) as a top-level row — that duplicates the limb (e.g. Neo-Soviet
+                            # Do not add (m, []) as a top-level row -- that duplicates the limb (e.g. Neo-Soviet
                             # under Artificial Shoulder Mount). Options must attach under the nested tuple only.
                         else:
                             # Regular option child
@@ -779,7 +779,7 @@ def format_cyberware_by_category(installed_instances, character_sheet):
                     all_options.append(row)
             elif pname in container_names and is_limb_under_borgware:
                 # Duplicate list row should not appear after nested-only attachment; if present, feed
-                # options into redistribution only — limb displays under borgware, not as a root.
+                # options into redistribution only -- limb displays under borgware, not as a root.
                 for row in ch_list:
                     if isinstance(row, tuple) and len(row) == 2 and hasattr(row[0], "cyberware"):
                         continue

@@ -256,7 +256,7 @@ def _execute_evidence_check(caller, char, focus_obj, clue):
         return
     if not _obstacle_gate_passed(char, clue):
         caller.msg(
-            "Something is in the way of this lead — overcome the obstacle before pushing further."
+            "Something is in the way of this lead -- overcome the obstacle before pushing further."
         )
         return
     for req in clue.required_clues.all():
@@ -389,7 +389,7 @@ def _resolve_evidence_target(caller, char, arg_orig):
         lines = ["|ySeveral exposed leads on that target:|n"]
         for loc in locs:
             c = loc.clue
-            lines.append(f"  {_player_hint_for_clue(c, loc, room)} — |c+investigate {c.id}|n")
+            lines.append(f"  {_player_hint_for_clue(c, loc, room)} -- |c+investigate {c.id}|n")
         return {"type": "list", "message": "\n".join(lines)}
 
     ek = _normalize_element_key(arg_orig)
@@ -406,7 +406,7 @@ def _resolve_evidence_target(caller, char, arg_orig):
             lines = ["|yWhich lead?|n"]
             for loc in locs:
                 c = loc.clue
-                lines.append(f"  |c+investigate {c.id}|n — {_player_hint_for_clue(c, loc, room)}")
+                lines.append(f"  |c+investigate {c.id}|n -- {_player_hint_for_clue(c, loc, room)}")
             return {"type": "list", "message": "\n".join(lines)}
 
     return {"type": "error", "message": "No exposed lead matches that. Use |c+investigate/scan|n or check +mystery."}
@@ -460,8 +460,8 @@ class CmdInvestigate(MuxCommand):
 
         if not self.args:
             self.caller.msg(
-                "|c+investigate/scan|n [here|object|exit|element] — look for leads.\n"
-                "|c+investigate <id>|n or name — evidence check on a lead you noticed.\n"
+                "|c+investigate/scan|n [here|object|exit|element] -- look for leads.\n"
+                "|c+investigate <id>|n or name -- evidence check on a lead you noticed.\n"
                 "|c+investigate/hint|n |c+investigate/overcome <id>|n"
             )
             return
@@ -495,7 +495,7 @@ class CmdInvestigate(MuxCommand):
         eligible_locs = _filter_locs_eligible_for_exposure(char, locs)
         if not eligible_locs:
             self.caller.msg(
-                "You sweep the area but nothing new surfaces — "
+                "You sweep the area but nothing new surfaces -- "
                 "prerequisites may be missing, or an obstacle may be blocking."
             )
             focus_damage = _roll_dice("1d6")
@@ -714,7 +714,7 @@ class CmdMystery(MuxCommand):
             "  |wOpen investigations:|n",
         ]
         if not broad.exists():
-            lines.append("  (None listed — ask staff or check the grid.)")
+            lines.append("  (None listed -- ask staff or check the grid.)")
         else:
             for m in broad:
                 pd = (m.public_description or "").strip()
@@ -724,7 +724,7 @@ class CmdMystery(MuxCommand):
                 else:
                     desc = (m.goal or "")[:120] + ("..." if len(m.goal or "") > 120 else "")
                 loc = f" |cStart:|n {hint}" if hint else ""
-                lines.append(f"  |y#{m.id}|n {m.name} — {desc}{loc}")
+                lines.append(f"  |y#{m.id}|n {m.name} -- {desc}{loc}")
         lines.append("")
         lines.append("  |c+mystery/info <id>|n for details. |c+investigate/scan|n to notice leads.")
         lines.append(footer())
@@ -970,7 +970,7 @@ class CmdClue(MuxCommand):
             return self._priority()
 
         self.caller.msg(
-            "Usage: |c+clue/create|n, |c+clue/add|n, |c+clue/list|n, |c+clue/requires|n, …"
+            "Usage: |c+clue/create|n, |c+clue/add|n, |c+clue/list|n, |c+clue/requires|n, ..."
         )
 
     def _create(self):
@@ -1176,7 +1176,7 @@ class CmdClue(MuxCommand):
             self.caller.msg(f"Clue #{c1_id} now requires #{c2_id} deciphered first.")
         else:
             c1.linked_clues.add(c2)
-            self.caller.msg(f"Linked #{c1_id} ↔ #{c2_id}.")
+            self.caller.msg(f"Linked #{c1_id} <-> #{c2_id}.")
 
     def _playerhint(self):
         if not self.args or "=" not in self.args:
@@ -1255,7 +1255,7 @@ class CmdCluesStaff(MuxCommand):
 
 
 class CmdRest(MuxCommand):
-    """Rest / concentration for Focus — unchanged."""
+    """Rest / concentration for Focus -- unchanged."""
 
     key = "+rest"
     aliases = ["rest"]
@@ -1320,3 +1320,117 @@ class CmdRest(MuxCommand):
                 "You try to concentrate but can't quite clear your head. "
                 "No bonus Focus this time."
             )
+
+
+def _staff_resolve_character(arg):
+    """Resolve a single Character from a name string. Returns (character, err_msg)."""
+    from evennia.utils.search import search_object
+
+    arg = (arg or "").strip()
+    if not arg:
+        return None, "Specify a character name."
+    matches = search_object(arg, typeclass="typeclasses.characters.Character")
+    if not matches:
+        return None, f"No character matching '{arg}'."
+    if len(matches) > 1:
+        names = ", ".join(getattr(o, "key", str(o)) for o in matches[:6])
+        return None, f"Ambiguous ({len(matches)} matches): {names}"
+    return matches[0], None
+
+
+class CmdStaffFocus(MuxCommand):
+    """
+    Staff: view or reset investigation Focus for a character (Builder).
+
+    Usage:
+      +focus/show <character>       - Current / max Focus
+      +focus/refresh <character>     - Set Focus to maximum
+      +focus/set <character>=<n>     - Set Focus (0 to max)
+      +focus/resetrest <character>   - Clear +rest daily lock (can use +rest again today)
+    """
+
+    key = "+focus"
+    aliases = ["stafffocus"]
+    lock = "cmd:perm(builders)"
+    help_category = "Building"
+
+    def func(self):
+        if "refresh" in self.switches:
+            return self._do_refresh()
+        if "set" in self.switches:
+            return self._do_set()
+        if "resetrest" in self.switches:
+            return self._do_resetrest()
+        # default: show
+        return self._do_show()
+
+    def _get_focus(self, char):
+        focus_obj = _get_or_create_focus(char)
+        mx = focus_obj.get_max_focus()
+        return focus_obj, mx
+
+    def _do_show(self):
+        name = (self.args or "").strip()
+        if not name:
+            self.caller.msg("Usage: +focus <character> or +focus/show <character>")
+            return
+        char, err = _staff_resolve_character(name)
+        if err:
+            self.caller.msg(err)
+            self.caller.msg("Usage: +focus/show <character>")
+            return
+        focus_obj, mx = self._get_focus(char)
+        self.caller.msg(
+            f"|w{char.key}|n Focus: |g{focus_obj.current_focus}|n / |c{mx}|n"
+        )
+
+    def _do_refresh(self):
+        name = (self.args or "").strip()
+        char, err = _staff_resolve_character(name)
+        if err:
+            self.caller.msg(err)
+            self.caller.msg("Usage: +focus/refresh <character>")
+            return
+        focus_obj, mx = self._get_focus(char)
+        old = focus_obj.current_focus
+        focus_obj.current_focus = mx
+        focus_obj.save()
+        self.caller.msg(
+            f"|w{char.key}|n Focus refreshed: |y{old}|n -> |g{focus_obj.current_focus}|n / {mx}"
+        )
+
+    def _do_set(self):
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: +focus/set <character>=<amount>")
+            return
+        char, err = _staff_resolve_character(self.lhs.strip())
+        if err:
+            self.caller.msg(err)
+            return
+        try:
+            n = int(self.rhs.strip())
+        except ValueError:
+            self.caller.msg("Amount must be an integer.")
+            return
+        focus_obj, mx = self._get_focus(char)
+        n = max(0, min(mx, n))
+        old = focus_obj.current_focus
+        focus_obj.current_focus = n
+        focus_obj.save()
+        self.caller.msg(
+            f"|w{char.key}|n Focus set: |y{old}|n -> |g{focus_obj.current_focus}|n / {mx}"
+        )
+
+    def _do_resetrest(self):
+        name = (self.args or "").strip()
+        char, err = _staff_resolve_character(name)
+        if err:
+            self.caller.msg(err)
+            self.caller.msg("Usage: +focus/resetrest <character>")
+            return
+        focus_obj, _mx = self._get_focus(char)
+        focus_obj.last_concentrate_date = None
+        focus_obj.save()
+        self.caller.msg(
+            f"|w{char.key}|n +rest daily lock cleared. They may use |c+rest|n again today."
+        )

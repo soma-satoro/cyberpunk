@@ -118,7 +118,7 @@ def inv_info_footer(width=78, dash_color="|m"):
     return f"{dash_color}{'-' * width}|n\n"
 
 
-# ASCII ellipsis only (avoid Unicode "…" in MUD column truncation)
+# ASCII ellipsis only (avoid Unicode "..." in MUD column truncation)
 INV_ELLIPSIS_ASCII = "..."
 
 
@@ -145,7 +145,7 @@ def divider(title, width=78, fillchar="-", color="|b", text_color="|y"):
 
     ``fillchar`` may be a single character or an Evennia ANSI segment repeated as one
     logical unit (e.g. ``|m-|n`` for a magenta dash). Do **not** use only the first
-    character of multi-char strings — that turns valid codes into spurious ``|`` runs.
+    character of multi-char strings -- that turns valid codes into spurious ``|`` runs.
     """
     if isinstance(fillchar, ANSIString):
         fillchar = str(fillchar)

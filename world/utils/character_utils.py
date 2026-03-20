@@ -209,7 +209,7 @@ MEDICINE_SPECIALTY_MAPPING = {
 }
 MEDICINE_SPECIALTY_ATTRIBUTES = frozenset(MEDICINE_SPECIALTY_MAPPING.values())
 
-# Maker (Tech) specialties - allocate Maker rank × 2: field, upgrade, fabrication, invention
+# Maker (Tech) specialties - allocate Maker rank x 2: field, upgrade, fabrication, invention
 MAKER_SPECIALTY_MAPPING = {
     'MAKF': 'maker_field',
     'MAKU': 'maker_upgrade',

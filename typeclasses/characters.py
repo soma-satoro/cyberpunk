@@ -653,7 +653,7 @@ class Character(DefaultCharacter):
         trauma_loss = getattr(self.db, "trauma_humanity_loss", 0) or 0
         natural_ceiling = self.db.empathy * 10
 
-        # No cyberware or trauma HL: full pool is always Empathy × 10 (chargen, empathy raises, etc.).
+        # No cyberware or trauma HL: full pool is always Empathy x 10 (chargen, empathy raises, etc.).
         if total_humanity_loss + trauma_loss == 0:
             self.db.humanity = natural_ceiling
             self.db.total_cyberware_humanity_loss = total_humanity_loss

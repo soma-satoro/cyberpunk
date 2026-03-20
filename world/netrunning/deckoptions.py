@@ -182,7 +182,7 @@ hardware = [
     },
     {
     "name": "Combat Recorder",
-    "description": "While installed, whenever another netrunner fails a Death Save while jacked into the same NET Architecture as you, the Combat Recorder saves the last 5 minutes for scientific purposes, auto-scrubbing all information that might identify you. Recordings are typically worth 50eb each. Buyers don’t ask questions.",
+    "description": "While installed, whenever another netrunner fails a Death Save while jacked into the same NET Architecture as you, the Combat Recorder saves the last 5 minutes for scientific purposes, auto-scrubbing all information that might identify you. Recordings are typically worth 50eb each. Buyers don't ask questions.",
     "slots": 1,
     "cost": 500,
     },

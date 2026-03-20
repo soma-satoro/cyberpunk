@@ -2024,7 +2024,7 @@ class CmdListItems(MuxCommand):
             name = g.get("name", "?")
             cat = g.get("category", "?")
             value = g.get("value", 0)
-            desc = g.get("description", "—") or "—"
+            desc = g.get("description", "--") or "--"
             nm = crop(name, width=28, suffix="...")
             out.append(f"|c{nm:<28}|n |gCategory:|n {str(cat):<14} |gValue:|n |y{value} eb|n")
             out.append(wrap_ansi(desc, 74, left_padding=2))

@@ -301,7 +301,7 @@ def make_death_save(character):
     """
     from world.cyberware.stat_bonuses import get_effective_body
 
-    # Effective BODY (lace, linear frames) — matches sheet.death_save after recalculate_derived_stats
+    # Effective BODY (lace, linear frames) -- matches sheet.death_save after recalculate_derived_stats
     body = get_effective_body(character)
     penalty = 0
     if hasattr(character, "character_sheet") and character.character_sheet:

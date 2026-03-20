@@ -557,7 +557,7 @@ class CharacterSheet(SharedMemoryModel):
             logger.info(f"Total cyberware humanity loss: {total_cyberware_hl}, trauma: {trauma_hl}, uninstalled: {uninstalled_hl}")
 
         natural_ceiling = self.empathy * 10
-        # No HL: full pool is Empathy × 10 (matches CPR when nothing has cost humanity yet).
+        # No HL: full pool is Empathy x 10 (matches CPR when nothing has cost humanity yet).
         if total_hl == 0:
             new_humanity = natural_ceiling
         else:

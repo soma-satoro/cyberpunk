@@ -1,6 +1,6 @@
 """
 EvMenu for Tech Maker specialty allocation at chargen.
-Allocates Maker rank × 2 points across Field, Upgrade, Fabrication, and Invention expertise.
+Allocates Maker rank x 2 points across Field, Upgrade, Fabrication, and Invention expertise.
 One point at a time - select which specialty to add to.
 """
 
@@ -42,7 +42,7 @@ def menunode_maker_allocation(caller, raw_string, **kwargs):
     lines = [
         "|wTech - Maker Specialty Allocation|n",
         "",
-        f"You have |g{total_points}|n points to allocate (Maker {maker} × {MAKER_ALLOCATION_PER_RANK}).",
+        f"You have |g{total_points}|n points to allocate (Maker {maker} x {MAKER_ALLOCATION_PER_RANK}).",
         f"Points remaining: |g{remaining}|n",
         "",
         "|yField Expertise|n: Repair, maintain, jury-rig. (max per specialty = Maker rank)",

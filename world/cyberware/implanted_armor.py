@@ -418,7 +418,7 @@ def get_inventory_implanted_armor_rows(character_sheet) -> List[str]:
         cw_name, cw_sp, cw_ev, cw_loc = 26, 12, 6, 31
         name_col = inv_visible_cell(f"{label} (implanted)", cw_name)
         sp_col = inv_visible_cell(f"{cur}/{mx}", cw_sp)
-        ev_col = inv_visible_cell("—", cw_ev)
+        ev_col = inv_visible_cell("--", cw_ev)
         loc_col = inv_visible_cell("body, head", cw_loc)
         rows.append(
             f"|w{name_col}|n |c{sp_col}|n |m{ev_col}|n|y{loc_col}|n\n"

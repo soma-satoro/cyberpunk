@@ -83,7 +83,7 @@ def validate_maker_specialties(maker, field, upgrade, fabrication, invention):
     expected = m * MAKER_ALLOCATION_PER_RANK
     if total != expected:
         return False, (
-            f"Maker specialties must sum to Maker rank × 2 ({m}×2={expected}): "
+            f"Maker specialties must sum to Maker rank x 2 ({m}x2={expected}): "
             f"Field + Upgrade + Fabrication + Invention = {f}+{u}+{fab}+{inv}={total}"
         )
     if f < 0 or u < 0 or fab < 0 or inv < 0:

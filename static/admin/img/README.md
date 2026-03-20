@@ -31,7 +31,7 @@ All icons in this directory are provided by
 To ensure visual consistency, traceability, and proper license attribution,
 follow these guidelines. This applies when adding or modifying icons.
 
-## ⚠️ Important: Changing Font Awesome Version
+## [!] Important: Changing Font Awesome Version
 
 If you update to a different Font Awesome version, you must **update all SVG
 files** and **comments inside the files** to reflect the new version number and

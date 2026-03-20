@@ -30,6 +30,7 @@ from .mystery_commands import (
     CmdRest,
     CmdClue,
     CmdCluesStaff,
+    CmdStaffFocus,
 )
 from .cyberware_admin_commands import CmdAddCyberware, CmdParentCyberware, CmdUnparentCyberware
 from .staff_commands import CmdRemoveCyberware, CmdUninstallCyberware, CmdSetLifepath, CmdReputation, CmdNotoriety, CmdConfig
@@ -258,6 +259,7 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdUninstallCyberware())
         self.add(CmdClue())
         self.add(CmdCluesStaff())
+        self.add(CmdStaffFocus())
         self.add(CmdSetLifepath())
         self.add(CmdReputation())
         self.add(CmdNotoriety())

@@ -1,6 +1,6 @@
 # Elflines Online Setup Guide
 
-Elflines Online (ELO) is the MMO within the Cyberpunk universe—edgerunners log in via Braindance to play as elves in the Elflands.
+Elflines Online (ELO) is the MMO within the Cyberpunk universe--edgerunners log in via Braindance to play as elves in the Elflands.
 
 ## Staff Setup
 
@@ -23,12 +23,12 @@ Elflines Online (ELO) is the MMO within the Cyberpunk universe—edgerunners log
 
 ## Player Usage
 
-- `+elo` — Status
-- `+elo/sheet` — Create/view ELO character (50 STAT, 60 skills, 200gp)
-- `+elo/login` — Enter Elflands
-- `+elo/logout` — Return to meat world
-- `+elo/who` — Who's in the Elflands
-- `+elfline/create/join/leave/invite/kick` — Guild management
+- `+elo` -- Status
+- `+elo/sheet` -- Create/view ELO character (50 STAT, 60 skills, 200gp)
+- `+elo/login` -- Enter Elflands
+- `+elo/logout` -- Return to meat world
+- `+elo/who` -- Who's in the Elflands
+- `+elfline/create/join/leave/invite/kick` -- Guild management
 
 ## Miasma (Future)
 

@@ -33,7 +33,7 @@ let notifications_plugin = (function () {
             document.title = "(" + unread + ") " + originalTitle;
             if ("Notification" in window) {
                 if (("notification_popup" in options) && (options["notification_popup"])) {
-                    // There is a Promise-based API for this, but it’s not supported
+                    // There is a Promise-based API for this, but it's not supported
                     // in Safari and some older browsers:
                     // https://developer.mozilla.org/en-US/docs/Web/API/Notification/requestPermission#Browser_compatibility
                     Notification.requestPermission(function(result) {

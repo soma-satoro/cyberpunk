@@ -1057,7 +1057,7 @@ You do |wnot|n see staff clues until you |wnotice|n them.
   |wEvidence check|n on a lead you |walready noticed|n (after scan). Uses the clue's skill vs its DV.
 
 |w+investigate/hint|n
-  DV15 Deduction; 1d6 Focus either way — GM may give a nudge.
+  DV15 Deduction; 1d6 Focus either way -- GM may give a nudge.
 
 |w+investigate/overcome <obstacle id>|n
   Push past a mystery obstacle (DV on the obstacle). Focus cost on success or failure.
@@ -1082,7 +1082,7 @@ Staff guide to setting up and running investigation mysteries. Requires Builder 
 
 # Overview
 
-Players use |w+investigate/scan|n and |w+investigate|n only after exposure — they never see raw clue lists. Staff use |w+mystery/*|n and |w+clue/*|n.
+Players use |w+investigate/scan|n and |w+investigate|n only after exposure -- they never see raw clue lists. Staff use |w+mystery/*|n and |w+clue/*|n.
 
 # Mystery shell
 
@@ -1091,7 +1091,7 @@ Players use |w+investigate/scan|n and |w+investigate|n only after exposure — t
 
 |w+mystery/public <id>=<player-facing description>|n
 |w+mystery/start <id>=<where to start looking>|n
-|w+mystery/scandv <id>=<dv>|n — Perception scan difficulty for this mystery (default 13).
+|w+mystery/scandv <id>=<dv>|n -- Perception scan difficulty for this mystery (default 13).
 
 |w+mystery/obstacle <mystery id>=<type>,<skill>,<dv>[,desc]|n
   Add an obstacle. Players use |w+investigate/overcome <id>|n.
@@ -1099,34 +1099,44 @@ Players use |w+investigate/scan|n and |w+investigate|n only after exposure — t
 |w+mystery/link <mystery id>=<mission id>|n
 |w+mystery/unlink <mystery id>|n
 
+# Character Focus (staff)
+
+|w+focus <character>|n or |w+focus/show <character>|n -- Current / max Focus.
+
+|w+focus/refresh <character>|n -- Set Focus to maximum (fixes bad state or post-event top-up).
+
+|w+focus/set <character>=<n>|n -- Set Focus to a number (clamped 0..max).
+
+|w+focus/resetrest <character>|n -- Clear the daily |c+rest|n lock so they can concentrate again today.
+
 # Clues and placement
 
 |w+clue/create <mystery id>=<type>,<skills>,<dv>,<obfuscation>[,staff description]|n
 
 |w+clue/add <target>=<clue id>|n or |w<room>=<id>/<element>|n
 
-|w+clue/playerhint <clue id>=<text>|n — Shown to players when the clue is exposed (after scan).
+|w+clue/playerhint <clue id>=<text>|n -- Shown to players when the clue is exposed (after scan).
 
-|w+clue/priority <clue id>=<n>|n — Lower = appears earlier on scan (ordering).
+|w+clue/priority <clue id>=<n>|n -- Lower = appears earlier on scan (ordering).
 
-|w+clue/gate <clue id>=<obstacle id>|n — Must overcome that obstacle before the clue can be exposed or investigated. |w0|n clears.
+|w+clue/gate <clue id>=<obstacle id>|n -- Must overcome that obstacle before the clue can be exposed or investigated. |w0|n clears.
 
-|w+clue/requires <dependent id>=<prerequisite id>|n — Prereq must be |wsuccessfully deciphered|n before the dependent can appear on scan.
+|w+clue/requires <dependent id>=<prerequisite id>|n -- Prereq must be |wsuccessfully deciphered|n before the dependent can appear on scan.
 
-|w+clue/link <id>=<id>|n — Informational link only.
+|w+clue/link <id>=<id>|n -- Informational link only.
 
-|w+clue/list [mystery]|n or |w+clues|n — Full staff listing.
+|w+clue/list [mystery]|n or |w+clues|n -- Full staff listing.
 
-|w+clue/remove|n / |w+clue/destroy|n — Remove placement or delete clue.
+|w+clue/remove|n / |w+clue/destroy|n -- Remove placement or delete clue.
 
 # Workflow
 
-1. +mystery/create … then +mystery/public, +mystery/start, +mystery/scandv
-2. +mystery/obstacle … if needed; +clue/gate to tie clues to obstacles
-3. +clue/create … for each clue; +clue/playerhint and +clue/priority
-4. +clue/add … place on grid (elements/exits/objects)
-5. +clue/requires … for chains
-6. +mystery/link … optional mission
+1. +mystery/create ... then +mystery/public, +mystery/start, +mystery/scandv
+2. +mystery/obstacle ... if needed; +clue/gate to tie clues to obstacles
+3. +clue/create ... for each clue; +clue/playerhint and +clue/priority
+4. +clue/add ... place on grid (elements/exits/objects)
+5. +clue/requires ... for chains
+6. +mystery/link ... optional mission
 7. +clue/list to verify
 
 See also: +help investigation
@@ -1187,7 +1197,7 @@ Elflines Online (ELO) is the massively multiplayer online game within the Cyberp
 
 # Lore
 
-The forests of the Elflands were once protected by a great hero. With the hero gone, the forces of darkness spread miasma and drove the elves behind settlement walls. A new generation of heroes rises to fight back. Elflines (guilds) are your family in the game—more than the parents who ignored you or the sibling who stole your Kibble.
+The forests of the Elflands were once protected by a great hero. With the hero gone, the forces of darkness spread miasma and drove the elves behind settlement walls. A new generation of heroes rises to fight back. Elflines (guilds) are your family in the game--more than the parents who ignored you or the sibling who stole your Kibble.
 
 # Staff
 
@@ -1200,7 +1210,7 @@ Builders use |w+elosetup|n to create the ELO Lobby room. Then add exits to build
         "aliases": ["rent", "apartments", "housing", "rent workflow"],
         "category": "Economy",
         "text": """
-The apartment rental system lets you rent or purchase housing in Night City. Costs are in Eurodollars (eb). Rent is a |wthreshold check|n—you must maintain enough eb to keep your apartment, but no eb is deducted monthly. You can also |wpurchase|n an apartment outright to avoid monthly checks.
+The apartment rental system lets you rent or purchase housing in Night City. Costs are in Eurodollars (eb). Rent is a |wthreshold check|n--you must maintain enough eb to keep your apartment, but no eb is deducted monthly. You can also |wpurchase|n an apartment outright to avoid monthly checks.
 
 |yFinding Apartments|n
 
@@ -1212,9 +1222,9 @@ The apartment rental system lets you rent or purchase housing in Night City. Cos
 |w+rent <type>|n
   Rent at your current location. You must specify an apartment type (e.g. |w+rent Studio Apartment|n or |w+rent One-Bedroom Apartment|n). Use |w+rent/status|n in the lobby or on a floor to see available types.
   Use this in:
-  - A building |wlobby|n — assigns you an apartment on a random floor
-  - On a specific |wfloor|n — assigns you an apartment on that floor
-  - Inside a |wvacant apartment|n — take over the existing unit
+  - A building |wlobby|n -- assigns you an apartment on a random floor
+  - On a specific |wfloor|n -- assigns you an apartment on that floor
+  - Inside a |wvacant apartment|n -- take over the existing unit
 
 You need enough Eurodollars to meet the rent threshold. Check your balance with |wbalance|n.
 
@@ -1309,9 +1319,9 @@ Apartments are created when players use |w+rent <type>|n. Staff configure the bu
 
 1. Create the floor room (e.g. with |wdig|n) and add exits between lobby and floor.
 2. Stand in the floor room.
-3. |w+manage/addroom|n — Adds this room to the building zone.
-4. |w+manage/floor <number> [max_units]|n — Set floor number and max units per floor (default 6).
-   Example: +manage/floor 4 6 — Floor 4, up to 6 apartments (401–406).
+3. |w+manage/addroom|n -- Adds this room to the building zone.
+4. |w+manage/floor <number> [max_units]|n -- Set floor number and max units per floor (default 6).
+   Example: +manage/floor 4 6 -- Floor 4, up to 6 apartments (401-406).
 
 The floor number becomes the prefix for apartment numbers. Floor 4 with unit 05 = apartment 405.
 
@@ -1319,17 +1329,17 @@ The floor number becomes the prefix for apartment numbers. Floor 4 with unit 05 
 
 |w+manage/setcost <room>=<rent_modifier>,<purchase_modifier>|n
   Adjust costs for a specific apartment. Modifiers are added to base costs.
-  Example: +manage/setcost #12345=500,5000 — Adds 500eb to rent, 5000eb to purchase.
+  Example: +manage/setcost #12345=500,5000 -- Adds 500eb to rent, 5000eb to purchase.
 
 # Creating Apartments (Staff)
 
 |w+manage/createapt [type] [=rent,purchase,rooms]|n
   Create an apartment on the current floor. Use in lobby (random floor) or on a floor.
-  |w+manage/createapt|n — Create using first available type
-  |w+manage/createapt "Luxury Penthouse"|n — Create with default costs
-  |w+manage/createapt "Luxury Penthouse"=20000,200000|n — Override rent and purchase
-  |w+manage/createapt "Luxury Penthouse"=20000,200000,6|n — Override all (6 rooms)
-  |w+manage/createapt Custom=5000,75000,4|n — Bespoke: 4 rooms, 5k rent, 75k purchase
+  |w+manage/createapt|n -- Create using first available type
+  |w+manage/createapt "Luxury Penthouse"|n -- Create with default costs
+  |w+manage/createapt "Luxury Penthouse"=20000,200000|n -- Override rent and purchase
+  |w+manage/createapt "Luxury Penthouse"=20000,200000,6|n -- Override all (6 rooms)
+  |w+manage/createapt Custom=5000,75000,4|n -- Bespoke: 4 rooms, 5k rent, 75k purchase
 
 Custom apartments use generic room names (Room 2, Room 3, ...). Add "Custom" to available types with +manage/addtype Custom first.
 
@@ -1368,7 +1378,7 @@ Apartment types generate rooms automatically:
 - Upscale Conapt: Main Room, Bedroom 1, Bedroom 2, Side Room
 - Luxury Penthouse: Main Room, Bedroom 1, Bedroom 2, Side Room, Patio
 - Beaverville House: Main Room, Bedroom 1, Bedroom 2, Side Room, Yard
-- McMansion: Main Room, Bedroom 1–3, Side Room, Yard
+- McMansion: Main Room, Bedroom 1-3, Side Room, Yard
 
 Exits use aliases (B1, B2, SR, O, etc.) that players cannot change.
 

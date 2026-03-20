@@ -528,7 +528,7 @@ def format_deck_sheet(character, deck_name_filter: Optional[str] = None, width: 
         decks = [g for g in decks if g.name == match.name]
 
     display_name = getattr(character.db, "full_name", None) or character.key
-    lines = [sheet_header(f"Cyberdecks — {display_name}", width=width)]
+    lines = [sheet_header(f"Cyberdecks -- {display_name}", width=width)]
 
     if not decks:
         lines.append("|wYou are not carrying a cyberdeck.|n")
@@ -551,7 +551,7 @@ def format_deck_sheet(character, deck_name_filter: Optional[str] = None, width: 
 
         lines.append(sheet_section(key[:44], width=width))
         if total is None:
-            lines.append("|rNo template in equipment_data — slot total unknown.|n\n")
+            lines.append("|rNo template in equipment_data -- slot total unknown.|n\n")
         else:
             lines.append(
                 f"|yTotal slots:|n |w{total}|n  |yIn use:|n |w{used}|n  |yFree:|n |w{free}|n  "
@@ -570,7 +570,7 @@ def format_deck_sheet(character, deck_name_filter: Optional[str] = None, width: 
                 pdata = program_data_by_name(nm)
                 bdata = black_ice_data_by_name(nm) if not pdata else None
                 typ = (pdata.get("type") if pdata else None) or "Black ICE"
-                rez = pdata.get("rez") if pdata else (bdata.get("rez") if bdata else "—")
+                rez = pdata.get("rez") if pdata else (bdata.get("rez") if bdata else "--")
                 lines.append(
                     f"|w{inv_visible_cell(nm, pn)}|n |w{inv_visible_cell(str(typ), pt)}|n "
                     f"|w{inv_visible_cell(str(rez), pz)}|n"

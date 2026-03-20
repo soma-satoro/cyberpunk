@@ -28,7 +28,7 @@ Optionally set stats on the custom item (staff only):
 +voucher/setstat mission reward voucher/1=description=Encrypted data chip from a corpo server
 ```
 
-Note the voucher's dbref (e.g. `#12345`) — you'll need it for the seed. Use `+vinfo mission reward voucher` or `look mission reward voucher` to see it, or check the object list.
+Note the voucher's dbref (e.g. `#12345`) -- you'll need it for the seed. Use `+vinfo mission reward voucher` or `look mission reward voucher` to see it, or check the object list.
 
 ---
 
@@ -36,7 +36,7 @@ Note the voucher's dbref (e.g. `#12345`) — you'll need it for the seed. Use `+
 
 For an item from the equipment database, staff must first have it in inventory (purchase from chargen or a vendor), then add it to a voucher:
 
-**Option A — Staff has the item in inventory:** If staff already owns "Light Armorjack" (armor) or "Medtech Kit" (gear) from a prior purchase:
+**Option A -- Staff has the item in inventory:** If staff already owns "Light Armorjack" (armor) or "Medtech Kit" (gear) from a prior purchase:
 
 ```
 +voucher/create Item Reward
@@ -44,7 +44,7 @@ For an item from the equipment database, staff must first have it in inventory (
 ```
 (Use the exact name as shown in your inventory.)
 
-**Option B — Staff creates custom armor (Light Armorjack):** Light Armorjack is armor, not gear:
+**Option B -- Staff creates custom armor (Light Armorjack):** Light Armorjack is armor, not gear:
 
 ```
 +voucher/create Item Reward
@@ -55,7 +55,7 @@ For an item from the equipment database, staff must first have it in inventory (
 +voucher/setstat item reward/1=locations=Body
 ```
 
-**Option C — Staff creates custom gear (e.g. Medtech Kit):** For gear, use only name, description, weight, value, category:
+**Option C -- Staff creates custom gear (e.g. Medtech Kit):** For gear, use only name, description, weight, value, category:
 
 ```
 +voucher/create Item Reward
@@ -74,7 +74,7 @@ Note this voucher's dbref (e.g. `#12346`).
 Mission completion moves reward objects to the mission lead. The vouchers must exist and have a valid location. Either:
 
 - **Drop them in the room** where you'll run the test, or  
-- **Keep them in your inventory** — they will be moved to the lead on completion.
+- **Keep them in your inventory** -- they will be moved to the lead on completion.
 
 For testing, keeping them in staff inventory is fine. Ensure they are **unlocked** so the completion logic can move them.
 
@@ -126,7 +126,7 @@ mission/grab 1=Data Heist/Pick up the data and armor from the warehouse/2025-04-
 
 Replace `1` with the seed ID. This creates a mission with:
 - Player payout: 2500 eb (split among survivors)
-- Fixer cut on completion: 500 eb (3000 − 2500)
+- Fixer cut on completion: 500 eb (3000 - 2500)
 - Rep: 12 general, 5 Arasaka
 
 3. The mission is now visible on the general board. No further action is needed.
@@ -176,8 +176,8 @@ mission/add 2=CompanionName
 
 ## Step 8: Verify Payouts
 
-- **Fixer:** 500 eb (3000 − 2500)  
-- **Surviving players:** 2500 ÷ number of survivors (e.g. 1250 each for 2 survivors)  
+- **Fixer:** 500 eb (3000 - 2500)  
+- **Surviving players:** 2500 / number of survivors (e.g. 1250 each for 2 survivors)  
 - **General rep:** 12 to each survivor  
 - **Arasaka rep:** 5 to each survivor  
 - **Lead receives:** Both vouchers (Corpo Data Chip + Light Armorjack) moved to their inventory  
@@ -217,5 +217,5 @@ equipdb armor
 equipdb gear
 ```
 
-- **Armor** (use `armor/Name` for custom): Light Armorjack, Medium Armorjack, Heavy Armorjack — fields: name, description, weight, value, sp, ev, locations
-- **Gear** (use `gear/Name` for custom): Medtech Kit, Stim, Antidote, Trauma Plate — fields: name, description, weight, value, category
+- **Armor** (use `armor/Name` for custom): Light Armorjack, Medium Armorjack, Heavy Armorjack -- fields: name, description, weight, value, sp, ev, locations
+- **Gear** (use `gear/Name` for custom): Medtech Kit, Stim, Antidote, Trauma Plate -- fields: name, description, weight, value, category

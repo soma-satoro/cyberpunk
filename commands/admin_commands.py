@@ -898,7 +898,7 @@ class CmdSetStoryteller(MuxCommand):
                 continue
             char = account.db._playable_characters[0] if account.db._playable_characters else None
             disp = char.key.strip() if char else account.key.strip()
-            rows.append(f"  |w{account.key}|n — {disp}")
+            rows.append(f"  |w{account.key}|n -- {disp}")
 
         if not rows:
             self.caller.msg("No accounts have Storyteller permission.")

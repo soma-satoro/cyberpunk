@@ -14,7 +14,7 @@ Vouchers can be picked up and dropped just like regular items using the standard
 
 - A **voucher** is an Evennia Object (typeclass: `typeclasses.vouchers.Voucher`) that holds a list of IC items
 - Each item on a voucher has: `name`, `description`, `quantity`, `ic_location`, and `cloneable` (boolean)
-- Vouchers are physical objects—they have a location (your inventory, a room, another character)
+- Vouchers are physical objects--they have a location (your inventory, a room, another character)
 - You can refer to a voucher by: its **name** (if unique), its **dbref** (#12345), or its **alias** (if set)
 
 ### Item Structure
@@ -56,7 +56,7 @@ Each item stored on a voucher is a dictionary:
 |---------|-------|-------------|
 | `+voucher/info` or `+vinfo` | `+voucher/info <voucher>` | Display voucher contents (sheet format) |
 | `+voucher/info` | `+voucher/info <voucher>/<item#>` | Detailed info for a specific item |
-| `+sheet` | `+sheet <voucher>` | Same as +voucher/info—shows voucher contents |
+| `+sheet` | `+sheet <voucher>` | Same as +voucher/info--shows voucher contents |
 | `look` | `look <voucher>` | Look at a voucher to see its contents inline |
 
 ### Alias and Naming
@@ -77,7 +77,7 @@ Each item stored on a voucher is a dictionary:
 
 | Command | Usage | Description |
 |---------|-------|-------------|
-| `+voucher/lock` | `+voucher/lock <voucher>` | Lock voucher—only you can pick it up or modify it |
+| `+voucher/lock` | `+voucher/lock <voucher>` | Lock voucher--only you can pick it up or modify it |
 | `+voucher/unlock` | `+voucher/unlock <voucher>` | Unlock voucher |
 
 **Important:** Lock vouchers before leaving them unattended. A locked voucher cannot be picked up by anyone except the person who locked it.
@@ -139,7 +139,7 @@ When you `look` at a voucher, its contents are displayed below the default descr
 
 | File | Purpose |
 |------|---------|
-| `typeclasses/vouchers.py` | Voucher typeclass—data model, `return_appearance`, `at_pre_get`, `format_sheet` |
+| `typeclasses/vouchers.py` | Voucher typeclass--data model, `return_appearance`, `at_pre_get`, `format_sheet` |
 | `commands/voucher_commands.py` | All +voucher/*, +conceal, +unconceal, +owner commands |
 | `commands/default_cmdsets.py` | Registers CmdVoucher, CmdConceal, CmdOwner in CharacterCmdSet |
 | `commands/character_commands.py` | CmdSheet checks for vouchers and displays `format_sheet()` |
@@ -212,7 +212,7 @@ give new voucher to Bob
 2. **Locking** stores `locked_by` as the character's dbref. Only that character can pick up a locked voucher.
 3. **+voucher/nuke** only works on empty vouchers. Remove or move all items first.
 4. **Cloneable** items must be marked when adding: `+voucher/add voucher=Program:1:cloneable`
-5. **IC owner** is separate from lock ownership—use `+voucher/chown` when transferring items IC.
+5. **IC owner** is separate from lock ownership--use `+voucher/chown` when transferring items IC.
 
 ---
 

@@ -72,7 +72,7 @@ ELO_TITLES_BY_STAT = {
 ELO_ARMORY = [
     # Armor
     ("leather_armor", "Leather Armor", 20, "Leathers"),
-    ("studded_leather", "Studded Leather Armor", 50, "Kevlar®"),
+    ("studded_leather", "Studded Leather Armor", 50, "Kevlar(R)"),
     ("chainmail", "Chainmail Armor", 100, "Medium Armorjack"),
     ("full_plate", "Full Plate Armor", 500, "Flak"),
     # Melee
