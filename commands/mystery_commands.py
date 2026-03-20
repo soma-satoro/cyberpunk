@@ -177,6 +177,23 @@ def _player_hint_for_clue(clue, loc, room):
     return _default_player_hint(loc, room)
 
 
+def _format_clue_location_global(loc):
+    """Short label for a clue placement (not necessarily the player's current room)."""
+    obj = loc.location_object
+    if not obj:
+        return "Unknown"
+    base = obj.key
+    if getattr(obj, "destination", None):
+        return f"Exit: {base}"
+    if loc.element_key:
+        return f"{base} ({loc.element_key})"
+    return base
+
+
+def _clue_deciphered(char, clue):
+    return ClueAttempt.objects.filter(clue=clue, character=char, success=True).exists()
+
+
 def _max_scan_dv(clues):
     if not clues:
         return 13
@@ -448,6 +465,9 @@ class CmdInvestigate(MuxCommand):
 
         focus_obj = _get_or_create_focus(char)
 
+        if "leads" in self.switches:
+            self._do_leads(char)
+            return
         if "hint" in self.switches:
             self._do_hint(focus_obj)
             return
@@ -462,6 +482,7 @@ class CmdInvestigate(MuxCommand):
             self.caller.msg(
                 "|c+investigate/scan|n [here|object|exit|element] -- look for leads.\n"
                 "|c+investigate <id>|n or name -- evidence check on a lead you noticed.\n"
+                "|c+investigate/leads|n -- uncovered leads, locations, and chains.\n"
                 "|c+investigate/hint|n |c+investigate/overcome <id>|n"
             )
             return
@@ -478,6 +499,55 @@ class CmdInvestigate(MuxCommand):
             self.caller.msg(res["message"])
             return
         _execute_evidence_check(self.caller, char, focus_obj, res["clue"])
+
+    def _do_leads(self, char):
+        exposures = (
+            ClueExposure.objects.filter(character=char)
+            .select_related("clue", "clue__mystery")
+            .order_by("clue__mystery_id", "clue_id")
+        )
+        if not exposures.exists():
+            self.caller.msg(
+                "You have not uncovered any leads yet. Use |c+investigate/scan|n in play."
+            )
+            return
+        lines = [header("Your uncovered leads"), ""]
+        for exp in exposures:
+            clue = exp.clue
+            m = clue.mystery
+            if m.is_solved:
+                status = "|gMystery solved|n"
+            elif _clue_deciphered(char, clue):
+                status = "|gLead deciphered|n"
+            else:
+                status = "|yNot deciphered yet|n"
+            locs = clue.locations.all()
+            if locs:
+                loc_str = ", ".join(_format_clue_location_global(loc) for loc in locs)
+            else:
+                loc_str = "(no fixed placement -- ask staff)"
+            lines.append(f"|y#{clue.id}|n |w{m.name}|n -- {status}")
+            lines.append(f"  Where: {loc_str}")
+            reqs = clue.required_clues.all()
+            if reqs:
+                parts = []
+                for r in reqs:
+                    ok = _clue_deciphered(char, r)
+                    tag = "|g(deciphered)|n" if ok else "|r(pending)|n"
+                    parts.append(f"#{r.id} {tag}")
+                lines.append(f"  Needs first: {', '.join(parts)}")
+            dependents = clue.unlocks.all()
+            if dependents:
+                lines.append(
+                    "  Other leads that need this one: "
+                    + ", ".join(f"#{d.id}" for d in dependents)
+                )
+            hint = (clue.player_hint or "").strip()
+            if hint:
+                lines.append(f"  Thread: {hint}")
+            lines.append("")
+        lines.append(footer())
+        self.caller.msg("\n".join(lines))
 
     def _do_scan(self, focus_obj):
         char = _get_character_for_caller(self.caller)
@@ -940,6 +1010,8 @@ class CmdClue(MuxCommand):
       +clue/playerhint <id>=...
       +clue/gate <clue id>=<obstacle id>
       +clue/priority <id>=<n>
+      +clue/resetattempts <character>[=<clue id>]  (add /all for full history)
+      +clue/resetobstacle <character>[=<obstacle id>]  (add /all for full history)
     """
 
     key = "+clue"
@@ -968,6 +1040,10 @@ class CmdClue(MuxCommand):
             return self._gate()
         if "priority" in self.switches:
             return self._priority()
+        if "resetattempts" in self.switches:
+            return self._reset_attempts()
+        if "resetobstacle" in self.switches:
+            return self._reset_obstacle()
 
         self.caller.msg(
             "Usage: |c+clue/create|n, |c+clue/add|n, |c+clue/list|n, |c+clue/requires|n, ..."
@@ -1234,6 +1310,109 @@ class CmdClue(MuxCommand):
         c.discovery_priority = max(0, pr)
         c.save()
         self.caller.msg(f"Discovery priority set to {c.discovery_priority}.")
+
+    def _reset_attempts(self):
+        """Clear ClueAttempt rows so a character can evidence-check again (today by default)."""
+        today = date.today()
+        mode_all = "all" in self.switches
+        if not self.args:
+            self.caller.msg(
+                "Usage: |c+clue/resetattempts <character>[=<clue id>]|n clears |ytoday's|n evidence check "
+                "for that lead (or all leads today if no clue id). "
+                "|c+clue/resetattempts/all <character>[=<clue id>]|n removes |rall|n stored attempts "
+                "(can break chains that depend on deciphered leads)."
+            )
+            return
+        if "=" in self.args:
+            char_name = self.lhs.strip()
+            try:
+                clue_id = int(self.rhs.strip())
+            except ValueError:
+                self.caller.msg("Clue id must be a number.")
+                return
+        else:
+            char_name = self.args.strip()
+            clue_id = None
+        if not char_name:
+            self.caller.msg("Specify a character.")
+            return
+        char, err = _staff_resolve_character(char_name)
+        if err:
+            self.caller.msg(err)
+            return
+        if mode_all:
+            if clue_id is not None:
+                n, _ = ClueAttempt.objects.filter(character=char, clue_id=clue_id).delete()
+                self.caller.msg(
+                    f"Removed {n} evidence-record(s) for {char.key} on clue #{clue_id}. "
+                    "(Mystery complexity is unchanged.)"
+                )
+            else:
+                n, _ = ClueAttempt.objects.filter(character=char).delete()
+                self.caller.msg(
+                    f"Removed {n} evidence-record(s) for {char.key} (all clues). "
+                    "|yPrerequisite chains may be broken until they decipher again.|n"
+                )
+            return
+        if clue_id is not None:
+            n, _ = ClueAttempt.objects.filter(
+                character=char, clue_id=clue_id, attempted_date=today
+            ).delete()
+        else:
+            n, _ = ClueAttempt.objects.filter(character=char, attempted_date=today).delete()
+        self.caller.msg(
+            f"Cleared today's evidence attempt(s) for {char.key} ({n} row(s))."
+        )
+
+    def _reset_obstacle(self):
+        """Clear ObstacleAttempt rows (overcome obstacle daily lock)."""
+        today = date.today()
+        mode_all = "all" in self.switches
+        if not self.args:
+            self.caller.msg(
+                "Usage: |c+clue/resetobstacle <character>=<obstacle id>|n clears today's overcome try. "
+                "|c+clue/resetobstacle <character>|n clears today's tries on all obstacles. "
+                "|c+clue/resetobstacle/all ...|n wipes full history."
+            )
+            return
+        if "=" in self.args:
+            char_name = self.lhs.strip()
+            try:
+                obs_id = int(self.rhs.strip())
+            except ValueError:
+                self.caller.msg("Obstacle id must be a number.")
+                return
+        else:
+            char_name = self.args.strip()
+            obs_id = None
+        if not char_name:
+            self.caller.msg("Specify a character.")
+            return
+        char, err = _staff_resolve_character(char_name)
+        if err:
+            self.caller.msg(err)
+            return
+        if mode_all:
+            if obs_id is not None:
+                n, _ = ObstacleAttempt.objects.filter(character=char, obstacle_id=obs_id).delete()
+                self.caller.msg(
+                    f"Removed {n} obstacle-record(s) for {char.key} on obstacle #{obs_id}."
+                )
+            else:
+                n, _ = ObstacleAttempt.objects.filter(character=char).delete()
+                self.caller.msg(
+                    f"Removed {n} obstacle-record(s) for {char.key} (all obstacles)."
+                )
+            return
+        if obs_id is not None:
+            n, _ = ObstacleAttempt.objects.filter(
+                character=char, obstacle_id=obs_id, attempted_date=today
+            ).delete()
+        else:
+            n, _ = ObstacleAttempt.objects.filter(character=char, attempted_date=today).delete()
+        self.caller.msg(
+            f"Cleared today's obstacle attempt(s) for {char.key} ({n} row(s))."
+        )
 
 
 class CmdCluesStaff(MuxCommand):

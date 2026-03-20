@@ -1056,6 +1056,9 @@ You do |wnot|n see staff clues until you |wnotice|n them.
 |w+investigate <id>|n or |w+investigate <spot>|n
   |wEvidence check|n on a lead you |walready noticed|n (after scan). Uses the clue's skill vs its DV.
 
+|w+investigate/leads|n
+  Notebook: every lead you |wnoticed|n, where it was placed, what you must decipher first, and |wother leads that depend on this one|n.
+
 |w+investigate/hint|n
   DV15 Deduction; 1d6 Focus either way -- GM may give a nudge.
 
@@ -1108,6 +1111,12 @@ Players use |w+investigate/scan|n and |w+investigate|n only after exposure -- th
 |w+focus/set <character>=<n>|n -- Set Focus to a number (clamped 0..max).
 
 |w+focus/resetrest <character>|n -- Clear the daily |c+rest|n lock so they can concentrate again today.
+
+# Daily attempts (staff)
+
+|w+clue/resetattempts <character>[=<clue id>]|n -- Clears |wtoday's|n evidence check so they can roll again. |w+clue/resetattempts/all <character>[=<clue id>]|n wipes full history (dangerous for chains).
+
+|w+clue/resetobstacle <character>[=<obstacle id>]|n -- Same for |w+investigate/overcome|n daily lock. |w/all|n for full history.
 
 # Clues and placement
 
