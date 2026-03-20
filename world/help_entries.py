@@ -1033,43 +1033,43 @@ See also: +help equip
         "aliases": ["mystery", "focus", "evidence check", "investigate"],
         "category": "General",
         "text": """
-The |wInvestigation System|n (from Cyberpunk RED Interface Volume 5: "Did Someone Say Murder?") lets you pursue mysteries through Evidence Checks. You use your Focus pool to decipher clues, reducing a mystery's complexity until it is solved.
+The |wInvestigation System|n (Interface RED Vol 5) uses |wFocus|n to |wscan|n for leads, then |wEvidence Checks|n to decipher them. Mysteries have hidden |wcomplexity|n; successful leads reduce it to zero to solve the case.
 
-# Focus
-
-Your Focus pool is based on your |wIntelligence|n and |wWillpower|n. Check your current Focus with |w+mystery|n.
+# Mysteries (no spoilers)
 
 |w+mystery|n
-  Shows your current Focus and whether you can make Evidence Checks.
+  Open investigations, your Focus, and short blurbs. Not full clue lists.
 
-|wFocus recovers|n every 24 hours (half your max). When Focus is depleted (0 or below), you cannot make Evidence Checks until it recovers.
+|w+mystery/info <id>|n
+  Public summary: description, clue/obstacle counts, where to start looking.
 
-# Evidence Checks
+|w+mystery/focus|n
+  Focus details.
 
-|w+investigate <target>|n
-  Attempt to decipher a clue. Targets can be:
-  |w+investigate here|n      - Investigate your current room
-  |w+investigate <name>|n    - Investigate an NPC or object in the room (e.g. corpse, dataterm)
-  |w+investigate <clue id>|n  - Investigate an abstract clue by its numeric ID
+# Scanning and following up
+
+You do |wnot|n see staff clues until you |wnotice|n them.
+
+|w+investigate/scan [here|<name>]|n
+  |wPerception + INT|n vs the mystery's scan DV. Costs 1d6 Focus. On success, exposes new leads in scope (room, element, object, or exit) that you are allowed to know about. Lower-|wpriority|n clues tend to surface first. Linked clues stay hidden until prerequisites are met and any |wgating obstacle|n is overcome.
+
+|w+investigate <id>|n or |w+investigate <spot>|n
+  |wEvidence check|n on a lead you |walready noticed|n (after scan). Uses the clue's skill vs its DV.
 
 |w+investigate/hint|n
-  Spend Focus for a GM hint. DV15 Deduction check; costs 1d6 Focus either way.
+  DV15 Deduction; 1d6 Focus either way — GM may give a nudge.
 
-# How It Works
+|w+investigate/overcome <obstacle id>|n
+  Push past a mystery obstacle (DV on the obstacle). Focus cost on success or failure.
 
-Each clue has a Difficulty Value (DV). You roll |wSkill + Stat + 1d10|n against the DV. Success = your total exceeds the DV (hitting it exactly is failure).
-  |gSuccess:|n The clue deals damage to the mystery's complexity. When complexity reaches 0, the mystery is solved.
-  |rFailure:|n You lose Focus. Critical Failure (natural 1) may add complications.
+|w+rest|n / |w+rest/concentrate|n
+  Recover extra Focus (see help +rest).
 
-You may attempt each clue |wonce per day|n. Some clues require you to decipher other clues first before they become available.
+# How evidence works
 
-# Tips
+Each lead has a DV. Roll |wSkill + Stat + 1d10|n vs DV (exact hit fails). |gSuccess:|n deals damage to mystery complexity; staff may show |wdescription|n text. |rFailure:|n costs Focus; fumbles may add complications. One attempt per lead per day.
 
-- Coordinate with your crew: multiple investigators can tackle different clues.
-- Use |w+lookup mystery|n for a quick summary.
-- Rest and let Focus recover before pushing further.
-
-See also: +help +mystery, +help +investigate
+See also: +help facilitating mysteries (staff)
         """,
     },
     {
@@ -1082,67 +1082,52 @@ Staff guide to setting up and running investigation mysteries. Requires Builder 
 
 # Overview
 
-A |wmystery|n has a goal and a complexity pool. |wClues|n reduce complexity when successfully deciphered. Clues can be attached to rooms, NPCs, or objects so players investigate them in-world. Mysteries can be linked to mission board missions; when solved, the mission and its job are updated.
+Players use |w+investigate/scan|n and |w+investigate|n only after exposure — they never see raw clue lists. Staff use |w+mystery/*|n and |w+clue/*|n.
 
-# Creating Mysteries and Clues
+# Mystery shell
 
-|w+createmystery <name>=<goal>,<complexity>|n
-  Create a new mystery. Complexity = starting pool (e.g. 50 for average, 100 for challenging).
-  Example: +createmystery The Heist=Find who stole the chip,50
+|w+mystery/create <name>=<goal>,<complexity or tier>|n
+  Create a mystery. Then set player text:
 
-|w+createclue <mystery id>=<type>,<skills>,<dv>,<obfuscation>|n
-  Create a clue. Use CLUE_TYPES: auditing, autopsy, forensics, gossip, interrogation, etc.
-  Example: +createclue 1=forensics,criminology;deduction,13,2
+|w+mystery/public <id>=<player-facing description>|n
+|w+mystery/start <id>=<where to start looking>|n
+|w+mystery/scandv <id>=<dv>|n — Perception scan difficulty for this mystery (default 13).
 
-# Placing Clues
+|w+mystery/obstacle <mystery id>=<type>,<skill>,<dv>[,desc]|n
+  Add an obstacle. Players use |w+investigate/overcome <id>|n.
 
-|w+addclue <target>=<clue id>|n
-  Attach a clue to a room, NPC, or object. Use |where|n for the room you're in.
+|w+mystery/link <mystery id>=<mission id>|n
+|w+mystery/unlink <mystery id>|n
 
-|w+addclue/remove <target>=<clue id>|n
-  Remove clue from that location only.
+# Clues and placement
 
-|w+addclue/list <target>|n
-  List clues attached to a location.
+|w+clue/create <mystery id>=<type>,<skills>,<dv>,<obfuscation>[,staff description]|n
 
-# Managing Clues
+|w+clue/add <target>=<clue id>|n or |w<room>=<id>/<element>|n
 
-|w+clues|n
-  List all clues in the system.
+|w+clue/playerhint <clue id>=<text>|n — Shown to players when the clue is exposed (after scan).
 
-|w+clues <mystery id or name>|n
-  List clues for a specific mystery.
+|w+clue/priority <clue id>=<n>|n — Lower = appears earlier on scan (ordering).
 
-|w+destroyclue <clue id>|n
-  Delete clue from the system entirely (removes from all locations).
+|w+clue/gate <clue id>=<obstacle id>|n — Must overcome that obstacle before the clue can be exposed or investigated. |w0|n clears.
 
-|w+destroyclue <target>=<clue id>|n
-  Remove clue from one location (same as +addclue/remove).
+|w+clue/requires <dependent id>=<prerequisite id>|n — Prereq must be |wsuccessfully deciphered|n before the dependent can appear on scan.
 
-# Clue Linking
+|w+clue/link <id>=<id>|n — Informational link only.
 
-|w+linkclue <clue id>=<clue id>|n
-  Link two clues (informational; shows relationships).
+|w+clue/list [mystery]|n or |w+clues|n — Full staff listing.
 
-|w+linkclue/requires <clue>=<clue id>|n
-  Make one clue required: players must decipher the required clue before attempting this one.
-
-# Mission Integration
-
-|w+mysterylink <mystery id>=<mission id>|n
-  Link a mystery to a mission. When the mystery is solved, the mission gets an update and the linked job gets a comment.
-
-|w+mysterylink/unlink <mystery id>|n
-  Remove the mission link.
+|w+clue/remove|n / |w+clue/destroy|n — Remove placement or delete clue.
 
 # Workflow
 
-1. +createmystery "Name"="Goal",complexity
-2. +createclue <mystery id>=type,skills,dv,obfuscation (for each clue)
-3. +addclue <room/NPC/object>=<clue id> (place clues in the world)
-4. +linkclue/requires <later clue>=<earlier clue> (if clue order matters)
-5. +mysterylink <mystery id>=<mission id> (if tied to a mission)
-6. Use +clues to verify your setup
+1. +mystery/create … then +mystery/public, +mystery/start, +mystery/scandv
+2. +mystery/obstacle … if needed; +clue/gate to tie clues to obstacles
+3. +clue/create … for each clue; +clue/playerhint and +clue/priority
+4. +clue/add … place on grid (elements/exits/objects)
+5. +clue/requires … for chains
+6. +mystery/link … optional mission
+7. +clue/list to verify
 
 See also: +help investigation
         """,

@@ -28,15 +28,8 @@ from .mystery_commands import (
     CmdMystery,
     CmdInvestigate,
     CmdRest,
-    CmdOvercome,
-    CmdAddClue,
-    CmdAddObstacle,
-    CmdClues,
-    CmdCreateMystery,
-    CmdCreateClue,
-    CmdDestroyClue,
-    CmdLinkClue,
-    CmdMysteryLink,
+    CmdClue,
+    CmdCluesStaff,
 )
 from .cyberware_admin_commands import CmdAddCyberware, CmdParentCyberware, CmdUnparentCyberware
 from .staff_commands import CmdRemoveCyberware, CmdUninstallCyberware, CmdSetLifepath, CmdReputation, CmdNotoriety, CmdConfig
@@ -141,7 +134,6 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdMystery())
         self.add(CmdInvestigate())
         self.add(CmdRest())
-        self.add(CmdOvercome())
         self.add(CmdChargen())
         self.add(CmdSellYourSoul())
         self.add(CmdManageBuilding())
@@ -264,14 +256,8 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdUnparentCyberware())
         self.add(CmdRemoveCyberware())
         self.add(CmdUninstallCyberware())
-        self.add(CmdAddClue())
-        self.add(CmdAddObstacle())
-        self.add(CmdClues())
-        self.add(CmdCreateMystery())
-        self.add(CmdCreateClue())
-        self.add(CmdDestroyClue())
-        self.add(CmdLinkClue())
-        self.add(CmdMysteryLink())
+        self.add(CmdClue())
+        self.add(CmdCluesStaff())
         self.add(CmdSetLifepath())
         self.add(CmdReputation())
         self.add(CmdNotoriety())

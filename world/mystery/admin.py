@@ -9,6 +9,7 @@ from .models import (
     ClueAttempt,
     ClueLocation,
     ObstacleAttempt,
+    ClueExposure,
 )
 
 
@@ -36,14 +37,22 @@ class MysteryAdmin(admin.ModelAdmin):
 
 @admin.register(MysteryClue)
 class MysteryClueAdmin(admin.ModelAdmin):
-    list_display = ("mystery", "clue_type", "dv", "obfuscation", "damage_dice")
+    list_display = (
+        "mystery",
+        "clue_type",
+        "dv",
+        "discovery_priority",
+        "gating_obstacle",
+        "obfuscation",
+        "damage_dice",
+    )
     list_filter = ("clue_type", "mystery")
     inlines = [ClueLocationInline]
 
 
 @admin.register(ClueLocation)
 class ClueLocationAdmin(admin.ModelAdmin):
-    list_display = ("clue", "location_object")
+    list_display = ("clue", "location_object", "element_key")
 
 
 @admin.register(CharacterFocus)
@@ -64,3 +73,8 @@ class MysteryObstacleAdmin(admin.ModelAdmin):
 @admin.register(ObstacleAttempt)
 class ObstacleAttemptAdmin(admin.ModelAdmin):
     list_display = ("character", "obstacle", "attempted_date", "success", "focus_lost")
+
+
+@admin.register(ClueExposure)
+class ClueExposureAdmin(admin.ModelAdmin):
+    list_display = ("character", "clue", "created_at")

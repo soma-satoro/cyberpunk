@@ -84,6 +84,20 @@ class Mystery(SharedMemoryModel):
         related_name="created_mysteries",
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    public_description = models.TextField(
+        blank=True,
+        default="",
+        help_text="Player-facing summary for +mystery and +mystery/info.",
+    )
+    starting_location_hint = models.TextField(
+        blank=True,
+        default="",
+        help_text="Where to start looking (relative location).",
+    )
+    scan_dv = models.PositiveSmallIntegerField(
+        default=13,
+        help_text="DV for +investigate/scan where this mystery's clues appear.",
+    )
 
     def __str__(self):
         return self.name
@@ -135,6 +149,23 @@ class MysteryClue(SharedMemoryModel):
         blank=True,
         related_name="linked_to",
     )
+    player_hint = models.TextField(
+        blank=True,
+        default="",
+        help_text="Shown when this clue is exposed to a character (after scan).",
+    )
+    discovery_priority = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Lower = appears earlier on scan results.",
+    )
+    gating_obstacle = models.ForeignKey(
+        "MysteryObstacle",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="gated_clues",
+        help_text="If set, character must overcome this obstacle before the clue can be exposed or investigated.",
+    )
 
     def __str__(self):
         return f"{self.mystery.name}: {self.clue_type}"
@@ -144,7 +175,7 @@ class MysteryClue(SharedMemoryModel):
 
 
 class ClueLocation(SharedMemoryModel):
-    """Links a MysteryClue to a location (room, NPC, object) on the grid."""
+    """Links a MysteryClue to a location (room, NPC, object, exit) on the grid."""
     clue = models.ForeignKey(
         MysteryClue,
         on_delete=models.CASCADE,
@@ -155,12 +186,42 @@ class ClueLocation(SharedMemoryModel):
         on_delete=models.CASCADE,
         related_name="mystery_clues",
     )
+    element_key = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        help_text="Named feature within a room (e.g. storm drain). Empty = whole target (room-wide, object, or exit).",
+    )
 
     class Meta:
-        unique_together = [["clue", "location_object"]]
+        unique_together = [["clue", "location_object", "element_key"]]
 
     def __str__(self):
+        if self.element_key:
+            return f"{self.clue} @ {self.location_object} ({self.element_key})"
         return f"{self.clue} @ {self.location_object}"
+
+
+class ClueExposure(SharedMemoryModel):
+    """A character has 'noticed' this clue (via scan); may then attempt evidence checks."""
+
+    character = models.ForeignKey(
+        ObjectDB,
+        on_delete=models.CASCADE,
+        related_name="clue_exposures",
+    )
+    clue = models.ForeignKey(
+        MysteryClue,
+        on_delete=models.CASCADE,
+        related_name="exposures",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [["character", "clue"]]
+
+    def __str__(self):
+        return f"{self.character} sees clue {self.clue_id}"
 
 
 class MysteryObstacle(SharedMemoryModel):

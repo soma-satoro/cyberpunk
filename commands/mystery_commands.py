@@ -1,12 +1,14 @@
 """
-Did Someone Say Murder? - Investigation System commands (Interface RED Vol 5)
+Did Someone Say Murder? - Investigation system (Interface RED Vol 5)
+
+Player: +investigate/* switches. Staff: +mystery/* and +clue/*.
 """
 
 import random
 from datetime import date
+from django.db.models import Q
 from evennia.commands.default.muxcommand import MuxCommand
-from evennia import Command
-from world.utils.formatting import header, footer, divider, section_header
+from world.utils.formatting import header, footer, section_header
 from world.mystery.models import (
     Mystery,
     MysteryClue,
@@ -15,18 +17,17 @@ from world.mystery.models import (
     ClueAttempt,
     ClueLocation,
     ObstacleAttempt,
+    ClueExposure,
 )
 from world.mystery.mystery_data import (
     get_max_focus,
     CLUE_TYPES,
     COMPLEXITY_TIERS,
-    OBFUSCATION_LEVELS,
 )
 from world.utils.character_utils import is_character_approved
 
 
 def _get_character_for_caller(caller):
-    """Resolve character (ObjectDB) from caller - puppeted character or caller if Account."""
     if hasattr(caller, "is_puppet") and caller.is_puppet:
         return caller
     if hasattr(caller, "character") and caller.character:
@@ -35,7 +36,6 @@ def _get_character_for_caller(caller):
 
 
 def _get_or_create_focus(character):
-    """Get or create CharacterFocus for character. Initializes current_focus to max."""
     focus = CharacterFocus.objects.filter(character_object=character).first()
     if not focus and hasattr(character, "character_sheet") and character.character_sheet:
         focus = CharacterFocus.objects.filter(character_sheet=character.character_sheet).first()
@@ -51,7 +51,6 @@ def _get_or_create_focus(character):
 
 
 def _roll_dice(dice_str):
-    """Parse '3d6' and return sum of rolls."""
     try:
         n, d = dice_str.lower().replace("d", " ").split()
         n, d = int(n), int(d)
@@ -60,100 +59,377 @@ def _roll_dice(dice_str):
         return 0
 
 
-class CmdMystery(MuxCommand):
-    """
-    View investigation system status: Focus and active mysteries.
-
-    Usage:
-      +mystery              - Your Focus and active mysteries
-      +mystery/focus        - Detailed Focus info
-    """
-
-    key = "+mystery"
-    aliases = ["mystery"]
-    lock = "cmd:all()"
-    help_category = "General"
-
-    def func(self):
-        char = _get_character_for_caller(self.caller)
-        if not char:
-            self.caller.msg("You must be playing a character to view mysteries.")
-            return
-        if not is_character_approved(char):
-            self.caller.msg("You must be approved by staff before using the mystery system.")
-            return
-
-        focus_obj = CharacterFocus.objects.filter(character_object=char).first()
-        if not focus_obj:
-            focus_obj = _get_or_create_focus(char)
-
-        int_val = getattr(char.db, "intelligence", 5) or 5
-        will_val = getattr(char.db, "willpower", 5) or 5
-        max_focus = get_max_focus(int_val, will_val)
-        current = focus_obj.current_focus
-
-        out = [
-            header("Investigation System"),
-            f"  |gFocus:|n {current}/{max_focus}",
-        ]
-        if current <= 0:
-            out.append("  |rYou cannot make Evidence Checks until Focus recovers.|n")
-        out.append("")
-        out.append("  Focus recovers INT + WILL every 24 hours. Use +rest/concentrate for +5 bonus.")
-        out.append(footer())
-        self.caller.msg("\n".join(out))
+def _normalize_element_key(s):
+    if not s:
+        return ""
+    return " ".join(s.strip().lower().split())
 
 
-def _resolve_clue_from_arg(caller, char, arg):
-    """
-    Resolve clue from arg: either a location (here, room, NPC, object) or clue id/name.
-    Returns (clue, None) or (None, error_msg).
-    """
-    arg = arg.strip().lower()
-    # First try location-based: "here" or object/NPC in room
-    if char and hasattr(char, "location") and char.location:
-        if arg in ("here", "room", "location"):
-            target = char.location
-        else:
-            # Search in room and its contents (NPCs, objects)
-            target = char.search(arg, location=char.location)
-        if target:
-            locs = ClueLocation.objects.filter(location_object=target)
-            if locs.exists():
-                # Use first clue if multiple
-                clue = locs.first().clue
-                return clue, None
-            if arg in ("here", "room", "location"):
-                return None, "Nothing to investigate here."
-            return None, f"Nothing to investigate on {target.key}."
+def _parse_clue_and_element(rhs):
+    rhs = (rhs or "").strip()
+    if "/" in rhs:
+        left, right = rhs.split("/", 1)
+        clue_id = int(left.strip())
+        element_key = _normalize_element_key(right)
+    else:
+        clue_id = int(rhs)
+        element_key = ""
+    return clue_id, element_key
 
-    # Fall back to clue id or name
+
+def _exit_search(room, arg):
+    if not room or not arg:
+        return None
+    want = _normalize_element_key(arg)
+    for ex in room.exits:
+        if ex.key and _normalize_element_key(ex.key) == want:
+            return ex
+        if hasattr(ex, "aliases") and ex.aliases:
+            for al in ex.aliases.all():
+                alias_text = getattr(al, "alias", None) or str(al)
+                if _normalize_element_key(str(alias_text)) == want:
+                    return ex
+    return None
+
+
+def _search_in_room(caller, char, arg):
+    if not char.location:
+        return None
+    arg = arg.strip()
+    hit = _exit_search(char.location, arg)
+    if hit:
+        return hit
+    quiet = caller.search(arg, location=char.location, quiet=True)
+    if quiet:
+        if isinstance(quiet, list):
+            return quiet[0] if quiet else None
+        return quiet
+    return None
+
+
+def _locations_for_room_scan(room):
+    if not room:
+        return ClueLocation.objects.none()
+    q = Q(location_object=room)
     try:
-        clue_id = int(arg)
-        clue = MysteryClue.objects.get(id=clue_id)
-        return clue, None
-    except (ValueError, MysteryClue.DoesNotExist):
-        clue = MysteryClue.objects.filter(
-            mystery__name__icontains=arg
-        ).first() or MysteryClue.objects.filter(
-            clue_type__iexact=arg
-        ).first()
-        if clue:
-            return clue, None
-    return None, "Clue not found."
+        for obj in room.contents:
+            q |= Q(location_object=obj)
+    except Exception:
+        pass
+    try:
+        for ex in room.exits:
+            q |= Q(location_object=ex)
+    except Exception:
+        pass
+    return ClueLocation.objects.filter(q)
+
+
+def _clue_prereqs_deciphered(clue, char):
+    for req in clue.required_clues.all():
+        if not ClueAttempt.objects.filter(clue=req, character=char, success=True).exists():
+            return False
+    return True
+
+
+def _obstacle_gate_passed(char, clue):
+    obs = clue.gating_obstacle
+    if not obs:
+        return True
+    return ObstacleAttempt.objects.filter(obstacle=obs, character=char, success=True).exists()
+
+
+def _clue_eligible_for_exposure(char, clue):
+    if clue.mystery.is_solved:
+        return False
+    if not _clue_prereqs_deciphered(clue, char):
+        return False
+    if not _obstacle_gate_passed(char, clue):
+        return False
+    return True
+
+
+def _is_exposed(char, clue):
+    return ClueExposure.objects.filter(character=char, clue=clue).exists()
+
+
+def _expose_clue(char, clue):
+    ClueExposure.objects.get_or_create(character=char, clue=clue)
+
+
+def _loc_label_for_player(loc, room):
+    if loc.element_key:
+        if loc.location_object == room:
+            return loc.element_key
+        return f"{loc.location_object.key} ({loc.element_key})"
+    if loc.location_object == room:
+        return "the general area"
+    return loc.location_object.key
+
+
+def _default_player_hint(loc, room):
+    label = _loc_label_for_player(loc, room)
+    return f"Something draws your attention near {label}."
+
+
+def _player_hint_for_clue(clue, loc, room):
+    if clue.player_hint.strip():
+        return clue.player_hint.strip()
+    return _default_player_hint(loc, room)
+
+
+def _max_scan_dv(clues):
+    if not clues:
+        return 13
+    return max(c.mystery.scan_dv for c in clues)
+
+
+def _unique_clues_from_locs(locs):
+    seen = set()
+    out = []
+    for loc in locs:
+        if loc.clue_id in seen:
+            continue
+        seen.add(loc.clue_id)
+        out.append(loc.clue)
+    return out
+
+
+def _skill_to_stat(skill_name):
+    stat_map = {
+        "intelligence": ["concentration", "conceal_object", "lip_reading", "perception", "tracking",
+                        "accounting", "animal_handling", "bureaucracy", "business", "composition",
+                        "criminology", "cryptography", "deduction", "education", "library_search",
+                        "local_expert", "tactics", "wilderness_survival"],
+        "reflexes": ["drive_land", "pilot_air", "pilot_sea", "riding", "archery", "autofire",
+                    "handgun", "heavy_weapons", "shoulder_arms"],
+        "dexterity": ["athletics", "contortionist", "dance", "endurance", "resist_torture_drugs",
+                     "stealth", "brawling", "evasion", "martial_arts", "melee"],
+        "technique": ["basic_tech", "cybertech", "demolitions", "electronics_security_tech", "first_aid",
+                      "forgery", "paramedic", "medicine", "surgery", "pick_lock", "weaponstech",
+                      "air_vehicle_tech", "land_vehicle_tech", "sea_vehicle_tech"],
+        "cool": ["acting", "play_instrument", "style", "bribery", "conversation", "human_perception",
+                "interrogation", "persuasion", "streetwise", "trading"],
+    }
+    for stat, skills in stat_map.items():
+        if skill_name in skills:
+            return stat
+    return "intelligence"
+
+
+def _collect_scan_locs(caller, char, arg):
+    """Return (room, list of ClueLocation) for scan scope, or (None, error message)."""
+    if not char.location:
+        return None, "You are not in a location."
+    room = char.location
+    arg = (arg or "").strip()
+    if not arg or arg.lower() in ("here", "room", "location"):
+        return room, list(_locations_for_room_scan(room))
+    target = _search_in_room(caller, char, arg)
+    if target:
+        return room, list(ClueLocation.objects.filter(location_object=target))
+    ek = _normalize_element_key(arg)
+    if ek:
+        locs = list(ClueLocation.objects.filter(location_object=room, element_key=ek))
+        if locs:
+            return room, locs
+    return None, "You find nothing to scan there."
+
+
+def _filter_locs_eligible_for_exposure(char, locs):
+    out = []
+    for loc in locs:
+        if _clue_eligible_for_exposure(char, loc.clue):
+            out.append(loc)
+    return out
+
+
+def _filter_locs_exposed(char, locs):
+    return [loc for loc in locs if _is_exposed(char, loc.clue)]
+
+
+def _execute_evidence_check(caller, char, focus_obj, clue):
+    if not _is_exposed(char, clue):
+        caller.msg(
+            "You have not noticed anything actionable there yet. "
+            "Try |c+investigate/scan|n first, or investigate elsewhere."
+        )
+        return
+    if not _obstacle_gate_passed(char, clue):
+        caller.msg(
+            "Something is in the way of this lead — overcome the obstacle before pushing further."
+        )
+        return
+    for req in clue.required_clues.all():
+        if not ClueAttempt.objects.filter(clue=req, character=char, success=True).exists():
+            caller.msg(
+                f"You must decipher the earlier lead first (clue #{req.id})."
+            )
+            return
+
+    today = date.today()
+    existing = ClueAttempt.objects.filter(
+        clue=clue, character=char, attempted_date=today
+    ).first()
+    if existing:
+        caller.msg("You've already attempted this lead today. Try again tomorrow.")
+        return
+
+    skill_name = clue.get_skills_list()[0] if clue.get_skills_list() else "deduction"
+    skill_val = getattr(char.db, skill_name, 0) or 0
+    stat_name = _skill_to_stat(skill_name)
+    stat_val = getattr(char.db, stat_name, 5) or 5
+
+    from world.utils.roll_utils import roll_skill_check, check_success
+    from world.wound_utils import get_action_penalty
+
+    action_penalty = get_action_penalty(char)
+    total, details = roll_skill_check(stat_val, skill_val, modifier=action_penalty)
+    target = clue.dv
+    success = check_success(total, target)
+    fumble = details.get("is_crit_failure", False)
+
+    if success:
+        damage = max(0, _roll_dice(clue.damage_dice) - clue.obfuscation)
+        clue.mystery.current_complexity = max(
+            0, clue.mystery.current_complexity - damage
+        )
+        clue.mystery.save()
+        if clue.mystery.current_complexity <= 0:
+            clue.mystery.solve()
+        ClueAttempt.objects.create(
+            clue=clue,
+            character=char,
+            attempted_date=today,
+            success=True,
+            damage_dealt=damage,
+        )
+        desc = (clue.description or "").strip()
+        if desc:
+            caller.msg(f"|gSuccess!|n {desc}")
+        else:
+            caller.msg("|gSuccess!|n You piece the lead together.")
+        caller.msg(
+            f"Dealt {damage} to the mystery. Remaining complexity: {clue.mystery.current_complexity}."
+        )
+        if clue.mystery.is_solved:
+            caller.msg(f"|yMystery solved!|n {clue.mystery.goal}")
+    else:
+        focus_damage = _roll_dice(clue.focus_damage_dice)
+        focus_obj.current_focus -= focus_damage
+        focus_obj.save()
+        ClueAttempt.objects.create(
+            clue=clue,
+            character=char,
+            attempted_date=today,
+            success=False,
+            focus_lost=focus_damage,
+        )
+        msg = f"|rFailed.|n You lose {focus_damage} Focus. ({focus_obj.current_focus} remaining)"
+        if fumble:
+            fumble_effect = clue.fumble_effect or CLUE_TYPES.get(clue.clue_type, {}).get("fumble_effect")
+            if fumble_effect:
+                msg += f" |rFumble!|n {fumble_effect}"
+            else:
+                msg += " |rFumble!|n Additional complications may apply."
+        caller.msg(msg)
+
+
+def _resolve_evidence_target(caller, char, arg_orig):
+    """Resolve a single clue for evidence check (must be exposed)."""
+    arg_lower = arg_orig.strip().lower()
+    if arg_orig.strip().isdigit():
+        try:
+            clue = MysteryClue.objects.get(id=int(arg_orig.strip()))
+        except MysteryClue.DoesNotExist:
+            return {"type": "error", "message": "Lead not found."}
+        if not _is_exposed(char, clue):
+            return {"type": "error", "message": "You have not noticed that lead yet. Use |c+investigate/scan|n."}
+        return {"type": "single", "clue": clue}
+
+    if not char.location:
+        return {"type": "error", "message": "You are not in a location."}
+
+    room = char.location
+
+    if arg_lower in ("here", "room", "location"):
+        locs = _filter_locs_exposed(
+            char, _filter_clue_locations_for_chain_only(list(_locations_for_room_scan(room)), char)
+        )
+        if not locs:
+            return {"type": "error", "message": "Nothing you can act on here yet. Try |c+investigate/scan|n."}
+        dedup = []
+        seen = set()
+        for loc in locs:
+            if loc.clue_id in seen:
+                continue
+            seen.add(loc.clue_id)
+            dedup.append(loc)
+        if len(dedup) == 1:
+            return {"type": "single", "clue": dedup[0].clue}
+        lines = ["|yLeads you are following up:|n"]
+        for loc in dedup:
+            c = loc.clue
+            hint = _player_hint_for_clue(c, loc, room)
+            lines.append(f"  {hint} (|c+investigate {c.id}|n)")
+        lines.append("Use |c+investigate <id>|n or name the spot.")
+        return {"type": "list", "message": "\n".join(lines)}
+
+    target = _search_in_room(caller, char, arg_orig)
+    if target:
+        locs = _filter_locs_exposed(
+            char,
+            _filter_clue_locations_for_chain_only(
+                list(ClueLocation.objects.filter(location_object=target)), char
+            ),
+        )
+        if not locs:
+            return {"type": "error", "message": f"Nothing actionable on {target.key} yet. Scan first."}
+        if len(locs) == 1:
+            return {"type": "single", "clue": locs[0].clue}
+        lines = ["|ySeveral exposed leads on that target:|n"]
+        for loc in locs:
+            c = loc.clue
+            lines.append(f"  {_player_hint_for_clue(c, loc, room)} — |c+investigate {c.id}|n")
+        return {"type": "list", "message": "\n".join(lines)}
+
+    ek = _normalize_element_key(arg_orig)
+    if ek:
+        locs = _filter_locs_exposed(
+            char,
+            _filter_clue_locations_for_chain_only(
+                list(ClueLocation.objects.filter(location_object=room, element_key=ek)), char
+            ),
+        )
+        if locs:
+            if len(locs) == 1:
+                return {"type": "single", "clue": locs[0].clue}
+            lines = ["|yWhich lead?|n"]
+            for loc in locs:
+                c = loc.clue
+                lines.append(f"  |c+investigate {c.id}|n — {_player_hint_for_clue(c, loc, room)}")
+            return {"type": "list", "message": "\n".join(lines)}
+
+    return {"type": "error", "message": "No exposed lead matches that. Use |c+investigate/scan|n or check +mystery."}
+
+
+def _filter_clue_locations_for_chain_only(locs, char):
+    """Locations whose clue chain allows attempting (prereqs); exposure handled separately."""
+    out = []
+    for loc in locs:
+        if _clue_prereqs_deciphered(loc.clue, char):
+            out.append(loc)
+    return out
 
 
 class CmdInvestigate(MuxCommand):
     """
-    Make an Evidence Check to gather a clue (investigation system).
+    Investigation: scan to notice leads, then follow up with evidence checks.
 
     Usage:
-      +investigate <target>     - Investigate a room, NPC, or object (e.g. +investigate here, +investigate corpse)
-      +investigate <clue id>    - Investigate a clue by ID (abstract clues)
-      +investigate/hint         - DV15 Deduction for a hint (costs 1d6 Focus)
-
-    Targets: 'here' for current room, or any NPC/object in the room.
-    Staff use +addclue to attach clues to rooms, NPCs, and objects.
+      +investigate/scan [here|<name>]  - Roll Perception to notice leads in scope
+      +investigate <id or spot>        - Evidence check on a lead you already noticed
+      +investigate/hint                - Ask the GM for a nudge (costs Focus)
+      +investigate/overcome <id>       - Push past an obstacle
     """
 
     key = "+investigate"
@@ -162,126 +438,136 @@ class CmdInvestigate(MuxCommand):
     help_category = "General"
 
     def func(self):
-        if "hint" in self.switches:
-            self.do_hint()
-            return
-
-        if not self.args:
-            self.caller.msg("Usage: +investigate <target or clue id>")
-            return
-
         char = _get_character_for_caller(self.caller)
         if not char:
-            self.caller.msg("You must be playing a character to investigate.")
+            self.caller.msg("You must be playing a character.")
             return
         if not is_character_approved(char):
-            self.caller.msg("You must be approved by staff before using the mystery system.")
+            self.caller.msg("You must be approved before using investigations.")
             return
 
         focus_obj = _get_or_create_focus(char)
-        if focus_obj.current_focus <= 0:
-            self.caller.msg("Your Focus is depleted. Rest before making more Evidence Checks.")
+
+        if "hint" in self.switches:
+            self._do_hint(focus_obj)
+            return
+        if "overcome" in self.switches:
+            self._do_overcome(focus_obj)
+            return
+        if "scan" in self.switches:
+            self._do_scan(focus_obj)
             return
 
-        clue, err = _resolve_clue_from_arg(self.caller, char, self.args)
-        if err:
-            self.caller.msg(err)
-            return
-
-        # Check required clues - must have succeeded on all before attempting this one
-        for req in clue.required_clues.all():
-            if not ClueAttempt.objects.filter(clue=req, character=char, success=True).exists():
-                self.caller.msg(
-                    f"You must decipher clue #{req.id} ({req.clue_type}) before this one."
-                )
-                return
-
-        today = date.today()
-        existing = ClueAttempt.objects.filter(
-            clue=clue, character=char, attempted_date=today
-        ).first()
-        if existing:
+        if not self.args:
             self.caller.msg(
-                f"You've already attempted this clue today. Try again tomorrow."
+                "|c+investigate/scan|n [here|object|exit|element] — look for leads.\n"
+                "|c+investigate <id>|n or name — evidence check on a lead you noticed.\n"
+                "|c+investigate/hint|n |c+investigate/overcome <id>|n"
             )
             return
 
-        # Resolve skill + stat for check
-        skill_name = clue.get_skills_list()[0] if clue.get_skills_list() else "deduction"
-        skill_val = getattr(char.db, skill_name, 0) or 0
-        stat_name = _skill_to_stat(skill_name)
-        stat_val = getattr(char.db, stat_name, 5) or 5
+        if focus_obj.current_focus <= 0:
+            self.caller.msg("Your Focus is depleted. Rest before investigating further.")
+            return
 
+        res = _resolve_evidence_target(self.caller, char, self.args)
+        if res["type"] == "error":
+            self.caller.msg(res["message"])
+            return
+        if res["type"] == "list":
+            self.caller.msg(res["message"])
+            return
+        _execute_evidence_check(self.caller, char, focus_obj, res["clue"])
+
+    def _do_scan(self, focus_obj):
+        char = _get_character_for_caller(self.caller)
+        if focus_obj.current_focus <= 0:
+            self.caller.msg("Your Focus is depleted.")
+            return
+
+        arg = (self.args or "").strip()
+        room, locs_or_err = _collect_scan_locs(self.caller, char, arg)
+        if room is None:
+            self.caller.msg(locs_or_err)
+            return
+        locs = locs_or_err
+
+        eligible_locs = _filter_locs_eligible_for_exposure(char, locs)
+        if not eligible_locs:
+            self.caller.msg(
+                "You sweep the area but nothing new surfaces — "
+                "prerequisites may be missing, or an obstacle may be blocking."
+            )
+            focus_damage = _roll_dice("1d6")
+            focus_obj.current_focus -= focus_damage
+            focus_obj.save()
+            self.caller.msg(f"(Lost {focus_damage} Focus from the effort.)")
+            return
+
+        clues = _unique_clues_from_locs(eligible_locs)
+        scan_dv = _max_scan_dv(clues)
+
+        skill_val = getattr(char.db, "perception", 0) or 0
+        stat_val = getattr(char.db, "intelligence", 5) or 5
         from world.utils.roll_utils import roll_skill_check, check_success
         from world.wound_utils import get_action_penalty
 
         action_penalty = get_action_penalty(char)
-        total, details = roll_skill_check(stat_val, skill_val, modifier=action_penalty)
-        target = clue.dv
-        success = check_success(total, target)
-        fumble = details.get("is_crit_failure", False)
+        total, _ = roll_skill_check(stat_val, skill_val, modifier=action_penalty)
+        success = check_success(total, scan_dv)
 
-        if success:
-            damage = max(0, _roll_dice(clue.damage_dice) - clue.obfuscation)
-            clue.mystery.current_complexity = max(
-                0, clue.mystery.current_complexity - damage
-            )
-            clue.mystery.save()
-            if clue.mystery.current_complexity <= 0:
-                clue.mystery.solve()
-            ClueAttempt.objects.create(
-                clue=clue,
-                character=char,
-                attempted_date=today,
-                success=True,
-                damage_dealt=damage,
-            )
+        focus_damage = _roll_dice("1d6")
+        focus_obj.current_focus -= focus_damage
+        focus_obj.save()
+
+        if not success:
             self.caller.msg(
-                f"|gSuccess!|n You decipher the clue. "
-                f"Dealt {damage} to the mystery. "
-                f"Remaining complexity: {clue.mystery.current_complexity}."
+                f"|rYou don't pick up anything useful.|n (Lost {focus_damage} Focus. "
+                f"{focus_obj.current_focus} remaining.)"
             )
-            if clue.mystery.is_solved:
-                self.caller.msg(f"|yMystery solved!|n {clue.mystery.goal}")
-        else:
-            focus_damage = _roll_dice(clue.focus_damage_dice)
-            focus_obj.current_focus -= focus_damage
-            focus_obj.save()
-            ClueAttempt.objects.create(
-                clue=clue,
-                character=char,
-                attempted_date=today,
-                success=False,
-                focus_lost=focus_damage,
-            )
-            msg = f"|rFailed.|n You lose {focus_damage} Focus. ({focus_obj.current_focus} remaining)"
-            if fumble:
-                fumble_effect = clue.fumble_effect or CLUE_TYPES.get(clue.clue_type, {}).get("fumble_effect")
-                if fumble_effect:
-                    msg += f" |rFumble!|n {fumble_effect}"
-                else:
-                    msg += " |rFumble!|n Additional complications may apply."
-            self.caller.msg(msg)
+            return
 
-    def do_hint(self):
+        exposed = []
+        for loc in sorted(
+            eligible_locs,
+            key=lambda x: (x.clue.discovery_priority, x.clue_id),
+        ):
+            clue = loc.clue
+            if _is_exposed(char, clue):
+                continue
+            _expose_clue(char, clue)
+            exposed.append((loc, clue))
+
+        if not exposed:
+            self.caller.msg(
+                f"You confirm what you already noticed. (Lost {focus_damage} Focus.)"
+            )
+            return
+
+        lines = [
+            f"|gYou pick up on something.|n (Lost {focus_damage} Focus. {focus_obj.current_focus} remaining.)",
+            "",
+            "|yThreads to follow:|n",
+        ]
+        for loc, clue in exposed:
+            hint = _player_hint_for_clue(clue, loc, room)
+            lines.append(f"  * {hint}")
+        lines.append("")
+        lines.append("Use |c+investigate <id>|n when you move in, or name the spot.")
+        self.caller.msg("\n".join(lines))
+
+    def _do_hint(self, focus_obj):
         char = _get_character_for_caller(self.caller)
-        if not char:
-            return
-        if not is_character_approved(char):
-            self.caller.msg("You must be approved by staff before using the mystery system.")
-            return
-        focus_obj = _get_or_create_focus(char)
         if focus_obj.current_focus <= 0:
             self.caller.msg("Your Focus is depleted.")
             return
-        # DV15 Deduction
         skill_val = getattr(char.db, "deduction", 0) or 0
         stat_val = getattr(char.db, "intelligence", 5) or 5
         from world.utils.roll_utils import roll_skill_check, check_success
         from world.wound_utils import get_action_penalty
 
         action_penalty = get_action_penalty(char)
-        total, details = roll_skill_check(stat_val, skill_val, modifier=action_penalty)
+        total, _ = roll_skill_check(stat_val, skill_val, modifier=action_penalty)
         success = check_success(total, 15)
         focus_damage = _roll_dice("1d6")
         focus_obj.current_focus -= focus_damage
@@ -293,45 +579,19 @@ class CmdInvestigate(MuxCommand):
         else:
             self.caller.msg(f"Nothing comes to mind. Lost {focus_damage} Focus.")
 
-
-class CmdOvercome(MuxCommand):
-    """
-    Attempt to overcome an Obstacle (Interface RED).
-
-    Usage:
-      +overcome <obstacle id>
-
-    Success: 1d6 Focus damage. Failure: 2d6 Focus damage.
-    One attempt per obstacle per character per day.
-    """
-
-    key = "+overcome"
-    aliases = ["overcome"]
-    lock = "cmd:all()"
-    help_category = "General"
-
-    def func(self):
-        if not self.args:
-            self.caller.msg("Usage: +overcome <obstacle id>")
-            return
+    def _do_overcome(self, focus_obj):
         char = _get_character_for_caller(self.caller)
-        if not char:
-            self.caller.msg("You must be playing a character to overcome obstacles.")
+        if not self.args:
+            self.caller.msg("Usage: +investigate/overcome <obstacle id>")
             return
-        if not is_character_approved(char):
-            self.caller.msg("You must be approved by staff before using the mystery system.")
+        if focus_obj.current_focus <= 0:
+            self.caller.msg("Your Focus is depleted.")
             return
-
         try:
             obs_id = int(self.args.strip())
             obstacle = MysteryObstacle.objects.get(id=obs_id)
         except (ValueError, MysteryObstacle.DoesNotExist):
             self.caller.msg("Obstacle not found.")
-            return
-
-        focus_obj = _get_or_create_focus(char)
-        if focus_obj.current_focus <= 0:
-            self.caller.msg("Your Focus is depleted. Rest before attempting obstacles.")
             return
 
         today = date.today()
@@ -368,31 +628,446 @@ class CmdOvercome(MuxCommand):
         )
         if success:
             self.caller.msg(
-                f"|gYou overcome the obstacle!|n You push through but take {focus_damage} Focus damage. "
+                f"|gYou overcome the obstacle!|n Lost {focus_damage} Focus. "
                 f"({focus_obj.current_focus} remaining)"
             )
         else:
             self.caller.msg(
-                f"|rYou fail to overcome the obstacle.|n You take {focus_damage} Focus damage. "
+                f"|rYou fail to overcome the obstacle.|n Lost {focus_damage} Focus. "
                 f"({focus_obj.current_focus} remaining)"
             )
 
 
-class CmdClues(MuxCommand):
+class CmdMystery(MuxCommand):
     """
-    List all clues in the investigation system (staff).
+    Mysteries: list, info, focus, and staff authoring (Builder).
 
     Usage:
-      +clues                - List all clues
-      +clues <mystery>      - List clues for a mystery
+      +mystery                    - Active mysteries and your Focus
+      +mystery/focus              - Focus details
+      +mystery/info <id>          - Mystery summary (no spoilers)
+      +mystery/create ...         - Staff: create mystery
+      +mystery/public <id>=...    - Staff: player-facing description
+      +mystery/start <id>=...     - Staff: where to start looking
+      +mystery/scandv <id>=<n>    - Staff: scan DV for this mystery
+      +mystery/obstacle ...       - Staff: add obstacle
+      +mystery/link ...           - Staff: link to mission
+      +mystery/unlink <id>        - Staff: unlink mission
     """
 
-    key = "+clues"
-    aliases = ["clues"]
+    key = "+mystery"
+    aliases = ["mystery"]
+    lock = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        char = _get_character_for_caller(self.caller)
+        if not char:
+            self.caller.msg("You must be playing a character.")
+            return
+        if not is_character_approved(char):
+            self.caller.msg("You must be approved first.")
+            return
+
+        focus_obj = _get_or_create_focus(char)
+        int_val = getattr(char.db, "intelligence", 5) or 5
+        will_val = getattr(char.db, "willpower", 5) or 5
+        max_focus = get_max_focus(int_val, will_val)
+        current = focus_obj.current_focus
+
+        if "create" in self.switches:
+            return self._staff_create(char)
+        if "public" in self.switches:
+            return self._staff_set_public()
+        if "start" in self.switches:
+            return self._staff_set_start()
+        if "scandv" in self.switches:
+            return self._staff_set_scandv()
+        if "obstacle" in self.switches:
+            return self._staff_obstacle()
+        if "link" in self.switches:
+            return self._staff_link()
+        if "unlink" in self.switches:
+            return self._staff_unlink()
+
+        if "info" in self.switches:
+            return self._show_info()
+
+        if "focus" in self.switches:
+            out = [
+                header("Focus"),
+                f"  |gFocus:|n {current}/{max_focus}",
+                "  Focus recovers INT + WILL every 24 hours. |c+rest|n for a concentration bonus.",
+                footer(),
+            ]
+            self.caller.msg("\n".join(out))
+            return
+
+        self._list_mysteries(focus_obj, current, max_focus)
+
+    def _list_mysteries(self, focus_obj, current, max_focus):
+        broad = Mystery.objects.filter(is_solved=False).order_by("name")
+        lines = [
+            header("Mysteries & Investigation"),
+            f"  |gFocus:|n {current}/{max_focus}",
+            "",
+            "  |wOpen investigations:|n",
+        ]
+        if not broad.exists():
+            lines.append("  (None listed — ask staff or check the grid.)")
+        else:
+            for m in broad:
+                pd = (m.public_description or "").strip()
+                hint = (m.starting_location_hint or "").strip()
+                if pd:
+                    desc = pd[:120] + ("..." if len(pd) > 120 else "")
+                else:
+                    desc = (m.goal or "")[:120] + ("..." if len(m.goal or "") > 120 else "")
+                loc = f" |cStart:|n {hint}" if hint else ""
+                lines.append(f"  |y#{m.id}|n {m.name} — {desc}{loc}")
+        lines.append("")
+        lines.append("  |c+mystery/info <id>|n for details. |c+investigate/scan|n to notice leads.")
+        lines.append(footer())
+        self.caller.msg("\n".join(lines))
+
+    def _show_info(self):
+        if not self.args:
+            self.caller.msg("Usage: +mystery/info <mystery id>")
+            return
+        try:
+            mid = int(self.args.strip())
+            m = Mystery.objects.get(id=mid)
+        except (ValueError, Mystery.DoesNotExist):
+            self.caller.msg("Mystery not found.")
+            return
+        nc = m.clues.count()
+        no = m.obstacles.count()
+        pd = (m.public_description or m.goal or "").strip()
+        sh = (m.starting_location_hint or "").strip()
+        lines = [
+            header(f"Mystery #{m.id}: {m.name}"),
+            f"  {pd}",
+            "",
+            f"  |wClues in play:|n {nc}  |wObstacles:|n {no}",
+        ]
+        if sh:
+            lines.append(f"  |wWhere to start:|n {sh}")
+        lines.append(f"  |wStatus:|n {'Solved' if m.is_solved else 'Open'}")
+        lines.append(footer())
+        self.caller.msg("\n".join(lines))
+
+    def _check_builder(self):
+        if not (
+            self.caller.check_permstring("builders")
+            or self.caller.check_permstring("admin")
+            or self.caller.check_permstring("Admin")
+        ):
+            self.caller.msg("Builder permission required.")
+            return False
+        return True
+
+    def _staff_create(self, char):
+        if not self._check_builder():
+            return
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: +mystery/create <name>=<goal>,<complexity or tier>")
+            return
+        name = self.lhs.strip()
+        rhs = self.rhs.strip()
+        parts = [p.strip() for p in rhs.split(",", 1)]
+        goal = parts[0] if parts else ""
+        complexity_arg = (parts[1] if len(parts) > 1 else "50").strip().lower()
+        tier_data = COMPLEXITY_TIERS.get(complexity_arg)
+        if tier_data:
+            complexity = tier_data["value"]
+            difficulty_level = complexity_arg
+        else:
+            try:
+                complexity = int(complexity_arg)
+                difficulty_level = "average"
+            except ValueError:
+                complexity = 50
+                difficulty_level = "average"
+        m = Mystery.objects.create(
+            name=name,
+            goal=goal,
+            difficulty_level=difficulty_level,
+            max_complexity=complexity,
+            current_complexity=complexity,
+            created_by=char,
+            public_description=goal[:500],
+        )
+        self.caller.msg(
+            f"Created Mystery #{m.id}: {m.name}. Set |c+mystery/public {m.id}=...|n and "
+            f"|c+mystery/start {m.id}=...|n for players."
+        )
+
+    def _staff_set_public(self):
+        if not self._check_builder():
+            return
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: +mystery/public <id>=<player-facing description>")
+            return
+        try:
+            mid = int(self.lhs.strip())
+            m = Mystery.objects.get(id=mid)
+        except (ValueError, Mystery.DoesNotExist):
+            self.caller.msg("Mystery not found.")
+            return
+        m.public_description = self.rhs.strip()
+        m.save()
+        self.caller.msg(f"Updated public description for #{m.id}.")
+
+    def _staff_set_start(self):
+        if not self._check_builder():
+            return
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: +mystery/start <id>=<where to start looking>")
+            return
+        try:
+            mid = int(self.lhs.strip())
+            m = Mystery.objects.get(id=mid)
+        except (ValueError, Mystery.DoesNotExist):
+            self.caller.msg("Mystery not found.")
+            return
+        m.starting_location_hint = self.rhs.strip()
+        m.save()
+        self.caller.msg(f"Updated starting location hint for #{m.id}.")
+
+    def _staff_set_scandv(self):
+        if not self._check_builder():
+            return
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: +mystery/scandv <id>=<dv>")
+            return
+        try:
+            mid = int(self.lhs.strip())
+            dv = int(self.rhs.strip())
+            m = Mystery.objects.get(id=mid)
+        except (ValueError, Mystery.DoesNotExist):
+            self.caller.msg("Invalid id or mystery.")
+            return
+        m.scan_dv = max(3, min(30, dv))
+        m.save()
+        self.caller.msg(f"Mystery #{m.id} scan DV set to {m.scan_dv}.")
+
+    def _staff_obstacle(self):
+        if not self._check_builder():
+            return
+        if not self.args or "=" not in self.args:
+            self.caller.msg(
+                "Usage: +mystery/obstacle <mystery id>=<type>,<skill>,<dv>[,description]"
+            )
+            return
+        try:
+            mid = int(self.lhs.strip())
+            mystery = Mystery.objects.get(id=mid)
+        except (ValueError, Mystery.DoesNotExist):
+            self.caller.msg("Mystery not found.")
+            return
+        parts = [p.strip() for p in self.rhs.split(",", 3)]
+        obs_type = parts[0] if parts else "Distraction"
+        skill = parts[1] if len(parts) > 1 else "streetwise"
+        try:
+            dv = int(parts[2]) if len(parts) > 2 and parts[2] else 13
+        except (ValueError, TypeError):
+            dv = 13
+        description = parts[3] if len(parts) > 3 else ""
+        is_ticking = "ticking" in obs_type.lower() or "clock" in obs_type.lower()
+        obs = MysteryObstacle.objects.create(
+            mystery=mystery,
+            obstacle_type=obs_type,
+            skill_used=skill,
+            dv=dv,
+            description=description,
+            is_ticking_clock=is_ticking,
+        )
+        self.caller.msg(
+            f"Added Obstacle #{obs.id} to {mystery.name}. Players: |c+investigate/overcome {obs.id}|n"
+        )
+
+    def _staff_link(self):
+        if not self._check_builder():
+            return
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: +mystery/link <mystery id>=<mission id>")
+            return
+        try:
+            mid = int(self.lhs.strip())
+            mystery = Mystery.objects.get(id=mid)
+        except (ValueError, Mystery.DoesNotExist):
+            self.caller.msg("Mystery not found.")
+            return
+        try:
+            mission_id = int(self.rhs.strip())
+            from world.mission_board.models import Mission
+            mission = Mission.objects.get(id=mission_id)
+        except (ValueError, Mission.DoesNotExist):
+            self.caller.msg("Mission not found.")
+            return
+        mystery.mission = mission
+        mystery.save()
+        self.caller.msg(f"Linked mystery to Mission #{mission.id}: {mission.name}")
+
+    def _staff_unlink(self):
+        if not self._check_builder():
+            return
+        if not self.args:
+            self.caller.msg("Usage: +mystery/unlink <mystery id>")
+            return
+        try:
+            mid = int(self.args.strip())
+            mystery = Mystery.objects.get(id=mid)
+        except (ValueError, Mystery.DoesNotExist):
+            self.caller.msg("Mystery not found.")
+            return
+        mystery.mission = None
+        mystery.save()
+        self.caller.msg(f"Unlinked mission from '{mystery.name}'.")
+
+
+class CmdClue(MuxCommand):
+    """
+    Staff: clues, placement, linking, listing.
+
+    Usage:
+      +clue/create <mid>=...
+      +clue/add <target>=<clue id>[/element]
+      +clue/remove ...
+      +clue/list [mystery]
+      +clue/destroy ...
+      +clue/link / +clue/requires ...
+      +clue/playerhint <id>=...
+      +clue/gate <clue id>=<obstacle id>
+      +clue/priority <id>=<n>
+    """
+
+    key = "+clue"
+    aliases = ["clue"]
     lock = "cmd:perm(builders)"
     help_category = "Building"
 
     def func(self):
+        if "create" in self.switches:
+            return self._create()
+        if "add" in self.switches:
+            return self._add()
+        if "remove" in self.switches:
+            return self._remove()
+        if "list" in self.switches:
+            return self._list_all()
+        if "destroy" in self.switches:
+            return self._destroy()
+        if "requires" in self.switches:
+            return self._link(requires=True)
+        if "link" in self.switches:
+            return self._link(requires=False)
+        if "playerhint" in self.switches:
+            return self._playerhint()
+        if "gate" in self.switches:
+            return self._gate()
+        if "priority" in self.switches:
+            return self._priority()
+
+        self.caller.msg(
+            "Usage: |c+clue/create|n, |c+clue/add|n, |c+clue/list|n, |c+clue/requires|n, …"
+        )
+
+    def _create(self):
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: +clue/create <mystery id>=<type>,<skills>,<dv>,<obfuscation>[,description]")
+            return
+        try:
+            mid = int(self.lhs.strip())
+            mystery = Mystery.objects.get(id=mid)
+        except (ValueError, Mystery.DoesNotExist):
+            self.caller.msg("Mystery not found.")
+            return
+        parts = [p.strip() for p in self.rhs.split(",")]
+        clue_type = parts[0].lower() if parts else "deduction"
+        skills = parts[1].replace(";", ", ") if len(parts) > 1 else "deduction"
+        try:
+            dv = int(parts[2]) if len(parts) > 2 else 13
+        except (ValueError, IndexError):
+            dv = 13
+        try:
+            obfuscation = int(parts[3]) if len(parts) > 3 else 0
+        except (ValueError, IndexError):
+            obfuscation = 0
+        defaults = CLUE_TYPES.get(clue_type, {})
+        damage_dice = defaults.get("damage_dice", "3d6")
+        focus_damage_dice = defaults.get("focus_damage_dice", "2d6")
+        fumble_effect = defaults.get("fumble_effect") or ""
+        description = ", ".join(parts[4:]) if len(parts) > 4 else ""
+        c = MysteryClue.objects.create(
+            mystery=mystery,
+            clue_type=clue_type,
+            skills_used=skills,
+            dv=dv,
+            obfuscation=obfuscation,
+            damage_dice=damage_dice,
+            focus_damage_dice=focus_damage_dice,
+            fumble_effect=fumble_effect,
+            description=description,
+        )
+        self.caller.msg(
+            f"Created Clue #{c.id}. |c+clue/add <room>={c.id}|n or |c={c.id}/element|n. "
+            f"|c+clue/playerhint {c.id}=...|n"
+        )
+
+    def _add(self):
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: +clue/add <target>=<clue id>[/element]")
+            return
+        target_name = self.lhs.strip()
+        clue_arg = self.rhs.strip()
+        target = self.caller.search(target_name, global_search=True)
+        if not target:
+            return
+        try:
+            clue_id, element_key = _parse_clue_and_element(clue_arg)
+            clue = MysteryClue.objects.get(id=clue_id)
+        except (ValueError, MysteryClue.DoesNotExist):
+            self.caller.msg("Invalid clue id.")
+            return
+        elem = element_key or ""
+        _, created = ClueLocation.objects.get_or_create(
+            clue=clue,
+            location_object=target,
+            element_key=elem,
+            defaults={},
+        )
+        if created:
+            extra = f" (element '{elem}')" if elem else ""
+            self.caller.msg(f"Attached clue #{clue_id} to {target.key}{extra}.")
+        else:
+            self.caller.msg("Already attached that way.")
+
+    def _remove(self):
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: +clue/remove <target>=<id>[/element]")
+            return
+        target_name = self.lhs.strip()
+        try:
+            clue_id, element_key = _parse_clue_and_element(self.rhs.strip())
+            clue = MysteryClue.objects.get(id=clue_id)
+        except (ValueError, MysteryClue.DoesNotExist):
+            self.caller.msg("Clue not found.")
+            return
+        target = self.caller.search(target_name, global_search=True)
+        if not target:
+            return
+        deleted, _ = ClueLocation.objects.filter(
+            clue=clue,
+            location_object=target,
+            element_key=element_key or "",
+        ).delete()
+        if deleted:
+            self.caller.msg("Removed.")
+        else:
+            self.caller.msg("Not found on that target.")
+
+    def _list_all(self):
         mystery_arg = (self.args or "").strip()
         if mystery_arg:
             try:
@@ -407,14 +1082,14 @@ class CmdClues(MuxCommand):
         else:
             mysteries = list(Mystery.objects.all().order_by("name"))
 
-        lines = [header("Investigation Clues")]
+        lines = [header("Investigation Clues (staff)")]
         for m in mysteries:
             clues = m.clues.all().order_by("id")
             obstacles = m.obstacles.all().order_by("id")
             lines.append(section_header(m.name))
             lines.append(f"  Goal: {m.goal[:60]}{'...' if len(m.goal) > 60 else ''}")
             lines.append(
-                f"  Difficulty: {getattr(m, 'difficulty_level', 'average')} | "
+                f"  Difficulty: {m.difficulty_level} | "
                 f"Complexity: {m.current_complexity}/{m.max_complexity} | Solved: {m.is_solved}"
             )
             if obstacles.exists():
@@ -424,12 +1099,20 @@ class CmdClues(MuxCommand):
             for c in clues:
                 reqs = list(c.required_clues.values_list("id", flat=True))
                 locs = ClueLocation.objects.filter(clue=c)
-                loc_str = ", ".join(str(loc.location_object.key) for loc in locs[:3])
+
+                def _fmt_loc(loc):
+                    if loc.element_key:
+                        return f"{loc.location_object.key}<{loc.element_key}>"
+                    return str(loc.location_object.key)
+
+                loc_str = ", ".join(_fmt_loc(loc) for loc in locs[:3])
                 if locs.count() > 3:
                     loc_str += f" (+{locs.count() - 3} more)"
+                gate = ""
+                if c.gating_obstacle_id:
+                    gate = f" [gate obs#{c.gating_obstacle_id}]"
                 lines.append(
-                    f"    |y#{c.id}|n {c.clue_type} DV{c.dv} "
-                    f"(skills: {c.skills_used[:30]}...) "
+                    f"    |y#{c.id}|n {c.clue_type} DV{c.dv} pri={c.discovery_priority}{gate} "
                     f"{'[requires: ' + ','.join(f'#{r}' for r in reqs) + ']' if reqs else ''}"
                 )
                 if loc_str:
@@ -438,19 +1121,141 @@ class CmdClues(MuxCommand):
         lines.append(footer())
         self.caller.msg("\n".join(lines))
 
+    def _destroy(self):
+        if not self.args:
+            self.caller.msg("Usage: +clue/destroy <clue id> OR <target>=<id>[/element]")
+            return
+        if "=" in self.args:
+            target_name = self.lhs.strip()
+            try:
+                clue_id, element_key = _parse_clue_and_element(self.rhs.strip())
+                clue = MysteryClue.objects.get(id=clue_id)
+            except (ValueError, MysteryClue.DoesNotExist):
+                self.caller.msg("Clue not found.")
+                return
+            target = self.caller.search(target_name, global_search=True)
+            if not target:
+                return
+            deleted, _ = ClueLocation.objects.filter(
+                clue=clue,
+                location_object=target,
+                element_key=element_key or "",
+            ).delete()
+            self.caller.msg("Removed from location." if deleted else "Not found.")
+            return
+        try:
+            clue_id = int(self.args.strip())
+            clue = MysteryClue.objects.get(id=clue_id)
+        except (ValueError, MysteryClue.DoesNotExist):
+            self.caller.msg("Clue not found.")
+            return
+        clue.delete()
+        self.caller.msg(f"Destroyed clue #{clue_id}.")
+
+    def _link(self, requires=False):
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: +clue/link <id>=<id> or +clue/requires <id>=<id>")
+            return
+        try:
+            c1_id = int(self.lhs.strip())
+            c1 = MysteryClue.objects.get(id=c1_id)
+        except (ValueError, MysteryClue.DoesNotExist):
+            self.caller.msg("Clue not found (left).")
+            return
+        try:
+            c2_id = int(self.rhs.strip())
+            c2 = MysteryClue.objects.get(id=c2_id)
+        except (ValueError, MysteryClue.DoesNotExist):
+            self.caller.msg("Clue not found (right).")
+            return
+        if c1.mystery_id != c2.mystery_id:
+            self.caller.msg("Both clues must belong to the same mystery.")
+            return
+        if requires:
+            c1.required_clues.add(c2)
+            self.caller.msg(f"Clue #{c1_id} now requires #{c2_id} deciphered first.")
+        else:
+            c1.linked_clues.add(c2)
+            self.caller.msg(f"Linked #{c1_id} ↔ #{c2_id}.")
+
+    def _playerhint(self):
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: +clue/playerhint <clue id>=<text for players when exposed>")
+            return
+        try:
+            cid = int(self.lhs.strip())
+            c = MysteryClue.objects.get(id=cid)
+        except (ValueError, MysteryClue.DoesNotExist):
+            self.caller.msg("Clue not found.")
+            return
+        c.player_hint = self.rhs.strip()
+        c.save()
+        self.caller.msg(f"Player hint set for clue #{c.id}.")
+
+    def _gate(self):
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: +clue/gate <clue id>=<obstacle id> (or 0 to clear)")
+            return
+        try:
+            cid = int(self.lhs.strip())
+            oid = int(self.rhs.strip())
+            c = MysteryClue.objects.get(id=cid)
+        except (ValueError, MysteryClue.DoesNotExist):
+            self.caller.msg("Invalid clue.")
+            return
+        if oid == 0:
+            c.gating_obstacle = None
+            c.save()
+            self.caller.msg("Gating obstacle cleared.")
+            return
+        try:
+            obs = MysteryObstacle.objects.get(id=oid)
+        except MysteryObstacle.DoesNotExist:
+            self.caller.msg("Obstacle not found.")
+            return
+        if obs.mystery_id != c.mystery_id:
+            self.caller.msg("Obstacle must belong to the same mystery.")
+            return
+        c.gating_obstacle = obs
+        c.save()
+        self.caller.msg(f"Clue #{c.id} gated by obstacle #{obs.id}.")
+
+    def _priority(self):
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: +clue/priority <clue id>=<number> (lower = found earlier on scan)")
+            return
+        try:
+            cid = int(self.lhs.strip())
+            pr = int(self.rhs.strip())
+            c = MysteryClue.objects.get(id=cid)
+        except (ValueError, MysteryClue.DoesNotExist):
+            self.caller.msg("Invalid.")
+            return
+        c.discovery_priority = max(0, pr)
+        c.save()
+        self.caller.msg(f"Discovery priority set to {c.discovery_priority}.")
+
+
+class CmdCluesStaff(MuxCommand):
+    """Alias for +clue/list (staff)."""
+
+    key = "+clues"
+    aliases = ["clues"]
+    lock = "cmd:perm(builders)"
+    help_category = "Building"
+
+    def func(self):
+        proxy = CmdClue()
+        proxy.caller = self.caller
+        proxy.args = self.args
+        proxy.switches = ["list"]
+        proxy.session = self.session
+        proxy.cmdset = self.cmdset
+        CmdClue.func(proxy)
+
 
 class CmdRest(MuxCommand):
-    """
-    Rest and attempt DV15 Concentration for +5 Focus (Interface RED).
-
-    Usage:
-      +rest                - Attempt Concentration check for +5 Focus (once per day)
-      +rest/concentrate    - Same as +rest
-
-    Per Interface RED: With a successful DV15 Concentration Check while resting,
-    you recover an additional 5 Focus. Usable once per day. Base Focus recovery
-    (INT + WILL) happens automatically every 24 hours.
-    """
+    """Rest / concentration for Focus — unchanged."""
 
     key = "+rest"
     aliases = ["rest"]
@@ -500,7 +1305,6 @@ class CmdRest(MuxCommand):
                 f"|gSuccess!|n You focus your mind. Recovered {gain} Focus. "
                 f"({focus_obj.current_focus}/{max_focus})"
             )
-            # CPR: successful rest day - nanomachines repair Skin Weave / Subdermal +1 SP each (if installed)
             if hasattr(char, "character_sheet") and char.character_sheet:
                 try:
                     from world.cyberware.implanted_armor import apply_daily_natural_healing_implanted_armor
@@ -516,404 +1320,3 @@ class CmdRest(MuxCommand):
                 "You try to concentrate but can't quite clear your head. "
                 "No bonus Focus this time."
             )
-
-
-class CmdCreateMystery(MuxCommand):
-    """
-    Create a new mystery (staff).
-
-    Usage:
-      +createmystery <name>=<goal>,<complexity>
-      +createmystery <name>=<goal>,<tier>
-
-    Tier: easy (25), average (50), challenging (100), difficult (150), legendary (200)
-    Or use a raw number for complexity.
-    """
-
-    key = "+createmystery"
-    aliases = ["createmystery"]
-    lock = "cmd:perm(builders)"
-    help_category = "Building"
-
-    def func(self):
-        if not self.args or "=" not in self.args:
-            self.caller.msg(
-                "Usage: +createmystery <name>=<goal>,<complexity or tier>"
-            )
-            return
-        name = self.lhs.strip()
-        rhs = self.rhs.strip()
-        parts = [p.strip() for p in rhs.split(",", 1)]
-        goal = parts[0] if parts else ""
-        complexity_arg = (parts[1] if len(parts) > 1 else "50").strip().lower()
-        tier_data = COMPLEXITY_TIERS.get(complexity_arg)
-        if tier_data:
-            complexity = tier_data["value"]
-            difficulty_level = complexity_arg
-        else:
-            try:
-                complexity = int(complexity_arg)
-                difficulty_level = "average"
-            except ValueError:
-                complexity = 50
-                difficulty_level = "average"
-        char = _get_character_for_caller(self.caller)
-        m = Mystery.objects.create(
-            name=name,
-            goal=goal,
-            difficulty_level=difficulty_level,
-            max_complexity=complexity,
-            current_complexity=complexity,
-            created_by=char,
-        )
-        self.caller.msg(
-            f"Created Mystery #{m.id}: {m.name} ({difficulty_level}, complexity {complexity})"
-        )
-
-
-class CmdCreateClue(MuxCommand):
-    """
-    Create a new clue and add it to a mystery (staff).
-
-    Usage:
-      +createclue <mystery id>=<clue_type>,<skills>,<dv>,<obfuscation>[,description]
-    Example:
-      +createclue 1=forensics,criminology;deduction,13,2
-      +createclue 1=forensics,criminology;deduction,13,2,The safe was forced open
-    """
-
-    key = "+createclue"
-    aliases = ["createclue"]
-    lock = "cmd:perm(builders)"
-    help_category = "Building"
-
-    def func(self):
-        if not self.args or "=" not in self.args:
-            self.caller.msg(
-                "Usage: +createclue <mystery id>=<type>,<skills>,<dv>,<obfuscation>"
-            )
-            return
-        try:
-            mid = int(self.lhs.strip())
-            mystery = Mystery.objects.get(id=mid)
-        except (ValueError, Mystery.DoesNotExist):
-            self.caller.msg("Mystery not found.")
-            return
-        parts = [p.strip() for p in self.rhs.split(",")]
-        clue_type = parts[0].lower() if parts else "deduction"
-        skills = parts[1].replace(";", ", ") if len(parts) > 1 else "deduction"
-        try:
-            dv = int(parts[2]) if len(parts) > 2 else 13
-        except (ValueError, IndexError):
-            dv = 13
-        try:
-            obfuscation = int(parts[3]) if len(parts) > 3 else 0
-        except (ValueError, IndexError):
-            obfuscation = 0
-        defaults = CLUE_TYPES.get(clue_type, {})
-        damage_dice = defaults.get("damage_dice", "3d6")
-        focus_damage_dice = defaults.get("focus_damage_dice", "2d6")
-        fumble_effect = defaults.get("fumble_effect") or ""
-        description = ", ".join(parts[4:]) if len(parts) > 4 else ""
-        c = MysteryClue.objects.create(
-            mystery=mystery,
-            clue_type=clue_type,
-            skills_used=skills,
-            dv=dv,
-            obfuscation=obfuscation,
-            damage_dice=damage_dice,
-            focus_damage_dice=focus_damage_dice,
-            fumble_effect=fumble_effect,
-            description=description,
-        )
-        self.caller.msg(
-            f"Created Clue #{c.id} ({c.clue_type}) for {mystery.name}. "
-            f"Use +addclue <target>={c.id} to attach to a location."
-        )
-
-
-class CmdAddObstacle(MuxCommand):
-    """
-    Add an Obstacle to a mystery (staff).
-
-    Usage:
-      +addobstacle <mystery id>=<type>,<skill>,<dv>[,description]
-    Example:
-      +addobstacle 1=Authority,persuasion,15,Corporations impede progress
-      +addobstacle 1=Ticking Clock,,,Building locks down at midnight
-
-    Types: Authority, Digital, Distraction, Fatigue, Legal, Location, etc.
-    """
-
-    key = "+addobstacle"
-    aliases = ["addobstacle"]
-    lock = "cmd:perm(builders)"
-    help_category = "Building"
-
-    def func(self):
-        if not self.args or "=" not in self.args:
-            self.caller.msg(
-                "Usage: +addobstacle <mystery id>=<type>,<skill>,<dv>[,description]"
-            )
-            return
-        try:
-            mid = int(self.lhs.strip())
-            mystery = Mystery.objects.get(id=mid)
-        except (ValueError, Mystery.DoesNotExist):
-            self.caller.msg("Mystery not found.")
-            return
-        parts = [p.strip() for p in self.rhs.split(",", 3)]
-        obs_type = parts[0] if parts else "Distraction"
-        skill = parts[1] if len(parts) > 1 else "streetwise"
-        try:
-            dv = int(parts[2]) if len(parts) > 2 and parts[2] else 13
-        except (ValueError, TypeError):
-            dv = 13
-        description = parts[3] if len(parts) > 3 else ""
-        is_ticking = "ticking" in obs_type.lower() or "clock" in obs_type.lower()
-        obs = MysteryObstacle.objects.create(
-            mystery=mystery,
-            obstacle_type=obs_type,
-            skill_used=skill,
-            dv=dv,
-            description=description,
-            is_ticking_clock=is_ticking,
-        )
-        self.caller.msg(
-            f"Added Obstacle #{obs.id} ({obs_type}) to {mystery.name}. "
-            f"Use +overcome {obs.id} to attempt."
-        )
-
-
-class CmdDestroyClue(MuxCommand):
-    """
-    Remove a clue from an object, or delete it from the system entirely (staff).
-
-    Usage:
-      +destroyclue <clue id>              - Delete clue from system (removes from all locations)
-      +destroyclue <target>=<clue id>      - Remove clue from target only (same as +addclue/remove)
-    """
-
-    key = "+destroyclue"
-    aliases = ["destroyclue"]
-    lock = "cmd:perm(builders)"
-    help_category = "Building"
-
-    def func(self):
-        if not self.args:
-            self.caller.msg("Usage: +destroyclue <clue id> or +destroyclue <target>=<clue id>")
-            return
-        if "=" in self.args:
-            # Remove from target only
-            target_name = self.lhs.strip()
-            try:
-                clue_id = int(self.rhs.strip())
-                clue = MysteryClue.objects.get(id=clue_id)
-            except (ValueError, MysteryClue.DoesNotExist):
-                self.caller.msg("Clue not found.")
-                return
-            target = self.caller.search(target_name, global_search=True)
-            if not target:
-                return
-            deleted, _ = ClueLocation.objects.filter(
-                clue=clue,
-                location_object=target,
-            ).delete()
-            if deleted:
-                self.caller.msg(f"Removed clue #{clue_id} from {target.key}.")
-            else:
-                self.caller.msg(f"Clue #{clue_id} was not attached to {target.key}.")
-            return
-        try:
-            clue_id = int(self.args.strip())
-            clue = MysteryClue.objects.get(id=clue_id)
-        except (ValueError, MysteryClue.DoesNotExist):
-            self.caller.msg("Clue not found.")
-            return
-        name = str(clue)
-        clue.delete()
-        self.caller.msg(f"Destroyed clue #{clue_id} ({name}). Removed from all locations.")
-
-
-class CmdLinkClue(MuxCommand):
-    """
-    Link clues: set required_clues or linked_clues (staff).
-
-    Usage:
-      +linkclue <clue>=<clue id>              - Add to linked_clues (bidirectional)
-      +linkclue/requires <clue>=<clue id>      - Add as required (must decipher before this clue)
-    """
-
-    key = "+linkclue"
-    aliases = ["linkclue"]
-    lock = "cmd:perm(builders)"
-    help_category = "Building"
-
-    def func(self):
-        if not self.args or "=" not in self.args:
-            self.caller.msg(
-                "Usage: +linkclue <clue>=<id> or +linkclue/requires <clue>=<id>"
-            )
-            return
-        try:
-            c1_id = int(self.lhs.strip())
-            c1 = MysteryClue.objects.get(id=c1_id)
-        except (ValueError, MysteryClue.DoesNotExist):
-            self.caller.msg("Clue not found (left side).")
-            return
-        try:
-            c2_id = int(self.rhs.strip())
-            c2 = MysteryClue.objects.get(id=c2_id)
-        except (ValueError, MysteryClue.DoesNotExist):
-            self.caller.msg("Clue not found (right side).")
-            return
-        if c1.mystery_id != c2.mystery_id:
-            self.caller.msg("Both clues must belong to the same mystery.")
-            return
-        if "requires" in self.switches:
-            c1.required_clues.add(c2)
-            self.caller.msg(f"Clue #{c1_id} now requires clue #{c2_id} to be deciphered first.")
-        else:
-            c1.linked_clues.add(c2)
-            self.caller.msg(f"Linked clue #{c1_id} to clue #{c2_id}.")
-
-
-class CmdMysteryLink(MuxCommand):
-    """
-    Link a mystery to a mission. When solved, mission and job are updated (staff).
-
-    Usage:
-      +mysterylink <mystery id>=<mission id>
-      +mysterylink/unlink <mystery id>   - Remove mission link
-    """
-
-    key = "+mysterylink"
-    aliases = ["mysterylink"]
-    lock = "cmd:perm(builders)"
-    help_category = "Building"
-
-    def func(self):
-        if not self.args:
-            self.caller.msg("Usage: +mysterylink <mystery id>=<mission id>")
-            return
-        try:
-            mid = int((self.lhs or self.args).strip())
-            mystery = Mystery.objects.get(id=mid)
-        except (ValueError, Mystery.DoesNotExist):
-            self.caller.msg("Mystery not found.")
-            return
-        if "unlink" in self.switches:
-            mystery.mission = None
-            mystery.save()
-            self.caller.msg(f"Unlinked mystery '{mystery.name}' from mission.")
-            return
-        try:
-            mission_id = int(self.rhs.strip())
-            from world.mission_board.models import Mission
-            mission = Mission.objects.get(id=mission_id)
-        except (ValueError, Mission.DoesNotExist):
-            self.caller.msg("Mission not found.")
-            return
-        mystery.mission = mission
-        mystery.save()
-        self.caller.msg(f"Linked mystery '{mystery.name}' to Mission #{mission.id}: {mission.name}")
-
-
-class CmdAddClue(MuxCommand):
-    """
-    Attach or remove investigation clues from rooms, NPCs, and objects.
-
-    Usage:
-      +addclue <target>=<clue id>    - Attach clue to room/NPC/object
-      +addclue/remove <target>=<clue id>  - Remove clue from target
-      +addclue/list <target>          - List clues attached to target
-    """
-
-    key = "+addclue"
-    aliases = ["addclue"]
-    lock = "cmd:perm(builders)"
-    help_category = "Building"
-
-    def func(self):
-        if "list" in self.switches:
-            target_name = (self.lhs or self.args or "").strip()
-            if target_name:
-                self.do_list(target_name)
-            else:
-                self.caller.msg("Usage: +addclue/list <target>")
-            return
-
-        if not self.args or "=" not in self.args:
-            self.caller.msg("Usage: +addclue <target>=<clue id>")
-            return
-
-        target_name = self.lhs.strip()
-        clue_arg = self.rhs.strip()
-
-        target = self.caller.search(target_name, global_search=True)
-        if not target:
-            return
-
-        try:
-            clue_id = int(clue_arg)
-            clue = MysteryClue.objects.get(id=clue_id)
-        except (ValueError, MysteryClue.DoesNotExist):
-            self.caller.msg("Clue not found. Use a numeric clue ID.")
-            return
-
-        if "remove" in self.switches:
-            deleted, _ = ClueLocation.objects.filter(
-                clue=clue,
-                location_object=target,
-            ).delete()
-            if deleted:
-                self.caller.msg(f"Removed clue #{clue_id} from {target.key}.")
-            else:
-                self.caller.msg(f"Clue #{clue_id} was not attached to {target.key}.")
-            return
-
-        _, created = ClueLocation.objects.get_or_create(
-            clue=clue,
-            location_object=target,
-        )
-        if created:
-            self.caller.msg(f"Attached clue #{clue_id} ({clue.clue_type}) to {target.key}.")
-        else:
-            self.caller.msg(f"Clue #{clue_id} is already attached to {target.key}.")
-
-    def do_list(self, target_name):
-        target = self.caller.search(target_name.strip(), global_search=True)
-        if not target:
-            return
-        locs = ClueLocation.objects.filter(location_object=target)
-        if not locs.exists():
-            self.caller.msg(f"No clues attached to {target.key}.")
-            return
-        lines = [f"Clues on {target.key}:"]
-        for loc in locs:
-            c = loc.clue
-            lines.append(f"  #{c.id} {c.clue_type} (Mystery: {c.mystery.name})")
-        self.caller.msg("\n".join(lines))
-
-
-def _skill_to_stat(skill_name):
-    """Map skill to primary stat for Evidence Checks."""
-    stat_map = {
-        "intelligence": ["concentration", "conceal_object", "lip_reading", "perception", "tracking",
-                        "accounting", "animal_handling", "bureaucracy", "business", "composition",
-                        "criminology", "cryptography", "deduction", "education", "library_search",
-                        "local_expert", "tactics", "wilderness_survival"],
-        "reflexes": ["drive_land", "pilot_air", "pilot_sea", "riding", "archery", "autofire",
-                    "handgun", "heavy_weapons", "shoulder_arms"],
-        "dexterity": ["athletics", "contortionist", "dance", "endurance", "resist_torture_drugs",
-                     "stealth", "brawling", "evasion", "martial_arts", "melee"],
-        "technique": ["basic_tech", "cybertech", "demolitions", "electronics_security_tech", "first_aid",
-                      "forgery", "paramedic", "medicine", "surgery", "pick_lock", "weaponstech",
-                      "air_vehicle_tech", "land_vehicle_tech", "sea_vehicle_tech"],
-        "cool": ["acting", "play_instrument", "style", "bribery", "conversation", "human_perception",
-                "interrogation", "persuasion", "streetwise", "trading"],
-    }
-    for stat, skills in stat_map.items():
-        if skill_name in skills:
-            return stat
-    return "intelligence"
