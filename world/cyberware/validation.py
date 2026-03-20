@@ -233,6 +233,7 @@ MULTIPLE_ALLOWED = frozenset({
     "superchrome covering",
     "reinforced cyberlimb upgrade",
     "hardened cybereye casing",
+    "color shift",
     # One per appropriate limb; per-parent limits apply.
     "standard hand",
     "standard foot",
@@ -256,8 +257,8 @@ LIMB_AND_EYE_DECOR_NAMES = frozenset({
 })
 # RAW: Reinforced + Hardened Shielding = cyberlimb only (one per arm/leg).
 LIMB_ONLY_DECOR_NAMES = frozenset({"hardened shielding", "reinforced cyberlimb upgrade"})
-# Hardened Cybereye Casing: only Cybereye-type parents; cap = eye count.
-EYE_ONLY_DECOR_NAMES = frozenset({"hardened cybereye casing"})
+# Eye-only cosmetics / casings: cap install count to foundation eye count (one per eye in practice).
+EYE_ONLY_DECOR_NAMES = frozenset({"hardened cybereye casing", "color shift"})
 
 _CYBEREYE_INSTANCE_NAMES = [
     "Cybereye",
@@ -1083,7 +1084,7 @@ def count_limb_and_eye_decor_capacity(character_sheet):
 def check_limb_decor_capacity(character_sheet, cyberware, *, installing: bool = True):
     """
     Limit cosmetic / shielding installs: at most one installed copy of this catalog item
-    per eligible parent (limb or eye). Hardened Cybereye Casing uses cybereye count only.
+    per eligible parent (limb or eye). Hardened Cybereye Casing and Color Shift use cybereye count only.
     Returns (success, error_message).
     """
     cw_name = _norm(getattr(cyberware, "name", ""))

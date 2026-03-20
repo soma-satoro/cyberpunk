@@ -91,8 +91,22 @@ class CmdHelpSearch(CmdHelp):
             self.caller.msg("No help entries available to search.")
             return
 
+        # Default CmdHelp Lunr fields omit `text`; search_index_entry still carries
+        # docstrings / entrytext. Index body text so mentions inside another topic
+        # (e.g. related commands) rank in help/search, not only keys/aliases.
+        search_fields = [
+            {"field_name": "key", "boost": 10},
+            {"field_name": "aliases", "boost": 7},
+            {"field_name": "no_prefix", "boost": 6},
+            {"field_name": "category", "boost": 5},
+            {"field_name": "text", "boost": 3},
+            {"field_name": "tags", "boost": 1},
+        ]
+
         try:
-            match, suggestions = self.do_search(search_str, all_entries)
+            match, suggestions = self.do_search(
+                search_str, all_entries, search_fields=search_fields
+            )
             matches = [match] if match else []
             suggestions = suggestions or []
         except Exception:

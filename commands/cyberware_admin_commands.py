@@ -31,6 +31,7 @@ def _cyberware_allows_multiple_installed_instances(cyberware: Cyberware) -> bool
         "reinforced cyberlimb upgrade",
         "extra-jointed cyberlimb upgrade",
         "hardened cybereye casing",
+        "color shift",
         "standard hand",
         "standard foot",
         "modular finger cyberhand",
@@ -44,18 +45,24 @@ class CmdAddCyberware(MuxCommand):
     Usage:
       addcyberware <cyberware item>=<character name>
       addcyberware/pair <cyberware item>=<character name>
+      addcyberware/parent <option>/<parent host>=<character name>
 
     Examples:
       addcyberware Sandevistan=Soma
       addcyberware/pair Cybereye=Soma
+      addcyberware/parent Color Shift/Cybereye=Soma
+      addcyberware/parent Hardened Cybereye Casing/Sponsored Cybereye=Soma
 
     Adds the specified cyberware to the character's inventory, installed.
     With /pair: adds a second Cybereye/Cyberarm/Cyberleg and pairs it to the existing one.
+    With /parent: adds an option already attached to an installed parent (same idea as
+    buy/cyberware parent=). If several parents match (e.g. two Cybereyes), the emptiest
+    is chosen. Use parentcyberware to assign to a specific instance.
     Cyberware must exist in the database (run populate_cyberware if needed).
     """
 
     key = "addcyberware"
-    switches = [("pair", "pair")]
+    switches = [("pair", "pair"), ("parent", "parent")]
     locks = "cmd:perm(Admin)"
     help_category = "Admin"
 
@@ -71,17 +78,13 @@ class CmdAddCyberware(MuxCommand):
             self.caller.msg("Usage: addcyberware <cyberware item>=<character name>")
             return
 
-        # Find the cyberware
-        try:
-            cyberware = Cyberware.objects.get(name__iexact=cyberware_name)
-        except Cyberware.DoesNotExist:
-            self.caller.msg(
-                f"Cyberware '{cyberware_name}' not found in database. "
-                "Run 'populate_cyberware' to load cyberware from the data files."
-            )
+        use_pair = "pair" in (self.switches or [])
+        use_parent = "parent" in (self.switches or [])
+        if use_pair and use_parent:
+            self.caller.msg("Use either |waddcyberware/pair|n or |waddcyberware/parent|n, not both.")
             return
 
-        # Find the character
+        # Find the character (before resolving cyberware for /parent LHS shape)
         character = self.caller.search(character_name, typeclass="typeclasses.characters.Character", global_search=True)
         if not character:
             character = self.caller.search(character_name, global_search=True)
@@ -97,7 +100,102 @@ class CmdAddCyberware(MuxCommand):
         # Get or create inventory
         inventory, _ = Inventory.get_or_create_for_character(character)
 
-        use_pair = "pair" in (self.switches or [])
+        opt_lookup_name = cyberware_name
+        parent_host_name = None
+        if use_parent:
+            if "/" not in cyberware_name:
+                self.caller.msg(
+                    "|wUsage:|n addcyberware/parent <option>/<parent host>=<character>\n"
+                    "|wExample:|n addcyberware/parent Color Shift/Cybereye=Soma"
+                )
+                return
+            opt_part, parent_host_name = cyberware_name.split("/", 1)
+            opt_lookup_name = opt_part.strip()
+            parent_host_name = parent_host_name.strip()
+            if not opt_lookup_name or not parent_host_name:
+                self.caller.msg("Both option name and parent host are required (Option/Parent).")
+                return
+
+        # Find the cyberware catalog row
+        try:
+            cyberware = Cyberware.objects.get(name__iexact=opt_lookup_name)
+        except Cyberware.DoesNotExist:
+            self.caller.msg(
+                f"Cyberware '{opt_lookup_name}' not found in database. "
+                "Run 'populate_cyberware' to load cyberware from the data files."
+            )
+            return
+
+        if use_parent:
+            from world.cyberware.validation import (
+                find_best_cyberaudio_parent,
+                select_balanced_parent_instance,
+                validate_parent_for_new_child,
+            )
+
+            parent_candidates = list(
+                inventory.cyberware.filter(
+                    cyberware__name__iexact=parent_host_name,
+                    installed=True,
+                ).select_related("cyberware")
+            )
+            if not parent_candidates:
+                self.caller.msg(
+                    f"{character.key} has no installed '{parent_host_name}' to attach {cyberware.name} to."
+                )
+                return
+
+            parent_inst = None
+            err = None
+            host_l = parent_host_name.lower()
+            if host_l in ("cyberaudio suite", "discount cyberaudio suite"):
+                parent_inst, err = find_best_cyberaudio_parent(
+                    char_sheet, cyberware, character=character
+                )
+                if err:
+                    self.caller.msg(err)
+                    return
+            elif host_l in ("chipware socket", "budget chipware socket"):
+                for cand in parent_candidates:
+                    ok, _ = validate_parent_for_new_child(cand, cyberware)
+                    if ok:
+                        parent_inst = cand
+                        break
+                if parent_inst is None:
+                    _, err = validate_parent_for_new_child(parent_candidates[0], cyberware)
+                    self.caller.msg(err or f"{cyberware.name} cannot use that socket.")
+                    return
+            else:
+                parent_inst, err = select_balanced_parent_instance(parent_candidates, cyberware)
+                if parent_inst is None:
+                    self.caller.msg(err or f"No valid parent for {cyberware.name}.")
+                    return
+
+            cw_instance = CyberwareInstance.objects.create(
+                cyberware=cyberware,
+                character_object=character,
+                character_sheet=char_sheet,
+                installed=True,
+                active=False,
+                parent=parent_inst,
+            )
+            inventory.cyberware.add(cw_instance)
+            char_sheet.consume_uninstalled_hl_for_cyberware(cyberware)
+            char_sheet.calculate_humanity_loss()
+
+            if cyberware.name.lower() == "cyberarm":
+                char_sheet.has_cyberarm = True
+                char_sheet.recalculate_derived_stats()
+
+            on_name = parent_inst.cyberware.name if parent_inst.cyberware else parent_host_name
+            self.caller.msg(
+                f"Added {cyberware.name} (installed on {on_name}) to {character.key}. "
+                f"Humanity loss: {cyberware.humanity_loss}."
+            )
+            character.msg(
+                f"A {cyberware.name} has been added to your cyberware (on {on_name}, installed)."
+            )
+            return
 
         if use_pair:
             # Find existing installed instance to pair with
