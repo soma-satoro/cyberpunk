@@ -162,7 +162,7 @@ def _combat_weapon_name(weapon):
 
 
 def _weapon_supports_autofire(weapon):
-    """SMG / Heavy SMG / Assault Rifle — uses weapon_type and generic template, not display name."""
+    """SMG / Heavy SMG / Assault Rifle - uses weapon_type and generic template, not display name."""
     if not weapon:
         return False
     rw = _combat_weapon_name(weapon).lower()

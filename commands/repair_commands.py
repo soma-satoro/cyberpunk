@@ -292,7 +292,7 @@ class CmdArmorStaff(MuxCommand):
       +armor/staff <character>=subdermal, sp=11
       +armor/staff <character>=skin_weave, sp=7
 
-    Implanted keys: skin_weave, subdermal_armor, sycust_fleshweave (aliases: subdermal, sycust, …)
+    Implanted keys: skin_weave, subdermal_armor, sycust_fleshweave (aliases: subdermal, sycust, ...)
     """
 
     key = "+armor"
@@ -367,6 +367,6 @@ class CmdArmorStaff(MuxCommand):
         if inst.original_sp is None:
             inst.original_sp = base
         inst.save()
-        self.caller.msg(f"|g{char.key}|n — {armor.name} SP set to {new_sp} (max {base}).")
+        self.caller.msg(f"|g{char.key}|n - {armor.name} SP set to {new_sp} (max {base}).")
         if char != self.caller:
             char.msg(f"Staff set your {armor.name} SP to {new_sp}.")

@@ -136,7 +136,7 @@ class CmdAlts(default_cmds.MuxCommand):
         else:
             # List the alts
             for alt_name in alts:
-                msg += f"• {alt_name}\n"
+                msg += f"* {alt_name}\n"
         
         # If there are blocks, list them
         if blocks:
@@ -145,7 +145,7 @@ class CmdAlts(default_cmds.MuxCommand):
             dash_count = (total_width - title_len) // 2
             msg += f"\n{'|b-|n' * dash_count}{blocks_title}{'|b-|n' * (total_width - dash_count - title_len)}\n"
             for block in blocks:
-                msg += f"• {block}\n"
+                msg += f"* {block}\n"
         
         # Check for pending requests
         has_pending = False
@@ -204,7 +204,7 @@ class CmdAlts(default_cmds.MuxCommand):
         else:
             # List the alts
             for alt_name in alts:
-                msg += f"• {alt_name}\n"
+                msg += f"* {alt_name}\n"
         
         caller.msg(msg)
     
@@ -641,7 +641,7 @@ This request will expire in 7 days.
                     
                 # Include confirmation code in the listing for convenience
                 code = request.get('code', 'NO_CODE')
-                pending_msg += f"• {requester} (requested {time_str}) - Code: {code}\n"
+                pending_msg += f"* {requester} (requested {time_str}) - Code: {code}\n"
         
         # Check outgoing requests
         outgoing_requests = caller.attributes.get('outgoing_alt_requests', {})
@@ -657,7 +657,7 @@ This request will expire in 7 days.
                 else:
                     time_str = f"{time_ago} days ago"
                     
-                pending_msg += f"• {target} (sent {time_str})\n"
+                pending_msg += f"* {target} (sent {time_str})\n"
         
         # Log what we're finding
         logger.log_info(f"{caller.name}'s pending_requests: {pending_requests}")
@@ -1133,6 +1133,6 @@ This request will expire in 7 days.
             msg += f"{target.name} has not declared any alt characters."
         else:
             for alt_name in public_alts:
-                msg += f"• {alt_name}\n"
+                msg += f"* {alt_name}\n"
         
         caller.msg(msg) 

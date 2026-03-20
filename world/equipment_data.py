@@ -16,13 +16,13 @@ class AmmoType(Enum):
     EMP = "EMP"
 
 # Cyberpunk Red vehicles - Land, Sea, and Air (from core rulebook)
-# All CHOOH² powered, Super Luxury category
+# All CHOOH2 powered, Super Luxury category
 # speed_combat: MOVE units; speed_narrative: "X MPH / Y KPH"
 vehicles = [
     # Land Vehicles
     {
         "name": "Roadbike",
-        "description": "Common CHOOH² powered bike.",
+        "description": "Common CHOOH2 powered bike.",
         "category": "land",
         "sdp": 35,
         "seats": 2,
@@ -32,7 +32,7 @@ vehicles = [
     },
     {
         "name": "Superbike",
-        "description": "Exotic CHOOH² streetbike, capable of extreme speeds.",
+        "description": "Exotic CHOOH2 streetbike, capable of extreme speeds.",
         "category": "land",
         "sdp": 35,
         "seats": 2,
@@ -42,7 +42,7 @@ vehicles = [
     },
     {
         "name": "Compact Groundcar",
-        "description": "Common CHOOH² powered car.",
+        "description": "Common CHOOH2 powered car.",
         "category": "land",
         "sdp": 50,
         "seats": 4,
@@ -52,7 +52,7 @@ vehicles = [
     },
     {
         "name": "High Performance Groundcar",
-        "description": "CHOOH² powered sportscar.",
+        "description": "CHOOH2 powered sportscar.",
         "category": "land",
         "sdp": 50,
         "seats": 4,
@@ -62,7 +62,7 @@ vehicles = [
     },
     {
         "name": "Super Groundcar",
-        "description": "Exotic CHOOH² sportscar, capable of extreme speeds.",
+        "description": "Exotic CHOOH2 sportscar, capable of extreme speeds.",
         "category": "land",
         "sdp": 50,
         "seats": 2,
@@ -73,7 +73,7 @@ vehicles = [
     # Sea Vehicles
     {
         "name": "Jetski",
-        "description": "Common CHOOH² powered personal watercraft.",
+        "description": "Common CHOOH2 powered personal watercraft.",
         "category": "sea",
         "sdp": 35,
         "seats": 2,
@@ -83,7 +83,7 @@ vehicles = [
     },
     {
         "name": "Speedboat",
-        "description": "CHOOH² powered speedboat.",
+        "description": "CHOOH2 powered speedboat.",
         "category": "sea",
         "sdp": 50,
         "seats": 4,
@@ -93,7 +93,7 @@ vehicles = [
     },
     {
         "name": "Cabin Cruiser",
-        "description": "Luxury CHOOH² powerboat with room to provide accommodations for a small, privileged few. Cabin Cruisers have customized rooms.",
+        "description": "Luxury CHOOH2 powerboat with room to provide accommodations for a small, privileged few. Cabin Cruisers have customized rooms.",
         "category": "sea",
         "sdp": 60,
         "seats": 4,  # 2 per room, minimum 2 rooms
@@ -103,7 +103,7 @@ vehicles = [
     },
     {
         "name": "Yacht",
-        "description": "Luxury CHOOH² pleasurecraft with ample room to provide accommodations and entertainment for a host and their distinguished guests. Yachts have customized rooms.",
+        "description": "Luxury CHOOH2 pleasurecraft with ample room to provide accommodations and entertainment for a host and their distinguished guests. Yachts have customized rooms.",
         "category": "sea",
         "sdp": 100,
         "seats": 16,  # 4 per room, minimum 4 rooms
@@ -114,7 +114,7 @@ vehicles = [
     # Air Vehicles
     {
         "name": "Gyrocopter",
-        "description": "A tiny CHOOH² powered rotorcraft favored by flying enthusiasts.",
+        "description": "A tiny CHOOH2 powered rotorcraft favored by flying enthusiasts.",
         "category": "air",
         "sdp": 35,
         "seats": 2,
@@ -124,7 +124,7 @@ vehicles = [
     },
     {
         "name": "Helicopter",
-        "description": "Full featured CHOOH² powered helicopter capable of sustained flight.",
+        "description": "Full featured CHOOH2 powered helicopter capable of sustained flight.",
         "category": "air",
         "sdp": 60,
         "seats": 4,
@@ -134,7 +134,7 @@ vehicles = [
     },
     {
         "name": "AV-4 Multipurpose Aerodyne",
-        "description": "Highly advanced CHOOH² vertical thrust engine powered flying vehicle.",
+        "description": "Highly advanced CHOOH2 vertical thrust engine powered flying vehicle.",
         "category": "air",
         "sdp": 100,
         "seats": 6,
@@ -144,7 +144,7 @@ vehicles = [
     },
     {
         "name": "AV-9 Super Aerodyne",
-        "description": "Exotic CHOOH² vertical thrust engine flying vehicle, capable of extreme speeds.",
+        "description": "Exotic CHOOH2 vertical thrust engine flying vehicle, capable of extreme speeds.",
         "category": "air",
         "sdp": 60,
         "seats": 2,
@@ -741,7 +741,7 @@ weapons = [
         "category": "melee",
         "weapon_type": "very heavy melee",
         "quality": "standard",
-        "description": "Two-Handed Exotic Very Heavy Melee Weapon (sword). With correct biometric key, damage ignores armor below SP7. Without key, weapon won't vibrate—just a standard Two-Handed Exotic Very Heavy Melee Weapon."
+        "description": "Two-Handed Exotic Very Heavy Melee Weapon (sword). With correct biometric key, damage ignores armor below SP7. Without key, weapon won't vibrate - just a standard Two-Handed Exotic Very Heavy Melee Weapon."
     },
     {
         "name": "Zhirafa Rhinocefist",
@@ -1787,7 +1787,7 @@ weapons = [
         "clip": 0,
         "weapon_type": "very heavy pistol",
         "quality": "poor",
-        "description": "Poor Quality Exotic Very Heavy Pistol. Fires rocks—ammo free. Repair destroyed: 1 hour, no Check."
+        "description": "Poor Quality Exotic Very Heavy Pistol. Fires rocks - ammo free. Repair destroyed: 1 hour, no Check."
     },
     {
         "name": "Pursuit Security Inc Crowd Buster",
@@ -2273,31 +2273,31 @@ armors = [
         "description": "A shield with 15 HP. It cannot be installed in a Pop-Up Shield."
     },
     {
-        "name": "Light Metalgear®",
+        "name": "Light Metalgear(R)",
         "sp": 16,
         "ev": 3,
         "locations": "Body",
         "weight": 3,
         "value": 1000,
-        "description": "Metalgear® with SP 16. Armor Penalty -3 to REF, DEX, and MOVE."
+        "description": "Metalgear(R) with SP 16. Armor Penalty -3 to REF, DEX, and MOVE."
     },
     {
-        "name": "Hybrid Metalgear®",
+        "name": "Hybrid Metalgear(R)",
         "sp": 17,
         "ev": 4,
         "locations": "Body",
         "weight": 3,
         "value": 2552,
-        "description": "Metalgear® with SP 17. Armor Penalty -3 to REF, -4 to DEX, -4 to MOVE."
+        "description": "Metalgear(R) with SP 17. Armor Penalty -3 to REF, -4 to DEX, -4 to MOVE."
     },
     {
-        "name": "Heavy Metalgear®",
+        "name": "Heavy Metalgear(R)",
         "sp": 19,
         "ev": 5,
         "locations": "Body",
         "weight": 4,
         "value": 5000,
-        "description": "Metalgear® with SP 19. Armor Penalty -4 to REF, -5 to DEX, -5 to MOVE."
+        "description": "Metalgear(R) with SP 19. Armor Penalty -4 to REF, -5 to DEX, -5 to MOVE."
     },
     {
         "name": "Roller Derby Helmet",
@@ -2330,7 +2330,7 @@ gears = [
     {
         "name": "Roller Derby Skates",
         "category": "Clothing",
-        "description": "A pair of roller skates with four wheels – two in front, two in the back – and a stopper. Roller Derby Skates increase movement by 4 m/yds when using the Run Action. Pulling the skates on or taking them off requires an Action. Any options stored in a Cyberleg or meat leg are inaccessible while the skates are worn. At the GM's discretion, performing a physical task involving the legs or balance while wearing skates might count as a Complex Task and impose a -2 modifier to Checks. This modifier shouldn't be applied to Checks made during a roller derby jam.",
+        "description": "A pair of roller skates with four wheels - two in front, two in the back - and a stopper. Roller Derby Skates increase movement by 4 m/yds when using the Run Action. Pulling the skates on or taking them off requires an Action. Any options stored in a Cyberleg or meat leg are inaccessible while the skates are worn. At the GM's discretion, performing a physical task involving the legs or balance while wearing skates might count as a Complex Task and impose a -2 modifier to Checks. This modifier shouldn't be applied to Checks made during a roller derby jam.",
         "weight": 1,
         "value": 50
     },

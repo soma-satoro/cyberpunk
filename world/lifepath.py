@@ -443,13 +443,14 @@ def undo_neuroport_choice(caller, lp):
                 caller.msg(f"|r  >> Error removing Neuroport: {e}|n")
         return True, None
 
-    if had_no:
+    had_money_stipend = had_no or str(neuroport).lower() == "already_owned"
+    if had_money_stipend:
         from world.cyberpunk_sheets.services import CharacterMoneyService
         balance = CharacterMoneyService.get_balance(char)
         if balance < 500:
             return False, (
-                "You previously chose not to take a Neuroport and received 500 eurodollars. "
-                "To redo your lifepath, you must have at least 500 eb to 'return' that choice. "
+                "You previously received 500 eurodollars from the lifepath Neuroport step. "
+                "To redo your lifepath, you must have at least 500 eb to return that stipend. "
                 "Your current balance is {} eb. Use the |wrefund|n command (in chargen) "
                 "to sell items back and recover eurodollars, then try again."
             ).format(balance)
@@ -707,7 +708,13 @@ def format_lifepath(lifepath_data):
     lines.append(_field("Family Background:", lifepath_data.get('family_background', 'Unknown')))
     neuroport = lifepath_data.get('neuroport_option') or lifepath_data.get('neuroport')
     if neuroport:
-        neuroport_str = "Yes (free Neuroport)" if str(neuroport).lower() == "yes" else "No (+500 eb)"
+        nlow = str(neuroport).lower()
+        if nlow == "already_owned":
+            neuroport_str = "Already had Neuroport (+500 eb)"
+        elif nlow == "yes":
+            neuroport_str = "Yes (free Neuroport)"
+        else:
+            neuroport_str = "No (+500 eb)"
         lines.append(_field("Neuroport:", neuroport_str))
     lines.append(_field("Childhood:", lifepath_data.get('childhood_environment', 'Unknown')))
     lines.append(_field("Family Crisis:", lifepath_data.get('family_crisis', 'Unknown')))

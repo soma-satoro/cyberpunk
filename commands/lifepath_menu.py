@@ -162,7 +162,7 @@ COREBOOK_DESCRIPTIONS = {
     "romantic": (
         "It wouldn't be Cyberpunk if there was a happily ever-after, now would it? "
         "You've probably been involved with someone by now. We don't care about the "
-        "ones that worked—we want to know about the ugly ones that ripped out your "
+        "ones that worked - we want to know about the ugly ones that ripped out your "
         "heart."
     ),
     "role_event": (
@@ -211,37 +211,6 @@ def _build_descriptive_menu(title, description_key, options, key_field=None, sho
 def _build_choice_text(title, options, key_field=None, show_random=True):
     """Build a numbered menu from a list of options (legacy, no description)."""
     return _build_descriptive_menu(title, "", options, key_field, show_random)
-
-
-def _sync_lifepath_to_sheet(caller):
-    """Sync caller.db.lifepath to CharacterSheet when it exists."""
-    sheet = getattr(caller, 'character_sheet', None)
-    if not sheet:
-        return
-    lp = caller.db.lifepath or {}
-    # Map new lifepath fields to CharacterSheet columns
-    if lp.get("cultural_region"):
-        sheet.cultural_origin = lp["cultural_region"]
-    if lp.get("personality"):
-        sheet.personality = lp["personality"]
-    if lp.get("clothing_style"):
-        sheet.clothing_style = lp["clothing_style"]
-    if lp.get("hairstyle"):
-        sheet.hairstyle = lp["hairstyle"]
-    if lp.get("affectation"):
-        sheet.affectation = lp["affectation"]
-    if lp.get("motivation"):
-        sheet.motivation = lp["motivation"]
-    if lp.get("life_goal"):
-        sheet.life_goal = lp["life_goal"]
-    if lp.get("family_background"):
-        sheet.family_background = lp["family_background"]
-    if lp.get("childhood_environment"):
-        sheet.environment = lp["childhood_environment"]
-    if lp.get("family_crisis"):
-        sheet.family_crisis = lp["family_crisis"]
-    # Store friends, enemies, romantic, role_event in db.lifepath (sheet has no columns)
-    sheet.save()
 
 
 # ---------------------------------------------------------------------------
@@ -476,7 +445,26 @@ def menunode_family_background(caller, raw_string, **kwargs):
 
 
 def menunode_neuroport(caller, raw_string, **kwargs):
-    """Neuroport option: 1=Yes (free neuroport cyberware), 2=No (500 eurodollars)."""
+    """Neuroport option: 1=Yes (free Neuroport or swap from Neural Link), 2=No (500 eb).
+    If a Neuroport is already installed, skip this menu: +500 eb and continue."""
+    from world.chargen_neural_helpers import resolve_chargen_character, installed_neural_status
+    from world.cyberpunk_sheets.services import CharacterMoneyService
+
+    lp = caller.db.lifepath or {}
+    if not lp.get("neuroport_option"):
+        char = resolve_chargen_character(caller)
+        _has_nl, has_np = installed_neural_status(char)
+        if has_np:
+            lp["neuroport_option"] = "already_owned"
+            caller.db.lifepath = lp
+            CharacterMoneyService.add_money(char, 500)
+            caller.msg(
+                "|g  >> You already have a Neuroport. "
+                "500 eurodollars added; continuing lifepath.|n"
+            )
+            _sync_lifepath_to_sheet(caller)
+            return "menunode_childhood"
+
     desc = (
         "In the 2070s, most parents have done all they can to give their kids a Neuroport. "
         "This handy piece of cyberware is so ubiquitous that almost everyone has one. "
@@ -484,11 +472,12 @@ def menunode_neuroport(caller, raw_string, **kwargs):
         "gotten one yourself through hook or crook (or just saving a lot). Likewise, some people "
         "grew up with parents who didn't trust the corpos selling the Neuroport -- rightfully or not! "
         "Maybe it was just fully out of reach.\n\n"
-        "Do you have a neuroport?"
+        "If you only have an older Neural Link, choosing Yes will replace it with a Neuroport.\n\n"
+        "Do you have (or want) a Neuroport?"
     )
     text = _header("Neuroport") + "\n\n"
     text += _wrap(desc) + "\n\n"
-    text += "  |w1|n. Yes (you receive a free Neuroport)\n"
+    text += "  |w1|n. Yes (free Neuroport; Neural Link removed if present)\n"
     text += "  |w2|n. No (you receive 500 eurodollars instead)\n\n"
     text += "  |wQ|n. Quit lifepath builder\n"
     options = [
@@ -500,43 +489,18 @@ def menunode_neuroport(caller, raw_string, **kwargs):
 
 
 def _set_neuroport(caller, raw_string, has_neuroport=True, **kwargs):
-    """Apply neuroport choice: grant cyberware or 500 eb."""
+    """Apply neuroport choice: grant Neuroport (swap from Neural Link if needed), or 500 eb."""
+    from world.chargen_neural_helpers import grant_neuroport_for_lifepath_yes
+
     lp = caller.db.lifepath or {}
     lp["neuroport_option"] = "yes" if has_neuroport else "no"
     caller.db.lifepath = lp
 
-    # Resolve character: caller may be Account or Character
     char = getattr(caller, "character", caller) if hasattr(caller, "character") else caller
     sheet = getattr(char, "character_sheet", None) or getattr(caller, "character_sheet", None)
 
     if has_neuroport and sheet:
-        try:
-            from world.cyberware.models import Cyberware
-            from world.inventory.models import Inventory
-            from world.inventory.models import CyberwareInstance
-
-            cyberware = Cyberware.objects.filter(name__iexact="Neuroport").first()
-            if cyberware:
-                inventory, _ = Inventory.get_or_create_for_character(char)
-                if not inventory.cyberware.filter(cyberware__name__iexact="Neuroport", installed=True).exists():
-                    cw_instance = CyberwareInstance.objects.create(
-                        cyberware=cyberware,
-                        character_sheet=sheet,
-                        installed=True,
-                    )
-                    inventory.cyberware.add(cw_instance)
-                    if hasattr(sheet, "consume_uninstalled_hl_for_cyberware"):
-                        sheet.consume_uninstalled_hl_for_cyberware(cyberware)
-                    if hasattr(sheet, "calculate_humanity_loss"):
-                        sheet.calculate_humanity_loss()
-                    sheet.save()
-                    caller.msg("|g  >> You received a free Neuroport!|n")
-                else:
-                    caller.msg("|y  >> You already have a Neuroport.|n")
-            else:
-                caller.msg("|y  >> Neuroport cyberware not found in database.|n")
-        except Exception as ex:
-            caller.msg(f"|r  >> Error granting Neuroport: {ex}|n")
+        grant_neuroport_for_lifepath_yes(char, msg=caller.msg)
     elif not has_neuroport:
         from world.cyberpunk_sheets.services import CharacterMoneyService
         CharacterMoneyService.add_money(char, 500)

@@ -500,7 +500,7 @@ class CmdRest(MuxCommand):
                 f"|gSuccess!|n You focus your mind. Recovered {gain} Focus. "
                 f"({focus_obj.current_focus}/{max_focus})"
             )
-            # CPR: successful rest day — nanomachines repair Skin Weave / Subdermal +1 SP each (if installed)
+            # CPR: successful rest day - nanomachines repair Skin Weave / Subdermal +1 SP each (if installed)
             if hasattr(char, "character_sheet") and char.character_sheet:
                 try:
                     from world.cyberware.implanted_armor import apply_daily_natural_healing_implanted_armor

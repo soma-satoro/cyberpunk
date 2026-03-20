@@ -16,7 +16,7 @@ from world.inventory.models import Inventory, Weapon, Armor, Gear, Ammunition, A
 from world.cyberware.models import Cyberware
 from world.equipment_data import weapons as weapon_data, armors as armor_data, gears as gear_data, ammunition
 from world.utils.formatting import header, footer, divider, sheet_header, sheet_section, format_stat
-from world.utils.character_utils import get_full_attribute_name, format_skill_display, STAT_MAPPING, SKILL_MAPPING, is_character_approved
+from world.utils.character_utils import get_full_attribute_name, format_skill_display, STAT_MAPPING, SKILL_MAPPING
 from world.utils.difficulty_values import parse_dv
 from typeclasses.npcs import NPC, is_npc
 from commands.attack_commands import (
@@ -31,14 +31,11 @@ from commands.attack_commands import (
 
 from commands.CmdPose import PoseBreakMixin
 from utils.text import process_special_characters
+from world.utils.permission_utils import check_storyteller_plot_access
 
 
 def _is_staff(caller):
     return caller.check_permstring("builders") or caller.check_permstring("wizards")
-
-
-def _is_storyteller(caller):
-    return caller.check_permstring("storyteller")
 
 
 def _can_manage_npc(caller, npc):
@@ -248,12 +245,12 @@ class CmdNpc(MuxCommand):
     def _require_staff_or_storyteller(self):
         if _is_staff(self.caller):
             return True
-        if _is_storyteller(self.caller):
-            if not is_character_approved(self.caller):
-                self.caller.msg("You must be approved by staff before creating or managing NPCs.")
-                return False
+        if check_storyteller_plot_access(self.caller):
             return True
-        self.caller.msg("You must be staff or a player storyteller to use NPC commands.")
+        if self.caller.check_permstring("storyteller"):
+            self.caller.msg("You must be approved by staff before creating or managing NPCs.")
+        else:
+            self.caller.msg("You must be staff or a player storyteller to use NPC commands.")
         return False
 
     def cmd_list(self):

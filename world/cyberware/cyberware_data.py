@@ -864,7 +864,7 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 7,
         "cost": 500,
         "is_weapon": False,
-        "description": " A One-Handed Ranged Weapon (that need not be concealable before its installation) provided by the user is permanently installed into the Cyberarm (along with any weapon attachments attached to it) so that it can be successfully concealed without a Check, and can be drawn and stowed without an Action. While the weapon is “popped up,” the user can't hold anything in this arm's hand. Requires a Cyberarm and takes 2 Option Slots.",
+        "description": " A One-Handed Ranged Weapon (that need not be concealable before its installation) provided by the user is permanently installed into the Cyberarm (along with any weapon attachments attached to it) so that it can be successfully concealed without a Check, and can be drawn and stowed without an Action. While the weapon is \"popped up,\" the user can't hold anything in this arm's hand. Requires a Cyberarm and takes 2 Option Slots.",
         "requirements": "Cyberarm"
 
     },

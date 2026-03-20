@@ -19,7 +19,7 @@ own cmdsets by inheriting from them or directly from `evennia.CmdSet`.
 from evennia import default_cmds, CmdSet
 from .character_commands import CmdSheet, CmdRoll, CmdLuck, CmdShortDesc, CmdPlusOoc, CmdPlusIc, CmdMeet
 from .chargen import CmdChargen, CmdListCharacterSheets, CmdLifepath, CmdSelfStat, CmdSetLanguage, CmdSellYourSoul
-from .admin_commands import CmdStat, CmdHeal, CmdHarm, CmdApprove, CmdUnapprove, CmdSpawnRipperdoc, CmdGradientName, CmdClearAllStates, CmdClearRental, CmdCleanupDuplicates, CmdExamine, CmdAssociateAllCharacterSheets, CmdViewCharacterSheetID, CmdSetCharacterSheetID, CmdAllSheets, CmdViewSheetAttributes, CmdSyncLanguages, CmdJoin, CmdSummon, CmdClearDb
+from .admin_commands import CmdStat, CmdHeal, CmdHarm, CmdApprove, CmdUnapprove, CmdSetStoryteller, CmdSpawnRipperdoc, CmdGradientName, CmdClearAllStates, CmdClearRental, CmdCleanupDuplicates, CmdExamine, CmdAssociateAllCharacterSheets, CmdViewCharacterSheetID, CmdSetCharacterSheetID, CmdAllSheets, CmdViewSheetAttributes, CmdSyncLanguages, CmdJoin, CmdSummon, CmdClearDb
 from .inventory_commands import CmdInventory, CmdWear, CmdEquipWeapon
 from .voucher_commands import CmdVoucher, CmdConceal, CmdOwner
 from .equipment_commands import CmdAddItem, CmdAddVehicle, CmdRemoveVehicle, CmdPopulateWeapons, CmdPopulateArmor, CmdPopulateGear, CmdPopulateVehicles, CmdViewEquipment, CmdPopulateAllEquipment, CmdRemoveEquipment, CmdPopulateCyberware, CmdDepopulateAllEquipment
@@ -85,6 +85,7 @@ from .where import CmdWhere
 from .CmdWho import CmdWho, CmdLfrp
 from .coords_commands import CmdCoords, CmdGo
 from .commonmux.CmdPage import CmdPage
+from .commonmux.CmdStaff import CmdStaff
 #from .vehicle_commands import CmdEnterVehicle, CmdExitVehicle
 from .dice_commands import CmdDice
 from .npc_commands import CmdNpc
@@ -227,6 +228,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdEditBoard())
         self.add(CmdGrantAccess())
         self.add(CmdPage())
+        self.add(CmdStaff())
 
 class AccountCmdSet(default_cmds.AccountCmdSet):
     """
@@ -276,6 +278,7 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdConfig())
         self.add(CmdApprove())
         self.add(CmdUnapprove())
+        self.add(CmdSetStoryteller())
         self.add(CmdPopulateCyberware())
         self.add(CmdAdminMoney())
         self.add(CmdSpawnRipperdoc())

@@ -50,3 +50,19 @@ def check_admin_permission(caller):
 def format_permission_error(caller, action="perform this action"):
     """Return a user-friendly message when permission is denied."""
     return f"You do not have permission to {action}."
+
+
+def check_storyteller_plot_access(caller):
+    """
+    True if caller may use plot-runner tools (e.g. NPCs, some mission actions).
+
+    Requires the Storyteller account permission and an approved character, same
+    gate as +npc for non-staff.
+    """
+    if not caller or not hasattr(caller, "check_permstring"):
+        return False
+    if not caller.check_permstring("storyteller"):
+        return False
+    from world.utils.character_utils import is_character_approved
+
+    return bool(is_character_approved(caller))

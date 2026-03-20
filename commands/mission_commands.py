@@ -22,6 +22,7 @@ from world.mission_board.services import (
 from world.cyberpunk_sheets.services import CharacterMoneyService
 from world.utils.formatting import header, footer, divider
 from world.utils.character_utils import is_character_approved
+from world.utils.permission_utils import check_storyteller_plot_access
 from evennia.utils import logger
 
 
@@ -34,7 +35,7 @@ def _is_fixer(caller):
 
 
 def _can_post_mission(caller):
-    return _is_staff(caller) or _is_fixer(caller)
+    return _is_staff(caller) or _is_fixer(caller) or check_storyteller_plot_access(caller)
 
 
 def _can_post_faction_mission(caller, faction_model):
@@ -50,6 +51,11 @@ def _can_post_faction_mission(caller, faction_model):
 
 def _is_storyteller(caller):
     return caller.check_permstring("storyteller")
+
+
+def _plot_storyteller(caller):
+    """Approved character with storyteller permission (plot tools, not full staff)."""
+    return check_storyteller_plot_access(caller)
 
 
 def _get_character_for_arg(caller, arg):
@@ -683,12 +689,16 @@ class CmdMission(MuxCommand):
                 self.caller.msg(f"Faction '{faction_name}' not found.")
                 return
         elif not _can_post_mission(self.caller):
-            self.caller.msg("Only staff, Fixers, faction heads, or designated mission posters can create missions.")
+            self.caller.msg(
+                "Only staff, Fixers, approved storytellers, faction heads, or designated mission posters "
+                "can create missions."
+            )
             return
 
         is_staff = _is_staff(self.caller)
         is_fixer_or_faction = _is_fixer(self.caller) or (faction and _can_post_faction_mission(self.caller, faction))
-        if not is_staff and is_fixer_or_faction:
+        is_plot_st = _plot_storyteller(self.caller)
+        if not is_staff and (is_fixer_or_faction or is_plot_st):
             total_rep = rep + faction_rep
             if total_rep > services.FIXER_REP_CAP:
                 self.caller.msg(f"Fixers and faction posters can offer max {services.FIXER_REP_CAP} total rep.")

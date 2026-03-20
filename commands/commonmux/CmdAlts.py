@@ -78,7 +78,7 @@ class CmdAlts(MuxCommand):
             msg += "You have not declared any alt characters.\n"
         else:
             for alt_name in alts:
-                msg += f"  • {alt_name}\n"
+                msg += f"  * {alt_name}\n"
         
         # Check for pending requests
         pending_requests = caller.db.pending_alt_requests or {}
@@ -107,7 +107,7 @@ class CmdAlts(MuxCommand):
             msg += f"{target.name} has not declared any alt characters."
         else:
             for alt_name in alts:
-                msg += f"  • {alt_name}\n"
+                msg += f"  * {alt_name}\n"
         
         caller.msg(msg)
     
@@ -250,7 +250,7 @@ class CmdAlts(MuxCommand):
             else:
                 time_str = f"{time_ago} days ago"
             
-            msg += f"  • {requester} (requested {time_str})\n"
+            msg += f"  * {requester} (requested {time_str})\n"
             msg += f"    Code: |w{code}|n\n"
         
         msg += f"\n|xUse |w+alts/confirm <code>|x to approve a request.|n"

@@ -228,28 +228,28 @@ def format_item_info(source, data):
     out = [section_header(f"{source}: {data.get('name', '')}", width=78)]
 
     if source == "Weapon":
-        out.append(f"  |gDamage:|n {data.get('damage', '—')}  |gROF:|n {data.get('rof', '—')}  |gHands:|n {data.get('hands', '—')}")
-        wt = data.get('weapon_type', '') or data.get('category', '—')
+        out.append(f"  |gDamage:|n {data.get('damage', '-')}  |gROF:|n {data.get('rof', '-')}  |gHands:|n {data.get('hands', '-')}")
+        wt = data.get('weapon_type', '') or data.get('category', '-')
         qual = data.get('quality', 'standard') or 'standard'
-        out.append(f"  |gCategory:|n {data.get('category', '—')}  |gType:|n {wt}  |gQuality:|n {qual}  |gValue:|n {data.get('value', 0)} eb  |gConceal:|n {'Yes' if data.get('concealable') else 'No'}")
+        out.append(f"  |gCategory:|n {data.get('category', '-')}  |gType:|n {wt}  |gQuality:|n {qual}  |gValue:|n {data.get('value', 0)} eb  |gConceal:|n {'Yes' if data.get('concealable') else 'No'}")
         if data.get("description"):
             out.append(f"  {wrap_ansi(data['description'], 74)}")
     elif source == "Armor":
-        out.append(f"  |gSP:|n {data.get('sp', 0)}  |gEV:|n {data.get('ev', 0)}  |gLocations:|n {data.get('locations', '—')}")
+        out.append(f"  |gSP:|n {data.get('sp', 0)}  |gEV:|n {data.get('ev', 0)}  |gLocations:|n {data.get('locations', '-')}")
         out.append(f"  |gValue:|n {data.get('value', 0)} eb")
         if data.get("description"):
             out.append(f"  {wrap_ansi(data['description'], 74)}")
     elif source == "Gear":
-        out.append(f"  |gCategory:|n {data.get('category', '—')}  |gValue:|n {data.get('value', 0)} eb")
+        out.append(f"  |gCategory:|n {data.get('category', '-')}  |gValue:|n {data.get('value', 0)} eb")
         if data.get("description"):
             out.append(f"  {wrap_ansi(data['description'], 74)}")
     elif source == "Vehicle":
-        out.append(f"  |gCategory:|n {data.get('category', '—')}  |gSDP:|n {data.get('sdp', 0)}  |gSeats:|n {data.get('seats', 0)}")
-        out.append(f"  |gSpeed:|n {data.get('speed_narrative', '—')}  |gValue:|n {data.get('value', 0)} eb")
+        out.append(f"  |gCategory:|n {data.get('category', '-')}  |gSDP:|n {data.get('sdp', 0)}  |gSeats:|n {data.get('seats', 0)}")
+        out.append(f"  |gSpeed:|n {data.get('speed_narrative', '-')}  |gValue:|n {data.get('value', 0)} eb")
         if data.get("description"):
             out.append(f"  {wrap_ansi(data['description'], 74)}")
     elif source == "Ammunition":
-        out.append(f"  |gType:|n {data.get('ammo_type', '—')}  |gCost:|n {data.get('cost', 0)} eb")
+        out.append(f"  |gType:|n {data.get('ammo_type', '-')}  |gCost:|n {data.get('cost', 0)} eb")
         if data.get("description"):
             out.append(f"  {wrap_ansi(data['description'], 74)}")
     elif source == "Cyberdeck":
@@ -258,14 +258,14 @@ def format_item_info(source, data):
             out.append(f"  {wrap_ansi(data['description'], 74)}")
     elif source == "Weapon Attachment":
         out.append(f"  |gValue:|n {data.get('value', 0)} eb  DV{data.get('install_dv', 17)} {data.get('install_skill', 'Weaponstech')}")
-        out.append(f"  {wrap_ansi(data.get('effect_description') or data.get('description', '—'), 74)}")
+        out.append(f"  {wrap_ansi(data.get('effect_description') or data.get('description', '-'), 74)}")
     elif source == "Cyberware":
-        out.append(f"  |gType:|n {data.get('type', '—')}  |gSlots:|n {data.get('slots', 0)}  |gHL:|n {data.get('humanity_loss', 0)}  |gCost:|n {data.get('cost', 0)} eb")
+        out.append(f"  |gType:|n {data.get('type', '-')}  |gSlots:|n {data.get('slots', 0)}  |gHL:|n {data.get('humanity_loss', 0)}  |gCost:|n {data.get('cost', 0)} eb")
         if data.get("description"):
             out.append(f"  {wrap_ansi(data['description'], 74)}")
     elif source == "Netrunning Program":
-        out.append(f"  |gType:|n {data.get('type', '—')}  |gATK/DFV/Rez:|n {data.get('atk', 0)}/{data.get('dfv', 0)}/{data.get('rez', 0)}  |gCost:|n {data.get('cost', 0)} eb")
-        out.append(f"  |gEffect:|n {wrap_ansi(data.get('effect', '—'), 74)}")
+        out.append(f"  |gType:|n {data.get('type', '-')}  |gATK/DFV/Rez:|n {data.get('atk', 0)}/{data.get('dfv', 0)}/{data.get('rez', 0)}  |gCost:|n {data.get('cost', 0)} eb")
+        out.append(f"  |gEffect:|n {wrap_ansi(data.get('effect', '-'), 74)}")
         if data.get("icon"):
             out.append(f"  |gIcon:|n {data['icon']}")
     elif source == "Netrunning Hardware":
@@ -274,10 +274,10 @@ def format_item_info(source, data):
             out.append(f"  {wrap_ansi(data['description'], 74)}")
     elif source == "Black ICE":
         out.append(f"  |gATK/DFV/Rez:|n {data.get('atk', 0)}/{data.get('dfv', 0)}/{data.get('rez', 0)}  |gCost:|n {data.get('cost', 0)} eb")
-        out.append(f"  |gEffect:|n {wrap_ansi(data.get('effect', '—'), 74)}")
+        out.append(f"  |gEffect:|n {wrap_ansi(data.get('effect', '-'), 74)}")
     elif source == "Quickhack":
-        out.append(f"  |gDV:|n {data.get('dv', 0)}  |gTier:|n {data.get('tier', '—')}")
-        out.append(f"  |gEffect:|n {wrap_ansi(data.get('effect', '—'), 74)}")
+        out.append(f"  |gDV:|n {data.get('dv', 0)}  |gTier:|n {data.get('tier', '-')}")
+        out.append(f"  |gEffect:|n {wrap_ansi(data.get('effect', '-'), 74)}")
 
     out.append(divider("", width=78))
     return out
@@ -456,7 +456,7 @@ class CmdLookup(MuxCommand):
             out = [section_header("Roles", width=78)]
             for r in ROLES:
                 ab = ROLE_ABILITIES.get(r, {})
-                out.append(f"  |c{r}|n - {ab.get('ability', '—')}")
+                out.append(f"  |c{r}|n - {ab.get('ability', '-')}")
             out.append("\n  Use |w+lookup roles <name>|n for role ability details.")
             out.append(divider("", width=78))
             self.caller.msg("\n".join(out))
@@ -472,7 +472,7 @@ class CmdLookup(MuxCommand):
             ab = ROLE_ABILITIES[key]
             out = [
                 section_header(f"Role: {key}", width=78),
-                f"  |gPrimary Ability:|n {ab.get('ability', '—')}",
+                f"  |gPrimary Ability:|n {ab.get('ability', '-')}",
                 f"  {ab.get('description', '')}",
                 divider("", width=78),
             ]

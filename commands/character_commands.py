@@ -485,7 +485,7 @@ class CmdSheet(MuxCommand):
                         parts.append(", ".join(injs))
                     if cw:
                         parts.append(f"cyberware: {', '.join(cw)}")
-                    detail = "; ".join(parts) if parts else "—"
+                    detail = "; ".join(parts) if parts else "-"
                     output += f"  {amt} eb: {detail} ({dt})\n"
 
         output += footer(width=W, fillchar="-")

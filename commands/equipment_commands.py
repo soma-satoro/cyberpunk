@@ -649,7 +649,7 @@ class CmdViewEquipment(MuxCommand):
         for g in gears:
             nm = crop(g.name, width=28, suffix="...")
             out.append(f"|c{nm:<28}|n |gCategory:|n {g.category:<14} |gValue:|n |y{g.value} eb|n")
-            desc = wrap_ansi(g.description, 74) if g.description else "—"
+            desc = wrap_ansi(g.description, 74) if g.description else "-"
             out.append(f"  {desc}")
         out.append(divider("", width=78))
         return "\n".join(out) + "\n"
@@ -726,7 +726,7 @@ class CmdViewEquipment(MuxCommand):
         for a in atts:
             nm = crop(a.name, width=28, suffix="...")
             out.append(f"|c{nm:<28}|n |gValue:|n |y{a.value} eb|n DV{a.install_dv} {a.install_skill}")
-            out.append(f"  {a.effect_description or a.description or '—'}")
+            out.append(f"  {a.effect_description or a.description or '-'}")
         out.append(divider("", width=78))
         return "\n".join(out) + "\n"
 

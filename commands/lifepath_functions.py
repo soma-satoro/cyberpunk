@@ -169,34 +169,31 @@ def set_neuroport(caller, raw_string, has_neuroport=True, **kwargs):
             caller.msg(blocked_msg)
         return start_lifepath(caller)
 
-    lp["neuroport_option"] = "yes" if has_neuroport else "no"
-    caller.db.lifepath = lp
-
     char = getattr(caller, "character", caller) if hasattr(caller, "character") else caller
     sheet = getattr(char, "character_sheet", None) or getattr(caller, "character_sheet", None)
 
+    from world.chargen_neural_helpers import installed_neural_status, grant_neuroport_for_lifepath_yes
+    from world.cyberpunk_sheets.services import CharacterMoneyService
+
+    _, has_np = installed_neural_status(char)
+    if has_neuroport and has_np:
+        lp["neuroport_option"] = "already_owned"
+        caller.db.lifepath = lp
+        CharacterMoneyService.add_money(char, 500)
+        caller.msg(
+            "You already have a Neuroport. 500 eurodollars added."
+        )
+        return start_lifepath(caller)
+
+    lp["neuroport_option"] = "yes" if has_neuroport else "no"
+    caller.db.lifepath = lp
+
     if has_neuroport and sheet:
         try:
-            from world.cyberware.models import Cyberware
-            from world.inventory.models import Inventory, CyberwareInstance
-            cw = Cyberware.objects.filter(name__iexact="Neuroport").first()
-            if cw:
-                inventory, _ = Inventory.get_or_create_for_character(char)
-                if not inventory.cyberware.filter(cyberware__name__iexact="Neuroport", installed=True).exists():
-                    inst = CyberwareInstance.objects.create(cyberware=cw, character_sheet=sheet, installed=True)
-                    inventory.cyberware.add(inst)
-                    if hasattr(sheet, "consume_uninstalled_hl_for_cyberware"):
-                        sheet.consume_uninstalled_hl_for_cyberware(cw)
-                    if hasattr(sheet, "calculate_humanity_loss"):
-                        sheet.calculate_humanity_loss()
-                    sheet.save()
-                    caller.msg("You received a free Neuroport!")
-            else:
-                caller.msg("Neuroport cyberware not found.")
+            grant_neuroport_for_lifepath_yes(char, msg=caller.msg)
         except Exception as e:
             caller.msg(f"Error granting Neuroport: {e}")
     elif not has_neuroport:
-        from world.cyberpunk_sheets.services import CharacterMoneyService
         CharacterMoneyService.add_money(char, 500)
         caller.msg("You received 500 eurodollars (saved from not buying cyberware).")
 

@@ -101,9 +101,9 @@ class CmdStaff(MuxCommand):
             if is_staff:
                 staff.append((account, character))
 
-        string = header(f"{settings.SERVERNAME} Staff", width=78, char="=") + "\n"
+        string = header(f"{settings.SERVERNAME} Staff", width=78, fillchar="=") + "\n"
         string += self.format_columns(["Name", "Position", "Status"], color="|w")
-        string += divider(78, char="=") + "\n"
+        string += divider("", width=78, fillchar="=") + "\n"
 
         if staff:
             for account, character in staff:
@@ -139,7 +139,35 @@ class CmdStaff(MuxCommand):
         else:
             string += "No staff members found.\n"
 
-        string += footer(width=78, char="=") + "\n"
+        # Accounts with Storyteller permission but not the staff tag (plot tools only)
+        staff_ids = {acc.id for acc, _ in staff}
+        storytellers = []
+        for account in all_accounts:
+            if account.id in staff_ids:
+                continue
+            if not account.check_permstring("storyteller"):
+                continue
+            character = account.db._playable_characters[0] if account.db._playable_characters else None
+            if character:
+                gradient_name = character.db.gradient_name
+                if gradient_name:
+                    st_name = ANSIString(gradient_name)
+                else:
+                    st_name = character.key.strip()
+            else:
+                st_name = account.key.strip()
+            st_status = "|gOnline|n" if account.is_connected else "|rOffline|n"
+            storytellers.append((st_name, st_status))
+
+        if storytellers:
+            string += "\n" + divider("", width=78, fillchar="-") + "\n"
+            string += "|wPlot storytellers|n (NPC/mission plot tools; not full staff)\n"
+            string += self.format_columns(["Name", "Role", "Status"], color="|w")
+            string += divider("", width=78, fillchar="=") + "\n"
+            for st_name, st_status in storytellers:
+                string += self.format_staff_row(st_name, "Storyteller", st_status)
+
+        string += footer(width=78, fillchar="=") + "\n"
         self.caller.msg(string)
 
     def format_columns(self, columns, color="|w"):
@@ -417,9 +445,9 @@ class CmdPST(default_cmds.MuxCommand):
                 if obj.dbref not in [x[2] for x in player_storytellers]:
                     player_storytellers.add((None, obj, obj.dbref))
 
-        string = header(f"{settings.SERVERNAME} Player Storytellers", width=78, char="=") + "\n"
+        string = header(f"{settings.SERVERNAME} Player Storytellers", width=78, fillchar="=") + "\n"
         string += self.format_columns(["Name", "Position", "Status", "Claimed"], color="|w")
-        string += divider(78, char="=") + "\n"
+        string += divider("", width=78, fillchar="=") + "\n"
 
         if player_storytellers:
             for account, character, _ in sorted(player_storytellers, key=lambda x: (x[1].key if x[1] else x[0].key) if x[1] or x[0] else ""):
@@ -447,7 +475,7 @@ class CmdPST(default_cmds.MuxCommand):
         else:
             string += "No player storytellers found.\n"
 
-        string += footer(width=78, char="=") + "\n"
+        string += footer(width=78, fillchar="=") + "\n"
         self.caller.msg(string)
 
     def is_claimed(self, account, character):

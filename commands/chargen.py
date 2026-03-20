@@ -946,7 +946,7 @@ class ConfirmCmdSet(CmdSet):
 
 class CmdSellYourSoul(Command):
     """
-    During chargen: opt into Sell Your Soul for 1500 eb + free Neural Link.
+    During chargen: opt into Sell Your Soul for 1500 eb + free Neural Link or Neuroport (choice).
     Choose employer (Military/Crime/Corporation) and catch (Hostages, Blackmail, etc.).
 
     Usage:
@@ -1274,7 +1274,7 @@ class CmdSelfStat(MuxCommand):
             )
             return
 
-        # Maker specialties (Tech only, chargen only) - allocate Maker rank × 2
+        # Maker specialties (Tech only, chargen only) - allocate Maker rank x 2
         elif full_attr_name in MAKER_SPECIALTY_ATTRIBUTES:
             if (char.db.role or "").strip() != "Tech":
                 self.caller.msg("Maker specialties are only for Techs.")

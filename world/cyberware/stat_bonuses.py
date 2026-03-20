@@ -193,10 +193,13 @@ def _fashion_style_bonus(instances: List[Any], counts: Counter) -> int:
     effective_tattoo_points = tattoos + (1 if nails > 0 else 0)
     if effective_tattoo_points >= 3:
         bonus += 2
+    return bonus
+
+def _fashion_personal_grooming_bonus(instances: List[Any], counts: Counter) -> int:
+    bonus = 0
     if counts.get("chemskin", 0) > 0 and counts.get("techhair", 0) > 0:
         bonus += 2
     return bonus
-
 
 def _superchrome_style_bonus(counts: Counter) -> int:
     if counts.get("superchrome covering", 0) > 0:
@@ -287,12 +290,12 @@ def get_cyberware_skill_bonus(character: Any, skill_key: str) -> int:
     if counts.get("audiovox", 0) > 0:
         if base == "play_instrument" and instance and instance.lower() in ("singing", "sing"):
             bonus += 2
-
-    # Style (stack fashion + superchrome rules)
+    # Personal Grooming: Chemskin + Techhair +2
+    if base == "personal_grooming":
+        bonus += _fashion_personal_grooming_bonus(instances, counts)
+    # Style: Fashion + Superchrome +2
     if base == "style":
-        bonus += _fashion_style_bonus(instances, counts)
-        bonus += _superchrome_style_bonus(counts)
-
+        bonus += _fashion_style_bonus(instances, counts) + _superchrome_style_bonus(counts)
     # Contortionist: Extra-Jointed (+2 per qualifying limb, max 4 limbs); Sycust Cyberspine +1
     if base == "contortionist":
         bonus += _extra_jointed_contortion_bonus(instances)

@@ -52,26 +52,26 @@ self.add(CommonMuxCmdSet())
 
 ```
 commonmux/
-├── __init__.py                 # Package initialization
-├── commonmux_cmdset.py         # Main commandset containing all commands
-├── README.md                   # This file
-├── CmdAlias.py                 # Alias management
-├── CmdAlts.py                  # Alt character management
-├── CmdEmit.py                  # Room emits
-├── CmdFinger.py                # OOC/IC Character information
-├── CmdLanguage.py              # Language system
-├── CmdPage.py                  # Private messaging
-├── CmdPool.py                  # Resource/power point management
-├── CmdPose.py                  # Posing/emoting
-├── CmdSay.py                   # In-character speech
-├── CmdShortDesc.py             # Short character descriptions
-├── CmdStaff.py                 # Staff roster
-├── CmdTableTalk.py             # OOC table talk
-├── CmdTxt.py                   # Text messages
-├── CmdWatch.py                 # Watching/monitoring
-├── CmdWeather.py               # Weather system
-├── CmdWho.py                   # Who list and census
-└── notes.py                    # Set notes on characters
++-- __init__.py                 # Package initialization
++-- commonmux_cmdset.py         # Main commandset containing all commands
++-- README.md                   # This file
++-- CmdAlias.py                 # Alias management
++-- CmdAlts.py                  # Alt character management
++-- CmdEmit.py                  # Room emits
++-- CmdFinger.py                # OOC/IC Character information
++-- CmdLanguage.py              # Language system
++-- CmdPage.py                  # Private messaging
++-- CmdPool.py                  # Resource/power point management
++-- CmdPose.py                  # Posing/emoting
++-- CmdSay.py                   # In-character speech
++-- CmdShortDesc.py             # Short character descriptions
++-- CmdStaff.py                 # Staff roster
++-- CmdTableTalk.py             # OOC table talk
++-- CmdTxt.py                   # Text messages
++-- CmdWatch.py                 # Watching/monitoring
++-- CmdWeather.py               # Weather system
++-- CmdWho.py                   # Who list and census
+`-- notes.py                    # Set notes on characters
 ```
 
 ## Integration

@@ -153,7 +153,7 @@ class CmdCoords(MuxCommand):
             if room_obj:
                 room_name = room_obj[0].name
                 # Mark favorites with a star
-                fav_marker = "|y★|n " if room_code in favorites else "  "
+                fav_marker = "|y*|n " if room_code in favorites else "  "
                 output.append(f"{fav_marker}|c{room_code}|n - {room_name}")
             else:
                 output.append(f"  |c{room_code}|n - |rDeleted Room|n")
@@ -296,10 +296,10 @@ class CmdCoords(MuxCommand):
                 if matching_rooms:
                     room = matching_rooms[0]
                     area_name = room.db.area_name or "Unknown Area"
-                    output.append(f"  |y★|n |c{room_code}|n - {room.name}")
+                    output.append(f"  |y*|n |c{room_code}|n - {room.name}")
                     output.append(f"      |x{area_name}|n")
                 else:
-                    output.append(f"  |y★|n |c{room_code}|n - |rRoom Not Found|n")
+                    output.append(f"  |y*|n |c{room_code}|n - |rRoom Not Found|n")
 
             output.append("")
             output.append(f"|gTotal: {len(favorites)} favorite{'s' if len(favorites) != 1 else ''}|n")

@@ -88,3 +88,6 @@ __pycache__/
 *.pyc
 *.pyo
 /docs
+_skill_chip_addcyberware_soma.txt
+docs/mediawiki/Roleplay_Commands_Guide.wiki
+docs/mediawiki/Mysteries_Guide.wiki

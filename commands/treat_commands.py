@@ -372,8 +372,8 @@ class CmdTreat(MuxCommand):
         for name in injuries:
             data, _ = get_injury_data_by_name(name)
             qf = " |g(quick-fixed)|n" if _is_injury_quick_fixed(sheet, name) else ""
-            effect = data.get("effect", "—") if data else "—"
-            lines.append(f"  • {name}{qf} [{effect}]")
+            effect = data.get("effect", "-") if data else "-"
+            lines.append(f"  * {name}{qf} [{effect}]")
         self.caller.msg("\n".join(lines))
 
     def _do_quick(self, args):
@@ -788,7 +788,7 @@ class CmdTreat(MuxCommand):
         if eligible:
             lines.append("  Cyberware replacement available:")
             for e in eligible:
-                lines.append(f"    • {e['injury']}: {e['cyberware']} ({e['cost']} eb)")
+                lines.append(f"    * {e['injury']}: {e['cyberware']} ({e['cost']} eb)")
         lines.append(f"Base cost: {base_cost} eb (highest DC {highest_dc})")
         if eligible:
             lines.append(f"With all cyberware: {max_total} eb")

@@ -162,7 +162,7 @@ class CmdHealth(MuxCommand):
                 effect_key = (data or {}).get("effect", "none")
                 desc = INJURY_EFFECT_DESCRIPTIONS.get(effect_key, effect_key)
                 qf = " |g(quick-fixed)|n" if _is_injury_quick_fixed(sheet, name) else ""
-                output += f"  • {name}{qf}\n"
+                output += f"  * {name}{qf}\n"
                 output += f"    {desc}\n"
 
         # Armor

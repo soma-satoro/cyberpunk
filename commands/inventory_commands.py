@@ -27,7 +27,7 @@ def _inventory_weapon_type_cell(weapon):
     """Weapon type for the inv table: ``weapon_type`` or ``category``; abbreviates *Very* to *v.*."""
     wt = (getattr(weapon, "weapon_type", None) or "").strip()
     if not wt:
-        wt = (getattr(weapon, "category", None) or "").replace("_", " ").strip() or "—"
+        wt = (getattr(weapon, "category", None) or "").replace("_", " ").strip() or "-"
     return re.sub(r"(?i)\bvery\b", "v.", wt)
 
 class CmdInventory(MuxCommand):
@@ -331,7 +331,7 @@ class CmdInventory(MuxCommand):
                     eff_clip = get_effective_clip(weapon, inv)
                     ammo_display = f"{weapon.current_ammo or 0}/{eff_clip}"
                 else:
-                    ammo_display = "—"
+                    ammo_display = "-"
                 type_cell = _inventory_weapon_type_cell(weapon)
                 output += (
                     f"|w{inv_visible_cell(weapon.name, wn)}|n "

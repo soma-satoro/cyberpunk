@@ -15,7 +15,7 @@ import random
 from typing import Any, Dict, List, Optional
 
 # Top-level keys = generic \"name\" in equipment_data.weapons (EQUIPMENT / quality buy).
-# Sub-keys: poor, standard, excellent — each a list of {\"name\": str, \"tagline\": str}
+# Sub-keys: poor, standard, excellent - each a list of {\"name\": str, \"tagline\": str}
 WEAPON_FLAVOR_BY_QUALITY: Dict[str, Dict[str, List[Dict[str, str]]]] = {
     "Medium Pistol": {
         "poor": [
@@ -299,7 +299,7 @@ GENERIC_FLAVOR_WEAPON_NAMES = frozenset(WEAPON_FLAVOR_BY_QUALITY.keys())
 
 
 def normalize_weapon_label(s: str) -> str:
-    """Lowercase, strip quotes, collapse whitespace — for matching flavor chart names."""
+    """Lowercase, strip quotes, collapse whitespace - for matching flavor chart names."""
     t = (s or "").strip().lower()
     t = t.replace('"', "").replace("'", "")
     return " ".join(t.split())
@@ -416,7 +416,7 @@ def build_weapon_description(
     q = (template.get("quality") or "standard").title()
     wt = template.get("weapon_type") or "weapon"
     base = template.get("_generic_name") or template.get("name") or "Firearm"
-    return f"{tagline.strip()}. {q} quality {wt} ({source_note} — same game stats as {base})."
+    return f"{tagline.strip()}. {q} quality {wt} ({source_note} - same game stats as {base})."
 
 
 def reflavor_weapon_instance(
@@ -446,7 +446,7 @@ def reflavor_weapon_instance(
         return (
             False,
             "That weapon is not a generic category that can be re-flavored. "
-            "Use this on items like “Very Heavy Pistol” or types that match a generic row; "
+            "Use this on items like \"Very Heavy Pistol\" or types that match a generic row; "
             "named catalog weapons keep their manufacturer model names.",
         )
 
@@ -487,7 +487,7 @@ def reflavor_weapon_instance(
     weapon.save()
     return True, (
         f"Re-flavored to |w{weapon.name}|n ({weapon.quality}). "
-        f"Stats stay the same as |w{generic}|n — only the street identity changed."
+        f"Stats stay the same as |w{generic}|n - only the street identity changed."
     )
 
 

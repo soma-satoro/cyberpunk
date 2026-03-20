@@ -100,7 +100,7 @@ class CmdElo(MuxCommand):
         stats = " ".join(f"{s[:3].upper()}:{getattr(sheet, s)}" for s in ELO_STATS)
         skills_list = [f"{sk}:{sheet.skills.get(sk, 0)}" for sk, _, _ in ELO_SKILLS if sheet.skills.get(sk, 0)]
         skills_list.extend(f"{k}:{v}" for k, v in sheet.skills.items() if k not in (x[0] for x in ELO_SKILLS) and v)
-        skills_str = ", ".join(skills_list) if skills_list else "—"
+        skills_str = ", ".join(skills_list) if skills_list else "-"
 
         hint = "" if sheet.is_complete else "\n|yUse |wsheet/elo|n to complete character generation.|n"
         caller.msg(
@@ -146,7 +146,7 @@ class CmdElo(MuxCommand):
                 if hasattr(obj, "has_account") and obj.has_account:
                     sheet = get_elo_sheet_for_character(obj)
                     elfname = sheet.elfname if sheet else obj.key
-                    elfline = sheet.elfline.get_bracket_name() if sheet and sheet.elfline else "—"
+                    elfline = sheet.elfline.get_bracket_name() if sheet and sheet.elfline else "-"
                     chars.append((elfname, elfline, room.key))
         if not chars:
             self.caller.msg("|wElflands Who|n\nNo one is currently in the Elflands.")

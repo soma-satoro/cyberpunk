@@ -799,6 +799,113 @@ class CmdUnapprove(AdminCommand):
         self.caller.msg(f"You have unapproved {target.name}.")
         target.msg("Your character has been unapproved. You may now use chargen commands again.")
 
+
+class CmdSetStoryteller(MuxCommand):
+    """
+    Grant or revoke the Storyteller permission on an account.
+
+    Storytellers may use plot-runner tools (+npc, mission/create, pickup GM, etc.)
+    without Builder/Admin access. They still need an approved character where
+    those systems require it.
+
+    Usage:
+      setstoryteller <account or character>
+      setstoryteller/remove <account or character>
+      setstoryteller/list
+
+    Switches:
+      remove - Revoke Storyteller permission
+      list   - List accounts that have Storyteller permission
+
+    Aliases: storytelleradmin, grantstoryteller
+    """
+
+    key = "setstoryteller"
+    aliases = ["storytelleradmin", "grantstoryteller"]
+    locks = "cmd:perm(Admin)"
+    help_category = "Admin"
+
+    _PERM = "Storyteller"
+
+    def _resolve_account(self, arg):
+        from evennia.utils.search import search_account
+
+        arg = (arg or "").strip()
+        if not arg:
+            return None
+        matches = list(search_account(arg, exact=False))
+        if len(matches) > 1:
+            self.caller.msg("Multiple accounts match. Be more specific.")
+            return None
+        if len(matches) == 1:
+            return matches[0]
+        target = self.caller.search(arg, global_search=True)
+        if not target:
+            return None
+        acc = getattr(target, "account", None)
+        if acc:
+            return acc
+        return target if hasattr(target, "permissions") else None
+
+    def _has_storyteller(self, account):
+        return bool(account and account.check_permstring("storyteller"))
+
+    def func(self):
+        if "list" in self.switches:
+            self._list_storytellers()
+            return
+        if "remove" in self.switches:
+            self._revoke()
+            return
+        self._grant()
+
+    def _grant(self):
+        if not self.args:
+            self.caller.msg("Usage: setstoryteller <account or character>")
+            return
+        account = self._resolve_account(self.args)
+        if not account:
+            return
+        if self._has_storyteller(account):
+            self.caller.msg(f"{account.key} already has Storyteller permission.")
+            return
+        account.permissions.add(self._PERM)
+        self.caller.msg(f"Granted Storyteller permission to account |w{account.key}|n.")
+        logger.log_info(f"Storyteller granted to {account.key} by {getattr(self.caller, 'key', self.caller)}")
+
+    def _revoke(self):
+        if not self.args:
+            self.caller.msg("Usage: setstoryteller/remove <account or character>")
+            return
+        account = self._resolve_account(self.args)
+        if not account:
+            return
+        if not self._has_storyteller(account):
+            self.caller.msg(f"{account.key} does not have Storyteller permission.")
+            return
+        account.permissions.remove(self._PERM)
+        self.caller.msg(f"Removed Storyteller permission from account |w{account.key}|n.")
+        logger.log_info(f"Storyteller revoked from {account.key} by {getattr(self.caller, 'key', self.caller)}")
+
+    def _list_storytellers(self):
+        from evennia.accounts.models import AccountDB
+
+        rows = []
+        for account in AccountDB.objects.all().order_by("username"):
+            if account.is_superuser:
+                continue
+            if not self._has_storyteller(account):
+                continue
+            char = account.db._playable_characters[0] if account.db._playable_characters else None
+            disp = char.key.strip() if char else account.key.strip()
+            rows.append(f"  |w{account.key}|n — {disp}")
+
+        if not rows:
+            self.caller.msg("No accounts have Storyteller permission.")
+            return
+        self.caller.msg("|wStoryteller accounts|n (plot tools, not full staff):\n" + "\n".join(rows))
+
+
 class CmdSpawnRipperdoc(Command):
     """
     Spawn a Ripperdoc NPC in the current location.

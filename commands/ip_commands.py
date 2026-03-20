@@ -9,7 +9,7 @@ Improvement Points (IP) commands.
 +ip/remove <name>=<amount> - Staff: Remove IP from a player
 
 Multi-role: any role ability can be raised with IP at the standard role-ability cost table
-(60 IP for rank 1, then 120, …). After chargen, +ip/buy can add other roles' abilities;
+(60 IP for rank 1, then 120, ...). After chargen, +ip/buy can add other roles' abilities;
 your +sheet Role line lists multiple roles (e.g. Solo / Medtech).
 """
 from evennia.commands.default.muxcommand import MuxCommand
