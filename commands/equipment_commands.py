@@ -10,7 +10,7 @@ from world.equipment_data import populate_weapons, populate_armor, populate_gear
 from world.cyberpunk_sheets.models import CharacterSheet
 from world.utils.ansi_utils import wrap_ansi
 from world.utils.formatting import header, footer, divider, section_header
-from .list_commands import _find_item_info, format_item_info
+from .list_commands import _find_item_info, format_item_info, try_resolve_equipdb_catalog_name
 from world.cyberware.utils import populate_cyberware
 from evennia.utils.ansi import ANSIString
 from evennia.utils import evtable
@@ -557,9 +557,19 @@ class CmdViewEquipment(MuxCommand):
             self.caller.msg("Usage: equipdb/info <item name>")
             return
 
-        source, data = _find_item_info(self.args)
+        raw_q = self.args.strip()
+        source, data = _find_item_info(raw_q)
         if not data:
-            self.caller.msg(f"Item '{self.args.strip()}' not found. Try |wequipdb/search <name>|n to find items.")
+            resolved, ferr = try_resolve_equipdb_catalog_name(raw_q)
+            if ferr:
+                self.caller.msg(ferr)
+                return
+            if resolved:
+                source, data = _find_item_info(resolved)
+        if not data:
+            self.caller.msg(
+                f"Item '{raw_q}' not found. Try |wequipdb/search <name>|n to find items."
+            )
             return
 
         self.caller.msg("\n".join(format_item_info(source, data)))
