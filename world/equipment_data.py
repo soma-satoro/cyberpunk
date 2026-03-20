@@ -3401,6 +3401,40 @@ gears = [
         "weight": 0,
         "value": 500
     },
+    # Core rulebook: generic quality-tier external cyberdecks
+    {
+        "name": "Excellent Quality Cyberdeck",
+        "category": "Cyberdeck",
+        "description": (
+            "A high-end modular platform that Programs and Hardware are installed on for the purpose of "
+            "Netrunning. This cyberdeck has 9 slots to install Programs and Hardware. Requires Interface "
+            "Plugs and Neural Link for a Netrunner to operate. See Netrunning Section on pg. 195."
+        ),
+        "weight": 0.5,
+        "value": 1000,
+    },
+    {
+        "name": "Poor Quality Cyberdeck",
+        "category": "Cyberdeck",
+        "description": (
+            "A cheap modular platform that Programs and Hardware are installed on for the purpose of "
+            "Netrunning. This cyberdeck has 5 slots to install Programs and Hardware. Requires Interface "
+            "Plugs and Neural Link for a Netrunner to operate. See Netrunning Section on pg. 195."
+        ),
+        "weight": 0.5,
+        "value": 100,
+    },
+    {
+        "name": "Standard Quality Cyberdeck",
+        "category": "Cyberdeck",
+        "description": (
+            "Modular platform that Programs and Hardware are installed on for the purpose of Netrunning. "
+            "This cyberdeck has 7 slots to install Programs and Hardware. Requires Interface Plugs and "
+            "Neural Link for a Netrunner to operate. See Netrunning Section on pg. 195."
+        ),
+        "weight": 0.5,
+        "value": 500,
+    },
 ]
 
 # Extend with Cyberpunk RED fashion items (core rulebook)
@@ -3409,6 +3443,42 @@ gears.extend(build_fashion_gear_list())
 
 #Cyberdecks (External)
 cyberdecks = [
+    {
+        "name": "Cyberdeck (Excellent Quality)",
+        "description": (
+            "A high-end modular platform that Programs and Hardware are installed on for the purpose of "
+            "Netrunning. This cyberdeck has 9 slots to install Programs and Hardware. Requires Interface "
+            "Plugs and Neural Link for a Netrunner to operate. See Netrunning Section on pg. 195."
+        ),
+        "hardware_slots": 0,
+        "program_slots": 0,
+        "any_slots": 9,
+        "value": 1000,
+    },
+    {
+        "name": "Cyberdeck (Poor Quality)",
+        "description": (
+            "A cheap modular platform that Programs and Hardware are installed on for the purpose of "
+            "Netrunning. This cyberdeck has 5 slots to install Programs and Hardware. Requires Interface "
+            "Plugs and Neural Link for a Netrunner to operate. See Netrunning Section on pg. 195."
+        ),
+        "hardware_slots": 0,
+        "program_slots": 0,
+        "any_slots": 5,
+        "value": 100,
+    },
+    {
+        "name": "Cyberdeck (Standard Quality)",
+        "description": (
+            "Modular platform that Programs and Hardware are installed on for the purpose of Netrunning. "
+            "This cyberdeck has 7 slots to install Programs and Hardware. Requires Interface Plugs and "
+            "Neural Link for a Netrunner to operate. See Netrunning Section on pg. 195."
+        ),
+        "hardware_slots": 0,
+        "program_slots": 0,
+        "any_slots": 7,
+        "value": 500,
+    },
     {
         "name": "SGI Technologies Elysia Mark V",
         "description": "The Elysia has a controversial history, being the favored deck of Rache Bartmoss. The Mark V capitalizes on the punk aesthetic by building a powerful machine in a trendy, anti-corporate case. One of the more expensive decks on the market.",
