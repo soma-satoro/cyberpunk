@@ -127,7 +127,6 @@ CHILD_REQUIRES_PARENT = {
     "popup shield": ["cyberarm", "neo-soviet cyberarm"],
     "popup ranged weapon": ["cyberarm", "neo-soviet cyberarm"],
     "quick change mount": ["cyberarm", "neo-soviet cyberarm"],
-    "rippers": ["cyberarm", "neo-soviet cyberarm"],
     "shoulder cam": ["cyberarm", "neo-soviet cyberarm"],
     "techscanner": ["cyberarm", "neo-soviet cyberarm"],
     "wolvers": ["cyberarm", "neo-soviet cyberarm"],
@@ -277,6 +276,9 @@ _CYBERLEG_INSTANCE_NAMES = [
 # Cyberarm/leg options that "can be the only cyberware in a meat arm/leg".
 # ONE such item can be installed without a Cyberarm/Cyberleg. For a second,
 # you must purchase the limb first, then parent the existing option to it.
+# Meat-arm rules: check_has_required_parent / check_cyberlimb_exclusive_option_capacity.
+# If parented, get_valid_parents_for_child uses CHILD_REQUIRES_PARENT when present
+# (e.g. Subdermal Grip); otherwise arm-only solo options resolve to Cyberarm hosts.
 SOLO_ARM_OPTIONS = frozenset({
     "big knucks",
     "rippers",
@@ -429,6 +431,16 @@ def check_cyberlimb_exclusive_option_capacity(character_sheet, cyberware):
     if not all(p in limb_hosts for p in vp):
         return True, ""
 
+    # Meat arm: one solo arm option may install with no Cyberarm (see SOLO_ARM_OPTIONS).
+    if name in SOLO_ARM_OPTIONS:
+        has_arm = CyberwareInstance.objects.filter(
+            character_sheet=character_sheet,
+            installed=True,
+            cyberware__name__in=["Cyberarm", "Neo-Soviet Cyberarm"],
+        ).exists()
+        if not has_arm and _count_solo_arm_options_unparented(character_sheet) == 0:
+            return True, ""
+
     tried = []
     for inst in CyberwareInstance.objects.filter(
         character_sheet=character_sheet,
@@ -565,10 +577,17 @@ def get_valid_parents_for_child(child_cyberware):
     """
     Get allowed parent names for a child. Uses CHILD_REQUIRES_PARENT and
     requirements from data.
+
+    Solo arm options (SOLO_ARM_OPTIONS) may install with no Cyberarm (meat arm);
+    if they are parented, hosts are still only Cyberarm / Neo-Soviet Cyberarm.
+    Entries also in CHILD_REQUIRES_PARENT (e.g. Subdermal Grip -> Neural Link) keep
+    their explicit rule set.
     """
     name = _norm(getattr(child_cyberware, "name", ""))
     if name in CHILD_REQUIRES_PARENT:
         return CHILD_REQUIRES_PARENT[name]
+    if name in SOLO_ARM_OPTIONS:
+        return ["cyberarm", "neo-soviet cyberarm"]
     # Fallback to requirements from data
     data = get_cyberware_data(child_cyberware)
     req = data.get("requirements")
