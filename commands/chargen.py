@@ -1133,6 +1133,8 @@ class CmdSelfStat(MuxCommand):
 
             # Set the new value directly on the character's DB
             setattr(char.db, full_attr_name, value)
+            if full_attr_name == "empathy":
+                char.recalculate_derived_stats()
 
         # Check if this is a skill
         elif full_attr_name in SKILL_MAPPING.values():
@@ -1375,11 +1377,16 @@ class CmdSelfStat(MuxCommand):
             sheet = char.character_sheet
             if hasattr(sheet, full_attr_name):
                 setattr(sheet, full_attr_name, value)
-                # Recalculate when body or has_cyberarm changes (affects unarmed damage)
-                if full_attr_name in ('body', 'has_cyberarm'):
+                # Recalculate when body or has_cyberarm changes (affects unarmed damage);
+                # empathy updates humanity cap/current on the sheet.
+                if full_attr_name in ('body', 'has_cyberarm', 'empathy'):
                     sheet.recalculate_derived_stats()
-                    char.db.unarmed_damage_dice = sheet.unarmed_damage_dice
-                    char.db.unarmed_damage_die_type = sheet.unarmed_damage_die_type
+                    if full_attr_name in ('body', 'has_cyberarm'):
+                        char.db.unarmed_damage_dice = sheet.unarmed_damage_dice
+                        char.db.unarmed_damage_die_type = sheet.unarmed_damage_die_type
+                    elif full_attr_name == 'empathy':
+                        char.db.humanity = sheet.humanity
+                        char.db.total_cyberware_humanity_loss = sheet.total_cyberware_humanity_loss
                 else:
                     sheet.save(skip_recalculation=True)  # Skip recalculation to avoid circular updates
 

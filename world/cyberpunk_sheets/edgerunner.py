@@ -794,8 +794,12 @@ class EdgerunnerChargen:
 
         # Store total loss
         character.db.total_cyberware_humanity_loss = total_humanity_loss
-        humanity_base = (getattr(character.db, 'humanity', 0) or 0) + old_total_hl + trauma_loss
-        character.db.humanity = max(0, min(character.db.empathy * 10, humanity_base - total_humanity_loss - trauma_loss))
+        natural_ceiling = character.db.empathy * 10
+        if total_humanity_loss + trauma_loss == 0:
+            character.db.humanity = natural_ceiling
+        else:
+            humanity_base = (getattr(character.db, 'humanity', 0) or 0) + old_total_hl + trauma_loss
+            character.db.humanity = max(0, min(natural_ceiling, humanity_base - total_humanity_loss - trauma_loss))
 
         # Recalculate empathy if humanity reduction is significant
         if character.db.empathy * 10 <= total_humanity_loss + trauma_loss:

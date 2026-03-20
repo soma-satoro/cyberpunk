@@ -556,10 +556,14 @@ class CharacterSheet(SharedMemoryModel):
         if not quiet:
             logger.info(f"Total cyberware humanity loss: {total_cyberware_hl}, trauma: {trauma_hl}, uninstalled: {uninstalled_hl}")
 
-        # Preserve staff-set humanity: use current humanity + old losses as base, then apply new losses
-        old_total_hl = getattr(self, "total_cyberware_humanity_loss", 0) or 0
-        humanity_base = self.humanity + old_total_hl + trauma_hl + uninstalled_hl
-        new_humanity = max(0, min(self.empathy * 10, humanity_base - total_hl))
+        natural_ceiling = self.empathy * 10
+        # No HL: full pool is Empathy × 10 (matches CPR when nothing has cost humanity yet).
+        if total_hl == 0:
+            new_humanity = natural_ceiling
+        else:
+            old_total_hl = getattr(self, "total_cyberware_humanity_loss", 0) or 0
+            humanity_base = self.humanity + old_total_hl + trauma_hl + uninstalled_hl
+            new_humanity = max(0, min(natural_ceiling, humanity_base - total_hl))
 
         if not quiet:
             logger.info(f"New calculated humanity: {new_humanity} (base preserved from staff-set)")
@@ -783,10 +787,14 @@ class CharacterSheet(SharedMemoryModel):
             total_cyberware_hl = 0
         trauma_hl = getattr(self, "trauma_humanity_loss", 0) or 0
 
-        # Preserve staff-set humanity: use current humanity + old losses as base, then apply current losses
-        old_total_hl = getattr(self, "total_cyberware_humanity_loss", 0) or 0
-        humanity_base = self.humanity + old_total_hl + trauma_hl
-        self.humanity = max(0, min(self.empathy * 10, humanity_base - total_cyberware_hl - trauma_hl))
+        natural_ceiling = self.empathy * 10
+        total_hl_impact = total_cyberware_hl + trauma_hl
+        if total_hl_impact == 0:
+            self.humanity = natural_ceiling
+        else:
+            old_total_hl = getattr(self, "total_cyberware_humanity_loss", 0) or 0
+            humanity_base = self.humanity + old_total_hl + trauma_hl
+            self.humanity = max(0, min(natural_ceiling, humanity_base - total_cyberware_hl - trauma_hl))
         self.total_cyberware_humanity_loss = total_cyberware_hl
 
         # Ensure _current_hp doesn't exceed _max_hp (allow negative for mortally wounded)

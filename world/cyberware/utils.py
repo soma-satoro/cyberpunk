@@ -1029,18 +1029,24 @@ def calculate_humanity_loss(sheet):
     installed_cyberware = CyberwareInstance.objects.filter(character_sheet=sheet, installed=True)
     total_cyberware_hl = sum(cw.cyberware.humanity_loss for cw in installed_cyberware)
     trauma_hl = getattr(sheet, "trauma_humanity_loss", 0) or 0
+    uhl = getattr(sheet, "uninstalled_cyberware_hl", None) or {}
+    uninstalled_hl = sum(uhl.values()) if isinstance(uhl, dict) else 0
+    total_hl = total_cyberware_hl + trauma_hl + uninstalled_hl
+    natural_ceiling = sheet.empathy * 10
 
-    # Preserve staff-set humanity: use current humanity + old losses as base, then apply new losses
-    old_total_hl = getattr(sheet, "total_cyberware_humanity_loss", 0) or 0
-    humanity_base = sheet.humanity + old_total_hl + trauma_hl
-    new_humanity = max(0, min(sheet.empathy * 10, humanity_base - total_cyberware_hl - trauma_hl))
+    if total_hl == 0:
+        new_humanity = natural_ceiling
+    else:
+        old_total_hl = getattr(sheet, "total_cyberware_humanity_loss", 0) or 0
+        humanity_base = sheet.humanity + old_total_hl + trauma_hl + uninstalled_hl
+        new_humanity = max(0, min(natural_ceiling, humanity_base - total_hl))
 
     # Update humanity and empathy (only reduce empathy when humanity is overwhelmed by cyberware)
     sheet.humanity = new_humanity
-    if sheet.empathy * 10 <= total_cyberware_hl + trauma_hl:
+    if sheet.empathy * 10 <= total_hl:
         sheet.empathy = max(1, new_humanity // 10)
     
-    sheet.total_cyberware_humanity_loss = total_cyberware_hl
+    sheet.total_cyberware_humanity_loss = total_cyberware_hl + uninstalled_hl
     sheet.save()
 
     return new_humanity
