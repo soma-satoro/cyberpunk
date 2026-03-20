@@ -26,7 +26,7 @@ class CmdWeather(MuxCommand):
     """
 
     key = "+weather"
-    aliases = ["+time"]
+    aliases = ["+time", "weather"]
     locks = "cmd:all()"
     help_category = "Roleplaying Tools"
 
@@ -52,50 +52,55 @@ class CmdWeather(MuxCommand):
             return "Waning Crescent"
 
     def get_wind_direction(self, degrees):
+        if degrees is None:
+            return "variable"
         directions = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
                       "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
         index = round(degrees / (360. / len(directions))) % len(directions)
         return directions[index]
 
     def get_tide_info(self):
+        san_diego_tz = pytz.timezone('America/Los_Angeles')
         tide_url = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?date=today&station=9410170&product=predictions&datum=STND&time_zone=lst_ldt&interval=hilo&units=english&format=json"
-        try:
-            response = requests.get(tide_url)
-            tide_data = response.json()
-            
-            if 'predictions' not in tide_data:
-                return []  # Return empty list if no predictions are available
 
-            predictions = tide_data['predictions']
-            san_diego_tz = pytz.timezone('America/Los_Angeles')
-            now = datetime.now(san_diego_tz)
-            
-            future_tides = [
-                tide for tide in predictions
-                if san_diego_tz.localize(datetime.strptime(tide['t'], "%Y-%m-%d %H:%M")) > now
-            ]
-
-            next_two_tides = future_tides[:2]
-            
-            formatted_tides = []
-            for tide in next_two_tides:
-                tide_time = san_diego_tz.localize(datetime.strptime(tide['t'], "%Y-%m-%d %H:%M"))
-                tide_type = "High" if tide['type'] == 'H' else "Low"
-                formatted_tides.append((
-                    tide_type,
-                    tide_time.strftime("%I:%M %p"),
-                    f"{float(tide['v']):.1f} ft"
-                ))
-
-            return formatted_tides
-
-        except requests.RequestException:
-            # If there's an error fetching the data, return a placeholder
+        def _placeholder_tides():
             now = datetime.now(san_diego_tz)
             return [
                 ("High", (now + timedelta(hours=2)).strftime("%I:%M %p"), "N/A"),
-                ("Low", (now + timedelta(hours=8)).strftime("%I:%M %p"), "N/A")
+                ("Low", (now + timedelta(hours=8)).strftime("%I:%M %p"), "N/A"),
             ]
+
+        try:
+            response = requests.get(tide_url, timeout=15)
+            response.raise_for_status()
+            tide_data = response.json()
+
+            if "predictions" not in tide_data:
+                return []
+
+            predictions = tide_data["predictions"]
+            now = datetime.now(san_diego_tz)
+
+            future_tides = [
+                tide
+                for tide in predictions
+                if san_diego_tz.localize(datetime.strptime(tide["t"], "%Y-%m-%d %H:%M")) > now
+            ]
+
+            formatted_tides = []
+            for tide in future_tides[:2]:
+                tide_time = san_diego_tz.localize(datetime.strptime(tide["t"], "%Y-%m-%d %H:%M"))
+                tide_type = "High" if tide["type"] == "H" else "Low"
+                formatted_tides.append((
+                    tide_type,
+                    tide_time.strftime("%I:%M %p"),
+                    f"{float(tide['v']):.1f} ft",
+                ))
+
+            return formatted_tides if formatted_tides else _placeholder_tides()
+
+        except (requests.RequestException, ValueError, KeyError, TypeError):
+            return _placeholder_tides()
 
     def func(self):
         if "set" in self.switches:
@@ -126,8 +131,8 @@ class CmdWeather(MuxCommand):
         # Set the timezone for San Diego
         san_diego_tz = pytz.timezone('America/Los_Angeles')
         
-        # Get current date and time in San Diego
-        now = datetime.now(san_diego_tz)
+        # IC: same Pacific calendar / clock as the server, year 2076
+        now = datetime.now(san_diego_tz).replace(year=2076)
         current_date = now.strftime("%A, %B %d, %Y")
         current_time = now.strftime("%I:%M %p")
 
@@ -143,59 +148,63 @@ class CmdWeather(MuxCommand):
             output.extend(wrapped_weather.split('\n'))
         else:
             # OpenWeatherMap API call
-            api_key = "549ac137ad7db9fb5d6f68b590d488a6"
-            city_id = "5391811"  # San Diego city ID
+            api_key = "4a936d02adce57315006f55dde4e4e9c"
+            city_id = "5393081"  # San Luis Obispo city ID, roughly where Night City is.
             url = f"http://api.openweathermap.org/data/2.5/weather?id={city_id}&appid={api_key}&units=imperial"
             forecast_url = f"http://api.openweathermap.org/data/2.5/forecast?id={city_id}&appid={api_key}&units=imperial"
             
             try:
-                response = requests.get(url)
-                forecast_response = requests.get(forecast_url)
+                response = requests.get(url, timeout=15)
+                forecast_response = requests.get(forecast_url, timeout=15)
                 data = response.json()
                 forecast_data = forecast_response.json()
-                
-                if response.status_code == 200 and forecast_response.status_code == 200:
-                    temp = data['main']['temp']
-                    feels_like = data['main']['feels_like']
-                    humidity = data['main']['humidity']
-                    description = data['weather'][0]['description']
-                    wind_speed = data['wind']['speed']
-                    wind_deg = data['wind']['deg']
+
+                if (
+                    response.status_code == 200
+                    and forecast_response.status_code == 200
+                    and "main" in data
+                    and data.get("weather")
+                ):
+                    temp = data["main"]["temp"]
+                    feels_like = data["main"]["feels_like"]
+                    humidity = data["main"]["humidity"]
+                    description = data["weather"][0]["description"]
+                    wind = data.get("wind") or {}
+                    wind_speed = wind.get("speed", 0.0)
+                    wind_deg = wind.get("deg")
                     wind_dir = self.get_wind_direction(wind_deg)
-                    
-                    # Convert sunrise and sunset to local time
-                    sunrise = datetime.fromtimestamp(data['sys']['sunrise'], san_diego_tz).strftime("%I:%M %p")
-                    sunset = datetime.fromtimestamp(data['sys']['sunset'], san_diego_tz).strftime("%I:%M %p")
-                    
-                    # Get moon phase
+
+                    sunrise = datetime.fromtimestamp(data["sys"]["sunrise"], san_diego_tz).strftime("%I:%M %p")
+                    sunset = datetime.fromtimestamp(data["sys"]["sunset"], san_diego_tz).strftime("%I:%M %p")
+
                     moon_phase = self.get_moon_phase()
-                    
-                    # Get tomorrow's forecast
-                    tomorrow = forecast_data['list'][8]  # Roughly 24 hours from now
-                    tomorrow_temp = tomorrow['main']['temp']
-                    tomorrow_desc = tomorrow['weather'][0]['description']
-                    
-                    # Get tide information
+
+                    tlist = forecast_data.get("list") or []
+                    tomorrow = tlist[8] if len(tlist) > 8 else (tlist[-1] if tlist else None)
+
                     tide_info = self.get_tide_info()
-                    
-                    # Format the weather information
+
                     output.append(self.format_stat("Weather", description.capitalize(), width=width))
                     output.append(self.format_stat("Temperature", f"{temp:.1f}F", "Feels Like", f"{feels_like:.1f}F", width=width))
                     output.append(self.format_stat("Humidity", f"{humidity}%", "Wind", f"{wind_speed:.1f} mph from the {wind_dir}", width=width))
                     output.append(self.format_stat("Sunrise", sunrise, "Sunset", sunset, width=width))
                     output.append(self.format_stat("Moon Sign", moon_phase, width=width))
-                    
-                    # Add tide information
+
                     output.append(section_header("Tide Information", width=width))
                     for tide in tide_info:
                         output.append(self.format_stat(f"{tide[0]} Tide", f"{tide[1]} ({tide[2]})", width=width))
-                    
-                    output.append(section_header("Tomorrow's Forecast", width=width))
-                    forecast = f"Clear sky, {tomorrow_temp:.1f}F"
-                    output.append(self.format_stat("", forecast, width=width))
 
-            except requests.RequestException:
-                self.caller.msg("Sorry, there was an error connecting to the weather service.")
+                    if tomorrow and tomorrow.get("main") and tomorrow.get("weather"):
+                        tomorrow_temp = tomorrow["main"]["temp"]
+                        output.append(section_header("Tomorrow's Forecast", width=width))
+                        forecast = f"{tomorrow['weather'][0]['description'].capitalize()}, {tomorrow_temp:.1f}F"
+                        output.append(self.format_stat("", forecast, width=width))
+                else:
+                    err = data.get("message") or forecast_data.get("message") or "weather API error"
+                    output.append(self.format_stat("Weather", f"Unavailable: {err}", width=width))
+
+            except (requests.RequestException, ValueError, KeyError, TypeError):
+                output.append(self.format_stat("Weather", "Unavailable (could not reach weather service)", width=width))
 
         output.append(footer(width=width, fillchar="="))
         
