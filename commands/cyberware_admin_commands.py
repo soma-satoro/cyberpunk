@@ -7,6 +7,36 @@ from world.inventory.models import CyberwareInstance, Inventory
 from world.cyberpunk_sheets.edgerunner import EdgerunnerChargen
 
 
+def _cyberware_allows_multiple_installed_instances(cyberware: Cyberware) -> bool:
+    """
+    True for limb/option gear that can be installed more than once (different parents),
+    e.g. Extra-Jointed on each cyberarm. Paired bases (Cybereye, Cyberarm) still use /pair.
+    """
+    ctype = (cyberware.type or "").strip()
+    if ctype in ("Cyberlimb", "Cyberarm Option", "Cyberleg Option"):
+        return True
+    desc = (cyberware.description or "").strip().lower()
+    if desc.startswith(
+        ("cyberlimb option.", "cyberarm option.", "cyberleg option.")
+    ):
+        return True
+    name = (cyberware.name or "").strip().lower()
+    return name in {
+        "hardened shielding",
+        "plastic covering",
+        "realskinn covering",
+        "superchrome covering",
+        "gorilla arm",
+        "mantis blade",
+        "reinforced cyberlimb upgrade",
+        "extra-jointed cyberlimb upgrade",
+        "hardened cybereye casing",
+        "standard hand",
+        "standard foot",
+        "modular finger cyberhand",
+    }
+
+
 class CmdAddCyberware(MuxCommand):
     """
     Add cyberware to a character (staff only).
@@ -100,15 +130,16 @@ class CmdAddCyberware(MuxCommand):
                 paired_with=first_instance,
             )
         else:
-            # Normal add: block if already installed
-            if inventory.cyberware.filter(
-                cyberware__name__iexact=cyberware_name, installed=True
-            ).exists():
-                self.caller.msg(
-                    f"{character.key} already has {cyberware.name} installed. "
-                    "Use addcyberware/pair to add a paired second."
-                )
-                return
+            # Normal add: block duplicate *unless* this item can exist on multiple limbs/options
+            if not _cyberware_allows_multiple_installed_instances(cyberware):
+                if inventory.cyberware.filter(
+                    cyberware__name__iexact=cyberware_name, installed=True
+                ).exists():
+                    self.caller.msg(
+                        f"{character.key} already has {cyberware.name} installed. "
+                        "Use addcyberware/pair to add a paired second (e.g. second Cybereye)."
+                    )
+                    return
 
             cw_instance = CyberwareInstance.objects.create(
                 cyberware=cyberware,
@@ -119,6 +150,7 @@ class CmdAddCyberware(MuxCommand):
             )
 
         inventory.cyberware.add(cw_instance)
+        char_sheet.consume_uninstalled_hl_for_cyberware(cyberware)
         char_sheet.calculate_humanity_loss()
 
         if cyberware.name.lower() == "cyberarm":
@@ -202,28 +234,43 @@ class CmdParentCyberware(MuxCommand):
             )
             return
 
-        # Find child instance (installed or uninstalled)
-        child_inst = CyberwareInstance.objects.filter(
+        # Find child instance (installed or uninstalled); disambiguate when multiples exist
+        from world.cyberware.validation import validate_parent_child, select_child_instance_for_parenting
+
+        child_qs = CyberwareInstance.objects.filter(
             character_sheet=char_sheet,
             cyberware__name__iexact=child_name,
-        ).first()
-
-        if not child_inst:
+        )
+        if not child_qs.exists():
             inventory, _ = Inventory.get_or_create_for_character(character)
-            child_inst = inventory.cyberware.filter(
-                cyberware__name__iexact=child_name,
-            ).first()
+            inv_pks = list(
+                inventory.cyberware.filter(cyberware__name__iexact=child_name).values_list("pk", flat=True)
+            )
+            child_qs = CyberwareInstance.objects.filter(pk__in=inv_pks)
 
-        if not child_inst:
+        if not child_qs.exists():
             self.caller.msg(
                 f"{character.key} does not have cyberware named '{child_name}' in inventory."
             )
             return
 
-        if child_inst.parent_id == parent_inst.id:
+        child_inst, pick_status = select_child_instance_for_parenting(
+            child_qs, parent_inst, allow_uninstalled=True
+        )
+        if pick_status == "already":
             self.caller.msg(
                 f"{child_inst.cyberware.name} is already assigned to {parent_inst.cyberware.name}."
             )
+            return
+        if pick_status == "all_busy" or child_inst is None:
+            self.caller.msg(
+                f"Every '{child_name}' on {character.key} is already assigned to another limb. "
+                f"Unparent one first."
+            )
+            return
+        ok, err = validate_parent_child(parent_inst, child_inst)
+        if not ok:
+            self.caller.msg(err)
             return
 
         child_inst.parent = parent_inst
@@ -234,6 +281,7 @@ class CmdParentCyberware(MuxCommand):
             inventory.cyberware.add(child_inst)
         child_inst.save()
         if was_uninstalled:
+            char_sheet.consume_uninstalled_hl_for_cyberware(child_inst.cyberware)
             char_sheet.calculate_humanity_loss()
             EdgerunnerChargen.recalculate_humanity_for_typeclass(character)
             self.caller.msg(
@@ -263,8 +311,8 @@ class CmdUnparentCyberware(MuxCommand):
       unparentcyberware "Popup Ranged Weapon"=Soma
 
     Disconnects the option from its parent limb/suite. The option is uninstalled
-    (moved to inventory as uninstalled) and humanity loss is refunded.
-    Use cyberware/parent to re-assign it later.
+    (moved to inventory as uninstalled). Humanity loss is preserved - reinstalling
+    the same type won't cost extra. Use cyberware/parent to re-assign it later.
     """
 
     key = "unparentcyberware"
@@ -324,12 +372,23 @@ class CmdUnparentCyberware(MuxCommand):
 
         cyberware = child_inst.cyberware
         parent_name = child_inst.parent.cyberware.name if child_inst.parent else "?"
+        humanity_loss = cyberware.humanity_loss
 
-        # Unparent and uninstall (refunds humanity)
+        # Unparent and uninstall (preserve humanity - add to uninstalled tracking)
         child_inst.parent = None
         child_inst.installed = False
         child_inst.active = False
         child_inst.save()
+
+        # Preserve humanity: add to uninstalled_cyberware_hl so reinstall doesn't cost extra
+        if humanity_loss > 0 and hasattr(char_sheet, "uninstalled_cyberware_hl"):
+            uhl = getattr(char_sheet, "uninstalled_cyberware_hl", None) or {}
+            if not isinstance(uhl, dict):
+                uhl = {}
+            cw_name = cyberware.name
+            uhl[cw_name] = uhl.get(cw_name, 0) + humanity_loss
+            char_sheet.uninstalled_cyberware_hl = uhl
+            char_sheet.save(skip_recalculation=True)
 
         # Recalculate humanity
         char_sheet.calculate_humanity_loss()
@@ -337,9 +396,9 @@ class CmdUnparentCyberware(MuxCommand):
 
         self.caller.msg(
             f"Unparented {cyberware.name} from {parent_name} on {character.key}. "
-            f"Humanity recalculated (refunded {cyberware.humanity_loss})."
+            f"Humanity preserved - reinstall same type for no extra humanity cost."
         )
         character.msg(
             f"Your {cyberware.name} has been disconnected from {parent_name} and uninstalled. "
-            f"Humanity refunded. Use cyberware/parent to re-assign it."
+            f"Humanity preserved. Use cyberware/parent to re-assign it."
         )

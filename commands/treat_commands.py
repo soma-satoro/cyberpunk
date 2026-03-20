@@ -44,10 +44,11 @@ def _get_sheet(char):
 
 
 def _get_tech(char):
+    from world.utils.character_utils import get_technique_value
     sheet = _get_sheet(char)
     if sheet:
-        return getattr(sheet, "technology", 0) or 0
-    return getattr(char.db, "technology", 0) or 0
+        return get_technique_value(sheet) or 0
+    return get_technique_value(char) or 0
 
 
 def _get_first_aid(char):

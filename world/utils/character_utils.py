@@ -63,11 +63,44 @@ def can_receive_ip(obj):
     return is_character_approved(obj)
 
 
+def get_technique_value(obj, migrate=True):
+    """
+    Get TECH/Technique stat value with fallback for legacy 'technology' attribute.
+    After technology->technique rename, existing characters may have db.technology
+    but not db.technique. This returns technique or technology, and optionally
+    migrates (copies technology to technique) for future reads.
+
+    Args:
+        obj: Character (with obj.db) or CharacterSheet
+        migrate: If True, copy technology to technique when migration applies
+    """
+    if obj is None:
+        return None
+    # Character.db or similar
+    db = getattr(obj, "db", None)
+    if db is not None:
+        tech = getattr(db, "technique", None)
+        legacy = getattr(db, "technology", None)
+        if tech is not None and tech != "":
+            return tech
+        if legacy is not None and legacy != "":
+            if migrate:
+                db.technique = legacy
+            return legacy
+        return tech if tech is not None else legacy
+    # CharacterSheet (Django model) - use getattr for both
+    tech = getattr(obj, "technique", None)
+    legacy = getattr(obj, "technology", None)
+    if tech is not None and tech != "":
+        return tech
+    return legacy
+
+
 STAT_MAPPING = {
     'INT': 'intelligence',
     'REF': 'reflexes',
     'DEX': 'dexterity',
-    'TECH': 'technology',
+    'TECH': 'technique',
     'COOL': 'cool',
     'WILL': 'willpower',
     'LUCK': 'luck',
@@ -221,8 +254,11 @@ for mapping in [STAT_MAPPING, SKILL_MAPPING, TOPSHEET_MAPPING, MEDICINE_SPECIALT
         # Add partial matches
         for i in range(1, len(abbr)):
             REVERSE_MAPPING[abbr[:i]] = full
-        for i in range(3, len(full)):  # Start from 3 to avoid very short matches
-            REVERSE_MAPPING[full[:i].upper()] = full
+        # Prefixes of full names (e.g. SHOULDER -> shoulder_arms). Skip medicine_* / maker_* so
+        # "MEDICINE" stays the role ability and does not resolve to medicine_cryo; same for MAKER vs maker_field.
+        if full not in MEDICINE_SPECIALTY_ATTRIBUTES and full not in MAKER_SPECIALTY_ATTRIBUTES:
+            for i in range(3, len(full)):  # Start from 3 to avoid very short matches
+                REVERSE_MAPPING[full[:i].upper()] = full
 # Wound stats: full keys only (no short abbrevs to avoid conflicts)
 for abbr, full in WOUND_STAT_MAPPING.items():
     REVERSE_MAPPING[abbr] = full

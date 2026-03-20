@@ -82,34 +82,101 @@ def sheet_section(title, width=80):
     return "|b" + pattern + "|m" + "=" * fill_len + "|n\n"
 
 
+def inv_info_centered_title(title, width=78, dash_color="|m", title_color="|y"):
+    """
+    ``inv/info`` item header: centered title between horizontal rules.
+
+    Uses plain ``-`` only for rules (no ANSI embedded in the filler), so total visible
+    width is exactly ``width`` and the title stays centered.
+    """
+    clean = str(ANSIString(title).clean()).strip()
+    core = f" {clean} "  # spaces around name, matching book-style blocks
+    if len(core) >= width:
+        return f"{title_color}{clean}|n\n"
+    remaining = width - len(core)
+    left = remaining // 2
+    right = remaining - left
+    return f"{dash_color}{'-' * left}|n{title_color}{core}|n{dash_color}{'-' * right}|n\n"
+
+
+def inv_info_section_rule(label, width=78, dash_color="|m", label_color="|y"):
+    """
+    ``inv/info`` section line: ``----- Description -----`` with centered label.
+    """
+    clean_label = str(ANSIString(label).clean()).strip()
+    core = f" {clean_label} "
+    if len(core) >= width:
+        return f"{label_color}{clean_label}|n\n"
+    remaining = width - len(core)
+    left = remaining // 2
+    right = remaining - left
+    return f"{dash_color}{'-' * left}|n {label_color}{clean_label}|n {dash_color}{'-' * right}|n\n"
+
+
+def inv_info_footer(width=78, dash_color="|m"):
+    """``inv/info`` closing rule: one full line of hyphens at visible width ``width``."""
+    return f"{dash_color}{'-' * width}|n\n"
+
+
+# ASCII ellipsis only (avoid Unicode "…" in MUD column truncation)
+INV_ELLIPSIS_ASCII = "..."
+
+
+def inv_visible_cell(value, width: int, *, ellipsis: str = INV_ELLIPSIS_ASCII) -> str:
+    """
+    Format one inventory table cell: visible width ``width``, left-aligned,
+    truncated with ASCII ``...`` when needed (ANSI in ``value`` is measured as-clean).
+    """
+    if width < 1:
+        return ""
+    raw = "" if value is None else str(value)
+    clean = str(ANSIString(raw).clean())
+    elen = len(ellipsis)
+    if len(clean) <= width:
+        return clean + " " * (width - len(clean))
+    if width <= elen:
+        return (ellipsis[:width]).ljust(width)
+    body = clean[: width - elen] + ellipsis
+    return body + " " * (width - len(body))
+
 
 def divider(title, width=78, fillchar="-", color="|b", text_color="|y"):
-    """Create a divider with consistent width."""
+    """Create a divider with consistent width.
+
+    ``fillchar`` may be a single character or an Evennia ANSI segment repeated as one
+    logical unit (e.g. ``|m-|n`` for a magenta dash). Do **not** use only the first
+    character of multi-char strings — that turns valid codes into spurious ``|`` runs.
+    """
     if isinstance(fillchar, ANSIString):
-        fillchar = fillchar[0]
-    else:
-        fillchar = fillchar[0]
+        fillchar = str(fillchar)
+    if not fillchar:
+        fillchar = "-"
+
+    # Visible width contributed by one repetition of fillchar (usually 1 for "-" or "|m-|n")
+    unit_vis = max(1, len(ANSIString(fillchar).clean()))
 
     if title:
         # Calculate the width of the title text without color codes
         title_width = len(ANSIString(title).clean())
-        
+
         # For column headers, center the title
         if width <= 25:  # Column headers
             padding = (width - title_width) // 2
             title_str = title.center(width)
             return f"{color}{title_str}|n"
         else:  # Full-width dividers
-            # Calculate padding on each side of the title
+            # Padding on each side of the title (spaces around title are separate)
             padding = (width - title_width - 2) // 2  # -2 for spaces around the title
-            
-            # Create the divider with title
-            left_part = color + fillchar * padding + "|n"
-            right_part = color + fillchar * (width - padding - title_width - 2) + "|n"
+            right_slots = width - padding - title_width - 2
+            left_units = max(0, padding // unit_vis)
+            right_units = max(0, right_slots // unit_vis)
+
+            left_part = color + fillchar * left_units + "|n"
+            right_part = color + fillchar * right_units + "|n"
             return f"{left_part} {text_color}{title}|n {right_part}"
     else:
-        # If no title, just create a line of fillchars
-        return color + fillchar * width + "|n"
+        line_units = max(0, width // unit_vis)
+        return color + fillchar * line_units + "|n"
 
 
 section_header = divider  # Alias for backward compatibility

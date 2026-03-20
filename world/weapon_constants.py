@@ -42,8 +42,18 @@ def get_effective_clip(weapon, inventory=None):
     Get effective clip size for a weapon, considering Extended/Drum Magazine attachments.
     If inventory is provided, checks InventoryWeapon.installed_attachments for clip_modifier.
     Otherwise falls back to weapon.clip (standard).
+    Flavored weapons with clip 0 fall back to equipment_data generic template clip.
     """
     base_clip = getattr(weapon, "clip", 0) or 0
+    if not base_clip:
+        try:
+            from world.edgerunner_weapon_flavor import resolve_weapon_equipment_template
+
+            tpl = resolve_weapon_equipment_template(weapon)
+            if tpl and tpl.get("clip"):
+                base_clip = int(tpl["clip"])
+        except (TypeError, ValueError, ImportError):
+            pass
     if not inventory:
         return base_clip
     try:

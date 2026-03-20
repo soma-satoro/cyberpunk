@@ -8,6 +8,7 @@ from world.cyberpunk_constants import LANGUAGES as CYBERPUNK_LANGUAGES
 from world.inventory.models import Inventory, Weapon, Armor, Gear, CyberwareInstance, Ammunition, AmmoType
 from world.equipment_data import weapons, armors, gears, ammunition, cyberdecks as cyberdecks_data
 from world.equipment_data import weapons as weapon_data, armors as armor_data, gears as gear_data
+from world.edgerunner_weapon_flavor import flavor_edgerunner_weapon, pick_ammunition_for_weapon
 from world.chargen_constants import (
     FASHION_BUDGET,
     FASHION_ITEM_NAMES,
@@ -118,7 +119,8 @@ class EdgerunnerChargen:
         character.db.intelligence = sheet.intelligence
         character.db.reflexes = sheet.reflexes
         character.db.dexterity = sheet.dexterity
-        character.db.technology = sheet.technology
+        from world.utils.character_utils import get_technique_value
+        character.db.technique = get_technique_value(sheet) or sheet.technique or 1
         character.db.cool = sheet.cool
         character.db.willpower = sheet.willpower
         character.db.luck = sheet.luck
@@ -532,23 +534,33 @@ class EdgerunnerChargen:
         
         role_equipment = EQUIPMENT.get(role, {})
         
-        # Assign weapons
+        # Assign weapons (random flavor name per generic type — same stats as template)
         for weapon_name in role_equipment.get('weapons', []):
             weapon_stats = next((w for w in weapon_data if w['name'] == weapon_name), None)
             if weapon_stats:
+                flavored = flavor_edgerunner_weapon(weapon_stats)
+                clip = int(flavored.get('clip') or 0)
                 weapon, created = Weapon.objects.get_or_create(
-                    name=weapon_name,
+                    name=flavored['name'],
                     defaults={
-                        'damage': weapon_stats['damage'],
-                        'rof': weapon_stats['rof'],
-                        'hands': weapon_stats['hands'],
-                        'concealable': weapon_stats['concealable'],
-                        'weight': weapon_stats['weight'],
-                        'value': weapon_stats['value']
+                        'damage': flavored['damage'],
+                        'rof': flavored['rof'],
+                        'hands': flavored['hands'],
+                        'concealable': flavored['concealable'],
+                        'weight': flavored['weight'],
+                        'value': flavored['value'],
+                        'description': flavored.get('description', ''),
+                        'category': flavored.get('category', 'handgun'),
+                        'weapon_type': flavored.get('weapon_type', ''),
+                        'quality': flavored.get('quality', 'standard'),
+                        'clip': clip,
+                        'attachment_slots': int(flavored.get('attachment_slots') or 3),
+                        'max_ammo': clip,
+                        'current_ammo': clip,
                     }
                 )
                 inventory.weapons.add(weapon)
-                logger.info(f"Added weapon: {weapon_name}")
+                logger.info(f"Added weapon: {flavored['name']} (from {weapon_name})")
         
         # Assign armor
         for armor_name in role_equipment.get('armor', []):
@@ -615,10 +627,9 @@ class EdgerunnerChargen:
                 inventory.add_gear(gear)
                 logger.info(f"Added Netrunner cyberdeck: {deck_name}")
         
-        # Assign ammunition
+        # Assign ammunition (use weapon.weapon_type — flavor names break name.split() matching)
         for weapon in inventory.weapons.all():
-            weapon_type = weapon.name.split()[-1]  # Get the last word of the weapon name
-            ammo = next((a for a in ammunition if a['weapon_type'] == weapon_type), None)
+            ammo = pick_ammunition_for_weapon(ammunition, weapon)
             if ammo:
                 # Use filter().first() to handle duplicate Ammunition rows (e.g. from multiple populates)
                 ammo_obj = Ammunition.objects.filter(
@@ -954,23 +965,33 @@ class EdgerunnerChargen:
         
         role_equipment = EQUIPMENT.get(role, {})
         
-        # Assign weapons
+        # Assign weapons (random flavor name per generic type — same stats as template)
         for weapon_name in role_equipment.get('weapons', []):
             weapon_stats = next((w for w in weapon_data if w['name'] == weapon_name), None)
             if weapon_stats:
+                flavored = flavor_edgerunner_weapon(weapon_stats)
+                clip = int(flavored.get('clip') or 0)
                 weapon, created = Weapon.objects.get_or_create(
-                    name=weapon_name,
+                    name=flavored['name'],
                     defaults={
-                        'damage': weapon_stats['damage'],
-                        'rof': weapon_stats['rof'],
-                        'hands': weapon_stats['hands'],
-                        'concealable': weapon_stats['concealable'],
-                        'weight': weapon_stats['weight'],
-                        'value': weapon_stats['value']
+                        'damage': flavored['damage'],
+                        'rof': flavored['rof'],
+                        'hands': flavored['hands'],
+                        'concealable': flavored['concealable'],
+                        'weight': flavored['weight'],
+                        'value': flavored['value'],
+                        'description': flavored.get('description', ''),
+                        'category': flavored.get('category', 'handgun'),
+                        'weapon_type': flavored.get('weapon_type', ''),
+                        'quality': flavored.get('quality', 'standard'),
+                        'clip': clip,
+                        'attachment_slots': int(flavored.get('attachment_slots') or 3),
+                        'max_ammo': clip,
+                        'current_ammo': clip,
                     }
                 )
                 inventory.weapons.add(weapon)
-                logger.info(f"Added weapon: {weapon_name}")
+                logger.info(f"Added weapon: {flavored['name']} (from {weapon_name})")
         
         # Assign armor
         for armor_name in role_equipment.get('armor', []):
@@ -1036,8 +1057,7 @@ class EdgerunnerChargen:
         
         # Assign ammunition
         for weapon in inventory.weapons.all():
-            weapon_type = weapon.name.split()[-1]  # Get the last word of the weapon name
-            ammo = next((a for a in ammunition if a['weapon_type'] == weapon_type), None)
+            ammo = pick_ammunition_for_weapon(ammunition, weapon)
             if ammo:
                 # Use filter().first() to handle duplicate Ammunition rows (e.g. from multiple populates)
                 ammo_obj = Ammunition.objects.filter(

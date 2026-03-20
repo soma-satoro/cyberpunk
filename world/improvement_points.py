@@ -11,11 +11,12 @@ from datetime import datetime
 
 # Attributes that can be purchased with IP (stats 1-10)
 IP_ATTRIBUTES = [
-    "intelligence", "reflexes", "dexterity", "technology", "cool",
+    "intelligence", "reflexes", "dexterity", "technique", "cool",
     "willpower", "luck", "move", "body", "empathy"
 ]
 
-# Role abilities - use Role Ability cost table (60 per rank)
+# Role abilities - use Role Ability cost table (60 per rank). Any character may buy these with IP
+# after chargen to become multi-role; +sheet lists extra roles when rank > 0.
 IP_ROLE_ABILITIES = [
     "charismatic_impact", "combat_awareness", "interface", "maker", "medicine",
     "credibility", "teamwork", "backup", "operator", "moto"
@@ -146,40 +147,61 @@ def get_character_stat_value(character, stat_name):
     Missing skills are treated as level 0 (so buying them goes 0 -> 1).
     For local_expert and play_instrument, use get_skill_instance when instance is provided.
     Checks db.skills first, then character_sheet (for role abilities and other skills stored on sheet).
+    For skills, applies skill chip bonus (effective = max(natural, 3) when chip installed).
     """
     base, instance = parse_skill_instance(stat_name)
     if not base:
         return None
 
-    # Skill instances (local_expert, play_instrument) - use character's get_skill_instance
+    # Build skill_key for chip lookup: "education" or "martial_arts(tae_kwon_do)"
+    skill_key = f"{base}({instance})" if instance else base
+
+    # Attributes: return directly (no chip modifier)
+    if base in IP_ATTRIBUTES and hasattr(character, "db"):
+        if base == "technique":
+            from world.utils.character_utils import get_technique_value
+            return get_technique_value(character) or 1
+        return getattr(character.db, base, 1)
+
+    # Skill instances (local_expert, play_instrument, martial_arts) - use get_skill_instance
+    natural = None
     if base in SKILLS_REQUIRING_INSTANCE and instance and hasattr(character, "get_skill_instance"):
-        return character.get_skill_instance(base, instance)
+        natural = character.get_skill_instance(base, instance)
+    else:
+        key = base
+        natural = None
+        # Medtech Surgery / derived skills: use character.get_skill when not an instanced skill key
+        if hasattr(character, "get_skill") and not (base in SKILLS_REQUIRING_INSTANCE and instance):
+            try:
+                natural = character.get_skill(base)
+            except Exception:
+                natural = None
+        if natural is None and hasattr(character, "db"):
+            if hasattr(character.db, "skills") and character.db.skills is not None:
+                natural = character.db.skills.get(key, 0)
+            if natural is None or natural == 0:
+                if hasattr(character, "character_sheet") and character.character_sheet:
+                    sheet = character.character_sheet
+                    if hasattr(sheet, key):
+                        sheet_val = getattr(sheet, key, 0)
+                        if sheet_val is not None:
+                            natural = sheet_val
+            if natural is None and hasattr(character.db, "skills") and character.db.skills is not None:
+                natural = character.db.skills.get(key, 0)
+            if natural is None:
+                natural = getattr(character.db, key, 0)
+        elif natural is None:
+            natural = getattr(character, key, 0) if hasattr(character, key) else 0
+    natural = natural if natural is not None else 0
 
-    key = base
-    # Try typeclass first (db.skills or db.attribute)
-    if hasattr(character, "db"):
-        if key in IP_ATTRIBUTES:
-            return getattr(character.db, key, 1)
-        if hasattr(character.db, "skills") and character.db.skills is not None:
-            val = character.db.skills.get(key, 0)
-            if val:
-                return val
-        # Fallback to character_sheet for skills (including role abilities) when db.skills is empty or 0
-        if hasattr(character, "character_sheet") and character.character_sheet:
-            sheet = character.character_sheet
-            if hasattr(sheet, key):
-                sheet_val = getattr(sheet, key, 0)
-                if sheet_val is not None:
-                    return sheet_val
-        if hasattr(character.db, "skills") and character.db.skills is not None:
-            return character.db.skills.get(key, 0)
-        return getattr(character.db, key, 0)
-
-    # Fallback to character sheet model - missing skills/attrs = level 0
-    if hasattr(character, key):
-        val = getattr(character, key, 0)
-        return val if val is not None else 0
-    return 0
+    # Apply skill chip bonus for skills (not attributes/role abilities)
+    if base not in IP_ATTRIBUTES and base not in IP_ROLE_ABILITIES:
+        try:
+            from world.cyberware.skill_chips import get_effective_skill_value
+            return get_effective_skill_value(character, skill_key, natural)
+        except ImportError:
+            pass
+    return natural
 
 
 def set_character_stat_value(character, stat_name, value):

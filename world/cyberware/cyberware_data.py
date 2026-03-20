@@ -1,6 +1,7 @@
 # world/cyberware/cyberware_data.py
 
 from .models import Cyberware
+from world.list_data import SKILL_TO_STAT
 """
 The dictionary data utilizes the following pattern for an entry:
 
@@ -393,7 +394,11 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 7,
         "cost": 50,
         "is_weapon": False,
-        "description": "Cheapest cybereye. 2 Option Slots. Preinstalled Chyron (cannot remove). Up to 1/hr GM can serve ad: -1 to vision Checks until Action to close.",
+        "description": (
+            "A full Cybereye implant (not a cosmetic cover): 2 Option Slots, preinstalled Chyron (cannot remove). "
+            "Can pair with a second Sponsored or standard Cybereye, or install under a MultiOptic Mount like Cybereye. "
+            "Up to 1/hr GM can serve ad: -1 to vision Checks until Action to close."
+        ),
     },
     {
         "name": "Hardened Cybereye Casing",
@@ -402,8 +407,14 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 3,
         "cost": 500,
         "is_weapon": False,
-        "description": "Cybereye Option. Cybereye immune to EMP, microwaver, Non-Black ICE program effects. Requires Cybereye.",
-        "requirements": "Cybereye",
+        "description": (
+            "You didn't dig out your eyeballs and install cyberoptics just to watch the world go dark "
+            "because someone blasted off an EMP or hit you with a stray Microwaver pulse. "
+            "Cybereye option: cybereye internals are hardened to military standards; the cybereye and "
+            "installed options cannot be disabled, inoperable, or destroyed by electric shock, "
+            "microwaver or EMP pulses, or any Non-Black ICE program effect."
+        ),
+        "requirements": "Cybereye or Sponsored Cybereye or Kiroshi MonoVision or Cyclops International Bug Eye",
     },
     # Add more Cyberoptics items -- Leaving open in case of new book releases.
 
@@ -1040,8 +1051,11 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 3,
         "cost": 1000,
         "is_weapon": False,
-        "description": "Cyberlimb and installed options cannot be rendered inoperable by EMP effects, like Microwaver pulses, or Non-Black ICE Program effects. Requires Cyberarm or Cyberleg.",
-        "requirements": "Cyberlimb"
+        "description": (
+            "Clinic. Cyberlimb option. Cyberlimb and installed options cannot be rendered inoperable "
+            "by EMP effects, Microwaver pulses, or Non-Black ICE program effects. Requires Cyberarm or Cyberleg."
+        ),
+        "requirements": "Cyberarm or Cyberleg",
     },
     {
         "name": "Plastic Covering",
@@ -1050,8 +1064,8 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 0,
         "cost": 100,
         "is_weapon": False,
-        "description": "Plastic coating for Cyberlimb. Available in wide variety of colors and patterns. Requires a Cyberarm or Cyberleg but does not take an Option Slot.",
-        "requirements": "Cyberlimb"
+        "description": "Plastic coating for Cyberlimb or Cybereye. Available in wide variety of colors and patterns. Does not take an Option Slot on limbs.",
+        "requirements": "Cyberarm or Cyberleg or Cybereye",
     },
     {
         "name": "Realskinn Covering",
@@ -1060,8 +1074,8 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 0,
         "cost": 500,
         "is_weapon": False,
-        "description": "Artificial skin coating for Cyberlimb. Requires a Cyberarm or Cyberleg but does not take an Option Slot.",
-        "requirements": "Cyberlimb"
+        "description": "Artificial skin coating for Cyberlimb or Cybereye. Does not take an Option Slot on limbs.",
+        "requirements": "Cyberarm or Cyberleg or Cybereye",
     },
     {
         "name": "Superchrome Covering",
@@ -1070,8 +1084,8 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 0,
         "cost": 1000,
         "is_weapon": False,
-        "description": "Shiny metallic coating for Cyberlimb. +2 to Style. This bonus only applies once. Requires a Cyberarm or Cyberleg but does not take an Option Slot.",
-        "requirements": "Cyberlimb"
+        "description": "Shiny metallic coating for Cyberlimb or Cybereye. +2 to Style (once). Does not take an Option Slot on limbs.",
+        "requirements": "Cyberarm or Cyberleg or Cybereye",
     },
 
     # Black Chrome Cyberarm/Cyberlimb
@@ -1151,8 +1165,12 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 3,
         "cost": 1000,
         "is_weapon": False,
-        "description": "Cyberlimb Option. Immune to Broken Leg (Cyberleg) or Broken Arm (Cyberarm) Critical Injury. Requires Cyberarm or Cyberleg.",
-        "requirements": "Cyberlimb",
+        "description": (
+            "Cyberlimb option. Increased hydraulic redundancy and bracing: immune to the Broken Leg "
+            "critical injury on a Cyberleg, or Broken Arm on a Cyberarm; the GM decides which limb is "
+            "targeted when you suffer a critical injury unless otherwise stated. Requires Cyberarm or Cyberleg."
+        ),
+        "requirements": "Cyberarm or Cyberleg",
     },
     {
         "name": "Extra-Jointed Cyberlimb Upgrade",
@@ -1801,6 +1819,177 @@ BODYCULPT_PACKAGES = {
         "package_contains": ["Cybereye", "Cybereye", "Low Light-IR-UV", "Low Light-IR-UV", "Grafted Muscle and Bone Lace", "Skin Weave"],
     },
 }
+
+# Basic skills (1x cost) - each gets a Basic Skill Chip
+BASIC_SKILLS = [
+    "concentration", "conceal_object", "lip_reading", "perception", "tracking",
+    "athletics", "contortionist", "dance", "endurance", "resist_torture_drugs", "stealth",
+    "brawling", "evasion", "melee", "pick_pocket",
+    "archery", "handgun", "shoulder_arms", "drive_land", "pilot_sea", "riding",
+    "accounting", "animal_handling", "bureaucracy", "business", "composition", "criminology",
+    "cryptography", "deduction", "education", "gamble", "library_search",
+    "zoology", "physics", "stock_market", "biology", "chemistry", "neuroscience",
+    "data_science", "economics", "sociology", "political_science", "genetics", "anatomy",
+    "robotics", "nanotechnology", "tactics", "wilderness_survival",
+    "air_vehicle_tech", "artistry", "basic_tech", "cybertech", "first_aid", "forgery",
+    "land_vehicle_tech", "photography", "pick_lock", "sea_vehicle_tech", "weaponstech",
+    "acting", "bribery", "interrogation", "personal_grooming", "persuasion", "streetwise", "style", "trading",
+    "conversation", "human_perception",
+]
+# Advanced skills (2x cost) - each gets an Advanced Skill Chip
+ADVANCED_SKILLS = ["autofire", "heavy_weapons", "demolitions", "electronics_security_tech", "paramedic", "pilot_air"]
+
+# Martial Arts is double-cost; each style is its own Advanced Skill Chip.
+# skill_chip_target uses lowercase instance with spaces (e.g. martial_arts(krav maga)) so it matches +roll / IP lookups.
+MARTIAL_ARTS_STYLES = sorted([
+    "Aikido",
+    "Arasaka-te",
+    "Arnis",
+    "Boxing",
+    "Capoeira",
+    "Choy Li Fut",
+    "Drunken Fist",
+    "Gun Fu",
+    "Judo",
+    "Jujutsu",
+    "Jujitsu",  # alternate spelling / legacy
+    "Karate",
+    "Kendo",
+    "Krav Maga",
+    "Kung Fu",
+    "Kyudo",
+    "Militech Commando Training",
+    "Muay Thai",
+    "Multiarm Melee",
+    "PanzerFaust",
+    "Silat",
+    "Sov-System",
+    "Sumo",
+    "Tai Chi",
+    "Taekwondo",
+    "Tae Kwon Do",  # alternate spelling / legacy chars
+    "Thamoc",
+    "Thrash Sambo",
+    "Wrestling",
+], key=str.lower)
+
+# Local Expert / Play Instrument are 1x skills; chips must target the instance (base-only never matches rolls).
+LOCAL_EXPERT_AREAS = [
+    # Core / player-requested regions
+    "Night City",
+    "The Net",
+    "Badlands",
+    "Corporate Zones",
+    "Del Coronado Bay",
+    "Dogtown",
+    "Watson",
+    "Santo Domingo",
+    "Pacifica",
+    "NorCal Highways",
+    # Extra districts / travel hubs (CP Red map + common games)
+    "Westbrook",
+    "Heywood",
+    "City Center",
+    "Japantown",
+    "Little China",
+    "Vista Del Rey",
+    "Northside",
+    "The Glen",
+    "Rancho Coronado",
+    "Combat Zone",
+    "Orbital",
+    "Crystal Palace",
+    "Los Angeles",
+    "Tokyo",
+    "London",
+    "Atlanta",
+]
+
+PLAY_INSTRUMENT_VARIANTS = [
+    "Singing",
+    "Guitar",
+    "Violin",
+    "Cello",
+    "Piano",
+    "Drums",
+    "Bass",
+    "Synth",
+    "Brass Instruments",
+    "Woodwinds",
+]
+
+def _skill_display(skill_key):
+    from world.list_data import SKILL_DISPLAY_OVERRIDES
+    base = skill_key.split("(")[0] if "(" in skill_key else skill_key
+    return SKILL_DISPLAY_OVERRIDES.get(base, base.replace("_", " ").title())
+
+for skill in BASIC_SKILLS:
+    display = _skill_display(skill)
+    CYBERWARE_DATA_LIST.append({
+        "name": f"Basic Skill Chip ({display})",
+        "type": "Neuralware",
+        "slots": 0,
+        "humanity_loss": 7,
+        "cost": 500,
+        "is_weapon": False,
+        "skill_chip_target": skill,
+        "description": f"Chipware. While installed, grants {display} at +3 unless your natural rating is higher. Requires Chipware Socket.",
+        "requirements": "Chipware Socket",
+    })
+for skill in ADVANCED_SKILLS:
+    display = _skill_display(skill)
+    CYBERWARE_DATA_LIST.append({
+        "name": f"Advanced Skill Chip ({display})",
+        "type": "Neuralware",
+        "slots": 0,
+        "humanity_loss": 7,
+        "cost": 1000,
+        "is_weapon": False,
+        "skill_chip_target": skill,
+        "description": f"Chipware. While installed, grants {display} at +3 unless your natural rating is higher. Requires Chipware Socket.",
+        "requirements": "Chipware Socket",
+    })
+for style in MARTIAL_ARTS_STYLES:
+    inst = style.strip().lower()
+    CYBERWARE_DATA_LIST.append({
+        "name": f"Advanced Skill Chip (Martial Arts: {style})",
+        "type": "Neuralware",
+        "slots": 0,
+        "humanity_loss": 7,
+        "cost": 1000,
+        "is_weapon": False,
+        "skill_chip_target": f"martial_arts({inst})",
+        "description": f"Chipware. While installed, grants Martial Arts ({style}) at +3 unless your natural rating is higher. Requires Chipware Socket.",
+        "requirements": "Chipware Socket",
+    })
+
+for area in LOCAL_EXPERT_AREAS:
+    inst = area.strip().lower()
+    CYBERWARE_DATA_LIST.append({
+        "name": f"Basic Skill Chip (Local Expert: {area})",
+        "type": "Neuralware",
+        "slots": 0,
+        "humanity_loss": 7,
+        "cost": 500,
+        "is_weapon": False,
+        "skill_chip_target": f"local_expert({inst})",
+        "description": f"Chipware. While installed, grants Local Expert ({area}) at +3 unless your natural rating is higher. Requires Chipware Socket.",
+        "requirements": "Chipware Socket",
+    })
+
+for instrument in PLAY_INSTRUMENT_VARIANTS:
+    inst = instrument.strip().lower()
+    CYBERWARE_DATA_LIST.append({
+        "name": f"Basic Skill Chip (Play Instrument: {instrument})",
+        "type": "Neuralware",
+        "slots": 0,
+        "humanity_loss": 7,
+        "cost": 500,
+        "is_weapon": False,
+        "skill_chip_target": f"play_instrument({inst})",
+        "description": f"Chipware. While installed, grants Play Instrument ({instrument}) at +3 unless your natural rating is higher. Requires Chipware Socket.",
+        "requirements": "Chipware Socket",
+    })
 
 # Add bodysculpt packages as Cyberware entries so they appear in catalogs
 for pkg_name, pkg_data in BODYCULPT_PACKAGES.items():

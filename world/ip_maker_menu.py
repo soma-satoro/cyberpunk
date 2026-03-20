@@ -1,6 +1,7 @@
 """
 EvMenu for allocating 2 Maker points when spending IP to raise Maker.
-Tech only - add 1 point at a time to Field, Upgrade, Fabrication, or Invention.
+Used for Techs and for any character buying Maker with IP (multi-role).
+Add 1 point at a time to Field, Upgrade, Fabrication, or Invention.
 Each specialty is capped by the new Maker rank.
 """
 

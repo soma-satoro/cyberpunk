@@ -111,11 +111,21 @@ class CharacterSheet(SharedMemoryModel):
         default=0,
         help_text="Permanent humanity loss from removed/destroyed cyberware (e.g. plot removal)",
     )
+    uninstalled_cyberware_hl = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Cyberware name -> HL held when uninstalled. Reinstalling same type consumes this (no extra HL).",
+    )
     death_save = models.PositiveIntegerField(default=0)
     death_save_penalty = models.IntegerField(default=0, help_text="Current death save penalty; increases each roll; resets to base when stabilized")
     base_death_save_penalty = models.IntegerField(default=0, help_text="Base penalty from critical injuries; staff can modify via stat")
     critical_injuries = models.JSONField(default=list, blank=True, help_text="List of critical injury names currently suffered")
     critical_injury_quick_fixes = models.JSONField(default=dict, blank=True, help_text="Injury name -> expiry timestamp; effect suppressed until expiry")
+    implanted_armor_state = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Skin weave / subdermal / Sycust SP tracking: key -> {current, max}; optional last_natural_implanted_repair_command_at",
+    )
     serious_wounds = models.PositiveIntegerField(default=0)
     eqweapon = models.ForeignKey('inventory.Weapon', on_delete=models.SET_NULL, null=True, blank=True, related_name='equipped_by')
     eqarmor = models.ForeignKey('inventory.Armor', on_delete=models.SET_NULL, null=True, blank=True, related_name='equipped_by')
@@ -203,7 +213,7 @@ class CharacterSheet(SharedMemoryModel):
     intelligence = models.PositiveIntegerField(default=1)
     reflexes = models.PositiveIntegerField(default=1)
     dexterity = models.PositiveIntegerField(default=1)
-    technology = models.PositiveIntegerField(default=1)
+    technique = models.PositiveIntegerField(default=1)
     cool = models.PositiveIntegerField(default=1)
     willpower = models.PositiveIntegerField(default=1)
     luck = models.PositiveIntegerField(default=1)
@@ -315,11 +325,14 @@ class CharacterSheet(SharedMemoryModel):
     has_cyberarm = models.BooleanField(default=False)
 
     def calculate_base_unarmed_damage(self):
-        if self.body >= 11:
+        from world.cyberware.stat_bonuses import get_effective_body_for_sheet
+
+        bod = get_effective_body_for_sheet(self)
+        if bod >= 11:
             return 4
-        elif self.body >= 7:
+        elif bod >= 7:
             return 3
-        elif self.body >= 5 or (self.body >= 1 and self.has_cyberarm):
+        elif bod >= 5 or (bod >= 1 and self.has_cyberarm):
             return 2
         else:
             return 1
@@ -536,14 +549,17 @@ class CharacterSheet(SharedMemoryModel):
             installed_cyberware = CyberwareInstance.objects.filter(character_sheet_id=sheet_pk, installed=True)
         total_cyberware_hl = sum(cw.cyberware.humanity_loss for cw in installed_cyberware)
         trauma_hl = getattr(self, "trauma_humanity_loss", 0) or 0
+        uhl = getattr(self, "uninstalled_cyberware_hl", None) or {}
+        uninstalled_hl = sum(uhl.values()) if isinstance(uhl, dict) else 0
+        total_hl = total_cyberware_hl + trauma_hl + uninstalled_hl
 
         if not quiet:
-            logger.info(f"Total cyberware humanity loss: {total_cyberware_hl}, trauma: {trauma_hl}")
+            logger.info(f"Total cyberware humanity loss: {total_cyberware_hl}, trauma: {trauma_hl}, uninstalled: {uninstalled_hl}")
 
         # Preserve staff-set humanity: use current humanity + old losses as base, then apply new losses
         old_total_hl = getattr(self, "total_cyberware_humanity_loss", 0) or 0
-        humanity_base = self.humanity + old_total_hl + trauma_hl
-        new_humanity = max(0, min(self.empathy * 10, humanity_base - total_cyberware_hl - trauma_hl))
+        humanity_base = self.humanity + old_total_hl + trauma_hl + uninstalled_hl
+        new_humanity = max(0, min(self.empathy * 10, humanity_base - total_hl))
 
         if not quiet:
             logger.info(f"New calculated humanity: {new_humanity} (base preserved from staff-set)")
@@ -552,10 +568,10 @@ class CharacterSheet(SharedMemoryModel):
         self.humanity = new_humanity
 
         # Only update empathy if it's been reduced to 0
-        if self.empathy * 10 <= total_cyberware_hl + trauma_hl:
+        if self.empathy * 10 <= total_hl:
             self.empathy = max(1, new_humanity // 10)
 
-        self.total_cyberware_humanity_loss = total_cyberware_hl
+        self.total_cyberware_humanity_loss = total_cyberware_hl + uninstalled_hl
         if not quiet:
             logger.info("About to recalculate derived stats")
         self.recalculate_derived_stats()
@@ -565,65 +581,38 @@ class CharacterSheet(SharedMemoryModel):
         if not quiet:
             logger.info("CharacterSheet saved")
 
-    def recalculate_derived_stats(self):
-        from world.hp_chart import get_hp_from_chart
-        self._max_hp = get_hp_from_chart(self.body, self.willpower)
-        self.death_save = self.body
-        self.serious_wounds = self.body
-
-        # Brawling damage scales with BODY; Cyberarm grants minimum 2d6 (CPR p.169)
-        base_unarmed_dice = self.calculate_base_unarmed_damage()
-        sheet_pk = getattr(self, 'pk', None)
-        if sheet_pk:
-            try:
-                CyberwareInstance = apps.get_model('inventory', 'CyberwareInstance')
-                active_inst = CyberwareInstance.objects.filter(
-                    character_sheet_id=sheet_pk, installed=True, active=True
-                ).select_related('cyberware').first()
-                weapon_dice = 0
-                if active_inst:
-                    cw = active_inst.cyberware
-                    if cw.is_weapon and cw.damage_dice:
-                        weapon_dice = cw.damage_dice
-                    elif cw.name.lower() in ('popup melee weapon', 'popup ranged weapon'):
-                        popup_name = getattr(active_inst, 'popup_weapon_name', None)
-                        if popup_name:
-                            from world.equipment_data import get_weapon_damage_dice
-                            weapon_dice = get_weapon_damage_dice(popup_name)
-                self.unarmed_damage_dice = max(base_unarmed_dice, weapon_dice) if weapon_dice else base_unarmed_dice
-            except OperationalError:
-                self.unarmed_damage_dice = base_unarmed_dice
-        else:
-            self.unarmed_damage_dice = base_unarmed_dice
-        self.unarmed_damage_die_type = 6  # Always d6 per CPR rules
-
-        try:
-            total_cyberware_hl = self.calculate_total_cyberware_hl()
-        except OperationalError:
-            total_cyberware_hl = 0
-        trauma_hl = getattr(self, "trauma_humanity_loss", 0) or 0
-
-        # Preserve staff-set humanity: use current humanity + old losses as base, then apply current losses
-        old_total_hl = getattr(self, "total_cyberware_humanity_loss", 0) or 0
-        humanity_base = self.humanity + old_total_hl + trauma_hl
-        self.humanity = max(0, min(self.empathy * 10, humanity_base - total_cyberware_hl - trauma_hl))
-        self.total_cyberware_humanity_loss = total_cyberware_hl
-
-        # Ensure _current_hp doesn't exceed _max_hp (allow negative for mortally wounded)
-        if self._current_hp > self._max_hp:
-            self._current_hp = self._max_hp
-
-        # Save without triggering another recalculation
+    def consume_uninstalled_hl_for_cyberware(self, cyberware):
+        """
+        When reinstalling cyberware that was previously uninstalled, reduce
+        uninstalled_cyberware_hl so we don't double-count HL. Call before
+        calculate_humanity_loss after an install.
+        """
+        uhl = getattr(self, "uninstalled_cyberware_hl", None) or {}
+        if not isinstance(uhl, dict):
+            return
+        cw_name = cyberware.name
+        if cw_name not in uhl or uhl[cw_name] <= 0:
+            return
+        deduct = min(cyberware.humanity_loss, uhl[cw_name])
+        uhl = dict(uhl)
+        uhl[cw_name] -= deduct
+        if uhl[cw_name] <= 0:
+            del uhl[cw_name]
+        self.uninstalled_cyberware_hl = uhl
         self.save(skip_recalculation=True)
 
+
     def calculate_total_cyberware_hl(self):
-        # Use lazy import to avoid circular dependency
+        """Total HL from installed cyberware + uninstalled (preserved trauma)."""
         CyberwareInstance = apps.get_model('inventory', 'CyberwareInstance')
         sheet_pk = getattr(self, 'pk', None)
-        if sheet_pk is None:
-            return 0
-        installed_cyberware = CyberwareInstance.objects.filter(character_sheet_id=sheet_pk, installed=True)
-        return sum(cw.cyberware.humanity_loss for cw in installed_cyberware)
+        installed_hl = 0
+        if sheet_pk:
+            installed_cyberware = CyberwareInstance.objects.filter(character_sheet_id=sheet_pk, installed=True)
+            installed_hl = sum(cw.cyberware.humanity_loss for cw in installed_cyberware)
+        uhl = getattr(self, "uninstalled_cyberware_hl", None) or {}
+        uninstalled_hl = sum(uhl.values()) if isinstance(uhl, dict) else 0
+        return installed_hl + uninstalled_hl
 
     def save(self, *args, **kwargs):
         # Add a flag to prevent recursive calls
@@ -703,7 +692,7 @@ class CharacterSheet(SharedMemoryModel):
         self.intelligence = 1
         self.reflexes = 1
         self.dexterity = 1
-        self.technology = 1
+        self.technique = 1
         self.cool = 1
         self.willpower = 1
         self.luck = 1
@@ -755,9 +744,12 @@ class CharacterSheet(SharedMemoryModel):
 
     def recalculate_derived_stats(self):
         from world.hp_chart import get_hp_from_chart
-        self._max_hp = get_hp_from_chart(self.body, self.willpower)
-        self.death_save = self.body
-        self.serious_wounds = self.body
+        from world.cyberware.stat_bonuses import get_effective_body_for_sheet
+
+        eff_body = get_effective_body_for_sheet(self)
+        self._max_hp = get_hp_from_chart(eff_body, self.willpower)
+        self.death_save = eff_body
+        self.serious_wounds = eff_body
 
         # Brawling damage scales with BODY; Cyberarm grants minimum 2d6 (CPR p.169)
         base_unarmed_dice = self.calculate_base_unarmed_damage()
@@ -817,14 +809,6 @@ def current_hp(self):
 @current_hp.setter
 def current_hp(self, value):
     self._current_hp = max(0, min(value, self.max_hp))
-
-@property
-def death_save(self):
-        return self.body
-
-@property
-def serious_wounds(self):
-        return self.body
 
 @property
 def rep_level(self):

@@ -433,7 +433,8 @@ def _roll_maker_check(character, tech_skill, specialty_rank):
     Roll TECH + tech_skill + specialty_rank + 1d10.
     Returns (total, d10_roll).
     """
-    tech = getattr(character.db, "technology", 0) or 0
+    from world.utils.character_utils import get_technique_value
+    tech = get_technique_value(character) or 0
     skill = 0
     if tech_skill == "medical_tech":
         from world.chargen_constants import get_medical_tech_skill

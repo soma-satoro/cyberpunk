@@ -39,7 +39,7 @@ from .mystery_commands import (
     CmdMysteryLink,
 )
 from .cyberware_admin_commands import CmdAddCyberware, CmdParentCyberware, CmdUnparentCyberware
-from .staff_commands import CmdRemoveCyberware, CmdSetLifepath, CmdReputation, CmdNotoriety, CmdConfig
+from .staff_commands import CmdRemoveCyberware, CmdUninstallCyberware, CmdSetLifepath, CmdReputation, CmdNotoriety, CmdConfig
 from .economy import CmdAdminMoney, CmdGiveMoney, CmdBalance, CmdLeaveRental
 from .rent_commands import CmdRent, CmdHome
 from world.cyberpunk_sheets.commerce import CmdBuy, CmdRefund, CmdListItems, CmdGive, CmdSellItem, CmdHaggle
@@ -57,8 +57,9 @@ from .cyberware_commands import CmdCyberware
 from .netrun_commands import CmdNet
 from .netrun_admin_commands import CmdArchitecture
 from .combat_system import CmdCombat
+from .initiative_commands import CmdInitiative
 from .attack_commands import CmdAttack, CmdDodge, CmdDeathSave, CmdCover, CmdHud
-from .repair_commands import CmdRepair, CmdJuryrig
+from .repair_commands import CmdRepair, CmdJuryrig, CmdArmorStaff
 from .treat_commands import CmdTreat
 from .health_commands import CmdHealth
 from .maker_commands import CmdMake
@@ -125,6 +126,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdInventory())
         self.add(CmdWear())
         self.add(CmdRepair())
+        self.add(CmdArmorStaff())
         self.add(CmdJuryrig())
         self.add(CmdTreat())
         self.add(CmdHealth())
@@ -144,6 +146,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdRoom())
         self.add(CmdAreaManage())
         self.add(CmdCombat())
+        self.add(CmdInitiative())
         self.add(CmdAttack())
         self.add(CmdDodge())
         self.add(CmdDeathSave())
@@ -256,6 +259,7 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdParentCyberware())
         self.add(CmdUnparentCyberware())
         self.add(CmdRemoveCyberware())
+        self.add(CmdUninstallCyberware())
         self.add(CmdAddClue())
         self.add(CmdAddObstacle())
         self.add(CmdClues())

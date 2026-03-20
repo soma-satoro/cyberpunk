@@ -4,11 +4,31 @@ from evennia.commands.default.muxcommand import MuxCommand
 from world.cyberpunk_sheets.models import CharacterSheet
 from world.inventory.models import Weapon, Armor, Gear, Inventory, Ammunition, CyberwareInstance, InventoryArmor, InventoryWeapon, WeaponAttachment
 from world.cyberpunk_sheets.services import CharacterSheetMoneyService
-from world.utils.formatting import sheet_header, sheet_section, footer, header, divider
-from world.utils.character_utils import get_character_sheet, get_staff_target_character
+from world.utils.formatting import (
+    sheet_header,
+    sheet_section,
+    footer,
+    inv_info_centered_title,
+    inv_info_section_rule,
+    inv_info_footer,
+    inv_visible_cell,
+)
+from world.utils.name_fuzzy import pick_named_candidate
+from world.utils.ansi_utils import wrap_ansi
+from world.lore_weapons import get_flavor_long_description
+from world.utils.character_utils import get_character_sheet, get_staff_target_character, is_staff
 import logging
+import re
 
 logger = logging.getLogger('cyberpunk.inventory')
+
+
+def _inventory_weapon_type_cell(weapon):
+    """Weapon type for the inv table: ``weapon_type`` or ``category``; abbreviates *Very* to *v.*."""
+    wt = (getattr(weapon, "weapon_type", None) or "").strip()
+    if not wt:
+        wt = (getattr(weapon, "category", None) or "").replace("_", " ").strip() or "—"
+    return re.sub(r"(?i)\bvery\b", "v.", wt)
 
 class CmdInventory(MuxCommand):
     """
@@ -24,9 +44,11 @@ class CmdInventory(MuxCommand):
       inv/wear <armor>
       inv/remove
       inv/attach <weapon>=<attachment> - Attach an attachment to a weapon
+      inv/reflavor <char>=<weapon>[/quality] - Staff: random flavor name on target's generic gun (default quality: standard)
 
     Switches:
-      inv/equip, inv/unequip, inv/wear, inv/remove - Modify your equipment
+      inv/equip, inv/unequip, inv/wear, inv/remove, inv/attach - Modify your equipment
+      inv/reflavor - Staff only
     """
 
     key = "inventory"
@@ -45,11 +67,16 @@ class CmdInventory(MuxCommand):
             self._do_info(self.args, character_sheet, self.caller)
             return
 
+        # Staff: reflavor before inv <name> parsing (args look like Char=weapon/quality)
+        if self.switches and "reflavor" in self.switches:
+            self.reflavor_weapon()
+            return
+
         # Staff can view another character: inv <name>
         target_char, character_sheet = get_staff_target_character(self.caller, self.args)
         if target_char is not None and character_sheet is not None:
             # Staff viewing another - only allow view, not equip/wear/etc
-            if self.switches and any(s in self.switches for s in ("equip", "unequip", "wear", "remove")):
+            if self.switches and any(s in self.switches for s in ("equip", "unequip", "wear", "remove", "attach")):
                 self.caller.msg("You can only view another character's inventory, not modify it.")
                 return
             self._show_inventory(character_sheet, target_char)
@@ -105,43 +132,50 @@ class CmdInventory(MuxCommand):
                 return
             display_char = target_char
         inv = character_sheet.inventory
-        item_name_lower = item_name.lower()
-        # Search: weapons, armor, gear, ammunition, vehicles, cyberware
+        candidates = []
         for weapon in inv.weapons.all():
-            if (weapon.name or "").lower() == item_name_lower:
-                self._format_weapon_info(weapon, display_char, inv)
-                return
+            candidates.append((weapon.name or "", ("weapon", weapon)))
         for armor in inv.armor.all():
-            if (armor.name or "").lower() == item_name_lower:
-                inst, _ = InventoryArmor.objects.get_or_create(
-                    inventory=inv, armor=armor,
-                    defaults={"current_sp": armor.sp, "original_sp": armor.sp}
-                )
-                self._format_armor_info(armor, inst, character_sheet, display_char)
-                return
+            candidates.append((armor.name or "", ("armor", armor)))
         for gear in inv.gear.all():
-            if (gear.name or "").lower() == item_name_lower:
-                self._format_gear_info(gear, display_char)
-                return
+            candidates.append((gear.name or "", ("gear", gear)))
         for ammo in inv.ammunition.all():
-            if (ammo.name or "").lower() == item_name_lower:
-                self._format_ammo_info(ammo, display_char)
-                return
+            candidates.append((ammo.name or "", ("ammo", ammo)))
         for vehicle in inv.vehicles.all():
-            if (vehicle.name or "").lower() == item_name_lower:
-                self._format_vehicle_info(vehicle, display_char)
-                return
+            candidates.append((vehicle.name or "", ("vehicle", vehicle)))
         for cw in inv.cyberware.all():
-            if (cw.cyberware.name or "").lower() == item_name_lower:
-                self._format_cyberware_info(cw, display_char)
-                return
-        self.caller.msg(f"No inventory item named '{item_name}' found.")
+            candidates.append((cw.cyberware.name or "", ("cyberware", cw)))
+
+        picked, err = pick_named_candidate(item_name, candidates)
+        if err:
+            self.caller.msg(err)
+            return
+        if not picked:
+            self.caller.msg(f"No inventory item named '{item_name}' found.")
+            return
+        kind, obj = picked
+        if kind == "weapon":
+            self._format_weapon_info(obj, display_char, inv)
+        elif kind == "armor":
+            inst, _ = InventoryArmor.objects.get_or_create(
+                inventory=inv, armor=obj,
+                defaults={"current_sp": obj.sp, "original_sp": obj.sp}
+            )
+            self._format_armor_info(obj, inst, character_sheet, display_char)
+        elif kind == "gear":
+            self._format_gear_info(obj, display_char)
+        elif kind == "ammo":
+            self._format_ammo_info(obj, display_char)
+        elif kind == "vehicle":
+            self._format_vehicle_info(obj, display_char)
+        else:
+            self._format_cyberware_info(obj, display_char)
 
     def _format_weapon_info(self, weapon, display_char, inv=None):
         """Format weapon details for display."""
         name = getattr(display_char.db, 'full_name', None) or getattr(display_char, 'key', '')
         owner = f" ({name}'s)" if display_char != self.caller else ""
-        out = header(f"{weapon.name}{owner}", width=78, fillchar="|m-|n") + "\n"
+        out = inv_info_centered_title(f"{weapon.name}{owner}", width=78)
         out += f"|cDamage:|n {weapon.damage or 'N/A'}\n"
         out += f"|cROF:|n {weapon.rof or 'N/A'}\n"
         out += f"|cCategory:|n {weapon.category or 'N/A'}\n"
@@ -154,10 +188,14 @@ class CmdInventory(MuxCommand):
             from world.weapon_constants import get_effective_clip
             eff_clip = get_effective_clip(weapon, inv)
         out += f"|cAmmo:|n {weapon.ammo_type or 'N/A'} (current: {weapon.current_ammo or 0}/{eff_clip})\n"
+        flavor_lore = get_flavor_long_description(weapon.name or "")
+        if flavor_lore:
+            out += inv_info_section_rule("Model", width=78)
+            out += wrap_ansi(flavor_lore, width=78) + "\n"
         if weapon.description:
-            out += divider("Description", width=78, fillchar="|m-|n") + "\n"
+            out += inv_info_section_rule("Description", width=78)
             out += f"{weapon.description}\n"
-        out += footer(width=78, fillchar="|m-|n")
+        out += inv_info_footer(width=78)
         self.caller.msg(out)
 
     def _format_armor_info(self, armor, inst, character_sheet, display_char):
@@ -167,7 +205,7 @@ class CmdInventory(MuxCommand):
         worn = " |y(worn)|n" if getattr(character_sheet, 'eqarmor', None) == armor else ""
         name = getattr(display_char.db, 'full_name', None) or getattr(display_char, 'key', '')
         owner = f" ({name}'s)" if display_char != self.caller else ""
-        out = header(f"{armor.name}{owner}", width=78, fillchar="|m-|n") + "\n"
+        out = inv_info_centered_title(f"{armor.name}{owner}", width=78)
         out += f"|cSP:|n {eff_sp} (base {base_sp})"
         if inst.current_sp is not None and inst.current_sp != base_sp:
             out += f" |y(ablation: {inst.current_sp})"
@@ -177,51 +215,51 @@ class CmdInventory(MuxCommand):
         if inst.juryrigged:
             out += "|yJuryrigged:|n Yes\n"
         if armor.description:
-            out += divider("Description", width=78, fillchar="|m-|n") + "\n"
+            out += inv_info_section_rule("Description", width=78)
             out += f"{armor.description}\n"
-        out += footer(width=78, fillchar="|m-|n")
+        out += inv_info_footer(width=78)
         self.caller.msg(out)
 
     def _format_gear_info(self, gear, display_char):
         """Format gear details for display."""
         name = getattr(display_char.db, 'full_name', None) or getattr(display_char, 'key', '')
         owner = f" ({name}'s)" if display_char != self.caller else ""
-        out = header(f"{gear.name}{owner}", width=78, fillchar="|m-|n") + "\n"
+        out = inv_info_centered_title(f"{gear.name}{owner}", width=78)
         out += f"|cCategory:|n {gear.category or 'N/A'}\n"
         out += f"|cValue:|n {gear.value or 0} eb\n"
         if gear.description:
-            out += divider("Description", width=78, fillchar="|m-|n") + "\n"
+            out += inv_info_section_rule("Description", width=78)
             out += f"{gear.description}\n"
-        out += footer(width=78, fillchar="|m-|n")
+        out += inv_info_footer(width=78)
         self.caller.msg(out)
 
     def _format_ammo_info(self, ammo, display_char):
         """Format ammunition details for display."""
         name = getattr(display_char.db, 'full_name', None) or getattr(display_char, 'key', '')
         owner = f" ({name}'s)" if display_char != self.caller else ""
-        out = header(f"{ammo.name}{owner}", width=78, fillchar="|m-|n") + "\n"
+        out = inv_info_centered_title(f"{ammo.name}{owner}", width=78)
         out += f"|cType:|n {ammo.ammo_type or 'N/A'}\n"
         out += f"|cQuantity:|n {ammo.quantity}\n"
         out += f"|cWeapon Type:|n {ammo.weapon_type or 'Generic'}\n"
         if ammo.description:
-            out += divider("Description", width=78, fillchar="|m-|n") + "\n"
+            out += inv_info_section_rule("Description", width=78)
             out += f"{ammo.description}\n"
-        out += footer(width=78, fillchar="|m-|n")
+        out += inv_info_footer(width=78)
         self.caller.msg(out)
 
     def _format_vehicle_info(self, vehicle, display_char):
         """Format vehicle details for display."""
         name = getattr(display_char.db, 'full_name', None) or getattr(display_char, 'key', '')
         owner = f" ({name}'s)" if display_char != self.caller else ""
-        out = header(f"{vehicle.name}{owner}", width=78, fillchar="|m-|n") + "\n"
+        out = inv_info_centered_title(f"{vehicle.name}{owner}", width=78)
         out += f"|cCategory:|n {vehicle.category or 'N/A'}\n"
         out += f"|cSDP:|n {vehicle.sdp or 0}\n"
         out += f"|cSeats:|n {vehicle.seats or 0}\n"
         out += f"|cSpeed:|n {vehicle.speed_narrative or 'N/A'}\n"
         if vehicle.description:
-            out += divider("Description", width=78, fillchar="|m-|n") + "\n"
+            out += inv_info_section_rule("Description", width=78)
             out += f"{vehicle.description}\n"
-        out += footer(width=78, fillchar="|m-|n")
+        out += inv_info_footer(width=78)
         self.caller.msg(out)
 
     def _format_cyberware_info(self, cw_instance, display_char):
@@ -229,22 +267,22 @@ class CmdInventory(MuxCommand):
         cw = cw_instance.cyberware
         name = getattr(display_char.db, 'full_name', None) or getattr(display_char, 'key', '')
         owner = f" ({name}'s)" if display_char != self.caller else ""
-        out = header(f"{cw.name}{owner}", width=78, fillchar="|m-|n") + "\n"
+        out = inv_info_centered_title(f"{cw.name}{owner}", width=78)
         out += f"|cType:|n {cw.type or 'N/A'}\n"
         out += f"|cHumanity Loss:|n {cw.humanity_loss}\n"
         out += f"|cStatus:|n {'Installed' if cw_instance.installed else 'Uninstalled'}\n"
         if getattr(cw_instance, "popup_weapon_name", None):
             out += f"|cWeapon:|n {cw_instance.popup_weapon_name}\n"
         if cw.description:
-            out += divider("Description", width=78, fillchar="|m-|n") + "\n"
+            out += inv_info_section_rule("Description", width=78)
             out += f"{cw.description}\n"
-        out += footer(width=78, fillchar="|m-|n")
+        out += inv_info_footer(width=78)
         self.caller.msg(out)
 
     def _show_inventory(self, character_sheet, display_char):
         """Display inventory for a character (used for self or staff viewing another)."""
         inv = character_sheet.inventory
-        W = 80
+        W = 78
         display_name = getattr(display_char.db, 'full_name', None) or getattr(display_char, 'key', display_char) or str(display_char)
 
         output = sheet_header(f"Inventory for {display_name}", width=W)
@@ -278,17 +316,31 @@ class CmdInventory(MuxCommand):
         # Weapons
         output += sheet_section("Weapons", width=W)
         weapons = inv.weapons.all()
+        # 78 visible chars incl. `` |y*|n`` (2 vis): cols + 4 single spaces between 5 columns
+        wn, wd, wtyp, wr, wa = 37, 7, 12, 5, 11
         if weapons:
             from world.weapon_constants import get_effective_clip
-            output += f"|y{'Weapon':<25}{'Damage':<12}{'ROF':<8}{'Ammo':<12}|n\n"
+            output += (
+                f"|y{inv_visible_cell('Weapon', wn)} {inv_visible_cell('Damage', wd)} "
+                f"{inv_visible_cell('Type', wtyp)} {inv_visible_cell('ROF', wr)} "
+                f"{inv_visible_cell('Ammo', wa)}|n\n"
+            )
             for weapon in weapons:
-                eq = "   (equipped)" if getattr(character_sheet, 'eqweapon', None) == weapon else ""
+                eq_mark = " |y*|n" if getattr(character_sheet, 'eqweapon', None) == weapon else ""
                 if getattr(weapon, "clip", 0) and weapon.category not in ("archery", "melee"):
                     eff_clip = get_effective_clip(weapon, inv)
                     ammo_display = f"{weapon.current_ammo or 0}/{eff_clip}"
                 else:
                     ammo_display = "—"
-                output += f"|w{weapon.name:<25}{weapon.damage or 'N/A':<12}{weapon.rof or 'N/A':<8}|c{ammo_display:<12}|n{eq}\n"
+                type_cell = _inventory_weapon_type_cell(weapon)
+                output += (
+                    f"|w{inv_visible_cell(weapon.name, wn)}|n "
+                    f"|w{inv_visible_cell(weapon.damage or 'N/A', wd)}|n "
+                    f"|w{inv_visible_cell(type_cell, wtyp)}|n "
+                    f"|w{inv_visible_cell(weapon.rof or 'N/A', wr)}|n "
+                    f"|c{inv_visible_cell(ammo_display, wa)}|n"
+                )
+                output += eq_mark + "\n"
                 try:
                     iw = InventoryWeapon.objects.get(inventory=inv, weapon=weapon)
                     for att in iw.installed_attachments.all():
@@ -299,11 +351,18 @@ class CmdInventory(MuxCommand):
             output += "|wNo weapons in inventory.|n\n"
         output += "\n"
 
-        # Armor
+        # Armor (inventory pieces + implanted Skin Weave / Subdermal / Sycust rows)
         output += sheet_section("Armor", width=W)
+        from world.cyberware.implanted_armor import get_inventory_implanted_armor_rows
+
         armors = inv.armor.all()
-        if armors:
-            output += f"|y{'Armor':<22}{'SP':<14}{'EV':<8}{'Locations':<18}|n\n"
+        implant_rows = get_inventory_implanted_armor_rows(character_sheet)
+        cn, cs, ce, cl = 26, 12, 6, 31
+        if armors or implant_rows:
+            output += (
+                f"|y{inv_visible_cell('Armor', cn)} {inv_visible_cell('SP', cs)} "
+                f"{inv_visible_cell('EV', ce)} {inv_visible_cell('Locations', cl)}|n\n"
+            )
             for armor in armors:
                 inst, _ = InventoryArmor.objects.get_or_create(
                     inventory=inv, armor=armor,
@@ -312,13 +371,21 @@ class CmdInventory(MuxCommand):
                 base_sp = inst.original_sp if inst.original_sp is not None else armor.sp
                 eff_sp = inst.get_effective_sp()
                 if inst.juryrigged:
-                    sp_display = f"{eff_sp} |y(juryrigged)|n"
+                    sp_plain = f"{eff_sp} (jury)"
                 elif inst.current_sp is not None and inst.current_sp != base_sp:
-                    sp_display = f"{inst.current_sp}/{base_sp}"
+                    sp_plain = f"{inst.current_sp}/{base_sp}"
                 else:
-                    sp_display = str(eff_sp) if eff_sp is not None else "N/A"
-                worn = " |y(worn)|n" if getattr(character_sheet, 'eqarmor', None) == armor else ""
-                output += f"|w{armor.name:<22}{sp_display:<14}{armor.ev or 'N/A':<8}{armor.locations or 'N/A':<18}{worn}|n\n"
+                    sp_plain = str(eff_sp) if eff_sp is not None else "N/A"
+                worn_mark = " |y*|n" if getattr(character_sheet, 'eqarmor', None) == armor else ""
+                output += (
+                    f"|w{inv_visible_cell(armor.name, cn)}|n "
+                    f"|w{inv_visible_cell(sp_plain, cs)}|n "
+                    f"|w{inv_visible_cell(armor.ev or 'N/A', ce)}|n "
+                    f"|w{inv_visible_cell(armor.locations or 'N/A', cl)}|n"
+                )
+                output += worn_mark + "\n"
+            for row in implant_rows:
+                output += row
         else:
             output += "|wNo armor in inventory.|n\n"
         output += "\n"
@@ -326,12 +393,20 @@ class CmdInventory(MuxCommand):
         # Gear (use get_gear_with_quantities if available to show qty)
         output += sheet_section("Gear", width=W)
         gear_items = inv.get_gear_with_quantities() if hasattr(inv, 'get_gear_with_quantities') else [(g, 1) for g in inv.gear.all()]
+        gn, gc, gd = 23, 14, 39
         if gear_items:
-            output += f"|y{'Gear':<32}{'Category':<18}{'Description':<30}|n\n"
+            output += (
+                f"|y{inv_visible_cell('Gear', gn)} {inv_visible_cell('Category', gc)} "
+                f"{inv_visible_cell('Description', gd)}|n\n"
+            )
             for gear, qty in gear_items:
-                desc = (gear.description[:27] + "...") if len(gear.description or "") > 30 else (gear.description or "")
+                desc_src = gear.description or ""
                 name_display = f"{gear.name} (x{qty})" if qty > 1 else gear.name
-                output += f"|w{name_display:<32}{gear.category:<18}{desc:<30}|n\n"
+                output += (
+                    f"|w{inv_visible_cell(name_display, gn)}|n "
+                    f"|w{inv_visible_cell(gear.category, gc)}|n "
+                    f"|w{inv_visible_cell(desc_src, gd)}|n\n"
+                )
         else:
             output += "|wNo gear in inventory.|n\n"
         output += "\n"
@@ -339,10 +414,18 @@ class CmdInventory(MuxCommand):
         # Ammunition
         output += sheet_section("Ammunition", width=W)
         ammo = inv.ammunition.all()
+        an, aty, aq = 28, 24, 24
         if ammo:
-            output += f"|y{'Ammunition':<25}{'Weapon Type':<25}{'Quantity':<20}|n\n"
+            output += (
+                f"|y{inv_visible_cell('Ammunition', an)} {inv_visible_cell('Weapon Type', aty)} "
+                f"{inv_visible_cell('Quantity', aq)}|n\n"
+            )
             for a in ammo:
-                output += f"|w{a.name:<25}{a.weapon_type:<25}{a.quantity:<20}|n\n"
+                output += (
+                    f"|w{inv_visible_cell(a.name, an)}|n "
+                    f"|w{inv_visible_cell(a.weapon_type, aty)}|n "
+                    f"|w{inv_visible_cell(str(a.quantity), aq)}|n\n"
+                )
         else:
             output += "|wNo ammunition in inventory.|n\n"
         output += "\n"
@@ -350,26 +433,48 @@ class CmdInventory(MuxCommand):
         # Vehicles
         output += sheet_section("Vehicles", width=W)
         vehicles = inv.vehicles.all()
+        vn, vcat, vsdp, vseat, vspd, vval = 23, 8, 5, 5, 19, 11
         if vehicles:
-            output += f"|y{'Vehicle':<22}{'Category':<8}{'SDP':<6}{'Seats':<6}{'Speed':<18}{'Value':<10}|n\n"
+            output += (
+                f"|y{inv_visible_cell('Vehicle', vn)} {inv_visible_cell('Cat', vcat)} "
+                f"{inv_visible_cell('SDP', vsdp)} {inv_visible_cell('Seat', vseat)} "
+                f"{inv_visible_cell('Speed', vspd)} {inv_visible_cell('Value', vval)}|n\n"
+            )
             for v in vehicles:
-                speed = (v.speed_narrative or "N/A")[:17]
-                output += f"|w{v.name:<22}{v.category:<8}{v.sdp:<6}{v.seats:<6}{speed:<18}{v.value or 0:<10}|n\n"
+                speed = v.speed_narrative or "N/A"
+                output += (
+                    f"|w{inv_visible_cell(v.name, vn)}|n "
+                    f"|w{inv_visible_cell(v.category, vcat)}|n "
+                    f"|w{inv_visible_cell(str(v.sdp or 0), vsdp)}|n "
+                    f"|w{inv_visible_cell(str(v.seats or 0), vseat)}|n "
+                    f"|w{inv_visible_cell(speed, vspd)}|n "
+                    f"|w{inv_visible_cell(str(v.value or 0), vval)}|n\n"
+                )
         else:
             output += "|wNo vehicles in inventory.|n\n"
         output += "\n"
 
-        # Cyberware (hierarchical: parent + options, paired, borg ware)
-        output += sheet_section("Cyberware", width=W)
-        cyberware = list(inv.cyberware.filter(installed=True).select_related("cyberware", "parent", "paired_with"))
+        # Uninstalled Cyberware (installed items shown via cyberware command)
+        output += sheet_section("Uninstalled Cyberware", width=W)
+        cyberware = list(inv.cyberware.filter(installed=False).select_related("cyberware"))
         if cyberware:
-            from world.cyberware.utils import format_cyberware_for_display
-            rows = format_cyberware_for_display(cyberware, with_roots=True)
-            output += f"|y{'Cyberware':<45}{'Type':<18}{'Status':<12}{'Humanity Loss':<12}|n\n"
-            for display_name, cw_type, humanity_loss in rows:
-                output += f"|w{display_name[:44]:<45}{cw_type:<18}{'Installed':<12}{humanity_loss:<12}|n\n"
+            name_w, type_w, hl_w = 48, 23, 5
+            output += (
+                f"|y{inv_visible_cell('Cyberware', name_w)} {inv_visible_cell('Type', type_w)} "
+                f"{inv_visible_cell('HL', hl_w)}|n\n"
+            )
+            for cw_inst in cyberware:
+                cw = cw_inst.cyberware
+                hl = cw.humanity_loss or 0
+                output += (
+                    f"|w{inv_visible_cell(cw.name or '', name_w)}|n "
+                    f"|w{inv_visible_cell(cw.type or '', type_w)}|n "
+                    f"|w{inv_visible_cell(str(hl), hl_w)}|n\n"
+                )
+            output += "|wUse the 'cyberware' command to see installed cyberware.|n\n"
         else:
-            output += "|wNo cyberware in inventory.|n\n"
+            output += "|wNo uninstalled cyberware in inventory.|n\n"
+            output += "|wUse the 'cyberware' command to see installed cyberware.|n\n"
         output += "\n"
 
         # Vouchers (physical IC objects - in character's contents)
@@ -379,12 +484,20 @@ class CmdInventory(MuxCommand):
             char_contents = display_char.contents if hasattr(display_char, 'contents') else []
             vouchers = [o for o in char_contents if o.is_typeclass("typeclasses.vouchers.Voucher")]
             if vouchers:
-                output += f"|y{'Voucher':<30}{'Items':<15}{'Locked':<10}|n\n"
+                vvn, vvi, vvl = 34, 18, 24
+                output += (
+                    f"|y{inv_visible_cell('Voucher', vvn)} {inv_visible_cell('Items', vvi)} "
+                    f"{inv_visible_cell('Locked', vvl)}|n\n"
+                )
                 for v in vouchers:
                     items = v.get_items() if hasattr(v, 'get_items') else []
                     item_count = sum(it.get("quantity", 1) for it in items)
                     locked = "Yes" if (v.db.locked if hasattr(v, 'db') else False) else "No"
-                    output += f"|w{v.key:<30}{item_count:<15}{locked:<10}|n\n"
+                    output += (
+                        f"|w{inv_visible_cell(v.key, vvn)}|n "
+                        f"|w{inv_visible_cell(str(item_count), vvi)}|n "
+                        f"|w{inv_visible_cell(locked, vvl)}|n\n"
+                    )
             else:
                 output += "|wNo vouchers in inventory.|n\n"
         except ImportError:
@@ -393,37 +506,6 @@ class CmdInventory(MuxCommand):
         output += footer(width=W, fillchar="-")
         output += "\nUse 'inv/info <item>' to view detailed info on a specific item."
         self.caller.msg(output)
-
-
-def _find_weapon_for_equip(caller, inventory, weapon_name):
-    """Find weapon by exact or fuzzy match. Returns Weapon or None (sends msg on failure)."""
-    if not weapon_name:
-        return None
-    weapon_name_lower = weapon_name.strip().lower()
-
-    # 1. Exact match (case-insensitive)
-    try:
-        return inventory.weapons.get(name__iexact=weapon_name_lower)
-    except Weapon.DoesNotExist:
-        pass
-    except Weapon.MultipleObjectsReturned:
-        caller.msg(f"You have multiple weapons named '{weapon_name}'. Please be more specific.")
-        return None
-
-    # 2. Fuzzy: weapons whose name starts with input
-    candidates = list(inventory.weapons.filter(name__istartswith=weapon_name_lower))
-    if not candidates:
-        # 3. Fuzzy: weapons whose name contains input
-        candidates = list(inventory.weapons.filter(name__icontains=weapon_name_lower))
-
-    if not candidates:
-        caller.msg(f"You don't have a weapon matching '{weapon_name}' in your inventory.")
-        return None
-    if len(candidates) > 1:
-        names = ", ".join(w.name for w in candidates)
-        caller.msg(f"Multiple weapons match: {names}. Please be more specific.")
-        return None
-    return candidates[0]
 
     def equip_item(self):
         if not self.args:
@@ -437,7 +519,7 @@ def _find_weapon_for_equip(caller, inventory, weapon_name):
             return
 
         sheet = self.caller.character_sheet
-        
+
         if not hasattr(sheet, 'inventory'):
             self.caller.msg("You don't have an inventory.")
             return
@@ -458,7 +540,7 @@ def _find_weapon_for_equip(caller, inventory, weapon_name):
             return
 
         sheet = self.caller.character_sheet
-        
+
         if not sheet.eqweapon:
             self.caller.msg("You don't have any weapon equipped.")
             return
@@ -597,6 +679,152 @@ def _find_weapon_for_equip(caller, inventory, weapon_name):
 
         self.caller.msg(f"You attach {att.name} to {weapon.name}.")
 
+    def reflavor_weapon(self):
+        """
+        Staff: inv/reflavor <character name>=<weapon>[/quality]
+
+        Quality optional: poor | standard | excellent. If omitted or blank after /, uses standard.
+        """
+        from world.edgerunner_weapon_flavor import reflavor_weapon_instance
+
+        if not is_staff(self.caller):
+            self.caller.msg("Only staff (Builder+) can use inv/reflavor.")
+            return
+
+        raw = (self.args or "").strip()
+        if "=" not in raw:
+            self.caller.msg(
+                "Usage: inv/reflavor <character name>=<weapon>[/quality]\n"
+                "Examples:\n"
+                "  inv/reflavor Alice=Very Heavy Pistol\n"
+                "  inv/reflavor Alice=Very Heavy Pistol/excellent\n"
+                "Quality defaults to standard when omitted."
+            )
+            return
+
+        char_name, rhs = raw.split("=", 1)
+        char_name = char_name.strip()
+        rhs = rhs.strip()
+        if not char_name or not rhs:
+            self.caller.msg(
+                "Usage: inv/reflavor <character name>=<weapon>[/quality]"
+            )
+            return
+
+        if "/" in rhs:
+            weapon_part, qpart = rhs.split("/", 1)
+            weapon_part = weapon_part.strip()
+            qpart = (qpart or "").strip().lower()
+            if qpart and qpart not in ("poor", "standard", "excellent"):
+                self.caller.msg("Quality must be poor, standard, or excellent.")
+                return
+            quality = qpart if qpart else "standard"
+        else:
+            weapon_part = rhs
+            quality = "standard"
+
+        if not weapon_part:
+            self.caller.msg("Weapon name is required after '=' (e.g. Alice=Very Heavy Pistol).")
+            return
+
+        target_char, sheet = get_staff_target_character(self.caller, char_name, quiet=True)
+        if not sheet:
+            self.caller.msg(
+                f"No character with a character sheet found for '{char_name}'."
+            )
+            return
+
+        inv = getattr(sheet, "inventory", None)
+        if not inv:
+            self.caller.msg(f"{char_name} has no inventory.")
+            return
+
+        weapon = _find_weapon_for_equip(self.caller, inv, weapon_part)
+        if not weapon:
+            return
+
+        tkey = getattr(target_char, "key", None) or char_name
+        ok, msg = reflavor_weapon_instance(
+            weapon,
+            quality=quality,
+            source_note=f"Staff reflavor by {getattr(self.caller, 'key', 'staff')}",
+        )
+        if ok:
+            self.caller.msg(
+                f"|g{tkey}|n: {msg}"
+            )
+        else:
+            self.caller.msg(f"|r{tkey}: {msg}|n")
+
+
+def _find_weapon_for_equip(caller, inventory, weapon_name):
+    """Find weapon by exact name, generic category, flavor chart name, or fuzzy match."""
+    from world import edgerunner_weapon_flavor as ewf
+
+    if not weapon_name:
+        return None
+    raw = weapon_name.strip()
+    weapon_name_lower = raw.lower()
+
+    # 1. Exact match (case-insensitive)
+    try:
+        return inventory.weapons.get(name__iexact=raw)
+    except Weapon.DoesNotExist:
+        pass
+    except Weapon.MultipleObjectsReturned:
+        caller.msg(f"You have multiple weapons named '{weapon_name}'. Please be more specific.")
+        return None
+
+    # 2. Generic weapon category from flavor chart / quality buy (e.g. "Very Heavy Pistol")
+    generic_key = None
+    for k in ewf.WEAPON_FLAVOR_BY_QUALITY:
+        if k.lower() == raw.lower():
+            generic_key = k
+            break
+    if generic_key:
+        matches = [w for w in inventory.weapons.all() if ewf.generic_category_for_weapon(w) == generic_key]
+        if len(matches) == 1:
+            return matches[0]
+        if not matches:
+            caller.msg(f"You don't have a {generic_key} in your inventory.")
+            return None
+        names = ", ".join(w.name for w in matches)
+        caller.msg(
+            f"You have multiple {generic_key} weapons: {names}. "
+            f"Use the weapon's full name to equip one."
+        )
+        return None
+
+    # 3. Flavor model name from edgerunner_weapon_flavor (matches inventory display name)
+    norm_in = ewf.normalize_weapon_label(raw)
+    if norm_in and norm_in in ewf.FLAVOR_NAME_TO_GENERIC_TIER:
+        matches = [
+            w for w in inventory.weapons.all()
+            if ewf.normalize_weapon_label(w.name) == norm_in
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if not matches:
+            caller.msg(f"You don't have '{weapon_name}' in your inventory.")
+            return None
+        names = ", ".join(w.name for w in matches)
+        caller.msg(f"Multiple weapons match: {names}. Please be more specific.")
+        return None
+
+    # 4. Fuzzy: name startswith / contains
+    candidates = list(inventory.weapons.filter(name__istartswith=weapon_name_lower))
+    if not candidates:
+        candidates = list(inventory.weapons.filter(name__icontains=weapon_name_lower))
+
+    if not candidates:
+        caller.msg(f"You don't have a weapon matching '{weapon_name}' in your inventory.")
+        return None
+    if len(candidates) > 1:
+        names = ", ".join(w.name for w in candidates)
+        caller.msg(f"Multiple weapons match: {names}. Please be more specific.")
+        return None
+    return candidates[0]
+
 
 class CmdWear(MuxCommand):
     """
@@ -661,24 +889,25 @@ class CmdEquipWeapon(MuxCommand):
 
     Usage:
       equip <weapon name>
-      unequip
+      wield <weapon name>   - same as equip
+      unequip / unwield
 
     Examples:
       equip Very Heavy Pistol
-      equip Kendachi Mono-Katana
+      wield Arasaka "Raijin"
       unequip
     """
     key = "equip"
-    aliases = ["unequip"]
+    aliases = ["unequip", "wield", "unwield"]
     help_category = "Combat"
 
     def func(self):
-        if self.cmdstring == "unequip":
+        if self.cmdstring in ("unequip", "unwield"):
             self._unequip()
             return
 
         if not self.args:
-            self.caller.msg("Usage: equip <weapon name>")
+            self.caller.msg("Usage: equip <weapon name>  (aliases: wield <weapon>)")
             return
 
         if not hasattr(self.caller, 'character_sheet') or not self.caller.character_sheet:

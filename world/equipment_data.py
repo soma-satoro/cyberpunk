@@ -270,6 +270,16 @@ ammunition = [
         "quantity": 50
     },
     {
+        "name": "Basic Arrow",
+        "ammo_type": "BASIC",
+        "weapon_type": "Archery",
+        "damage_modifier": 0,
+        "armor_piercing": 0,
+        "description": "Standard arrows or bolts for bows and crossbows.",
+        "cost": 10,
+        "quantity": 50
+    },
+    {
         "name": "Rocket Ammo",
         "ammo_type": "EXPLOSIVE",
         "weapon_type": "Heavy Weapons",
@@ -333,7 +343,7 @@ weapons = [
         "damage": "3d6",
         "rof": "2",
         "hands": 1,
-        "concealable": True,
+        "concealable": False,
         "weight": 1,
         "value": 100,
         "category": "handgun",
@@ -346,7 +356,7 @@ weapons = [
         "damage": "4d6",
         "rof": "1",
         "hands": 1,
-        "concealable": True,
+        "concealable": False,
         "weight": 1,
         "value": 100,
         "category": "handgun",

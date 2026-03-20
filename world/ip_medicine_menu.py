@@ -1,6 +1,7 @@
 """
 EvMenu for allocating 1 Medicine point when spending IP to raise Medicine.
-Medtech only - pick Surgery, Pharmaceuticals, or Cryosystem.
+Used for Medtechs and for any character buying Medicine with IP (multi-role).
+Pick Surgery, Pharmaceuticals, or Cryosystem.
 """
 
 from evennia.utils.evmenu import EvMenu

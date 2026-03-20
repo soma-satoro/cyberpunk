@@ -13,6 +13,8 @@ class Cyberware(SharedMemoryModel):
     damage_dice = models.IntegerField(default=0)
     damage_die_type = models.IntegerField(default=6)  # Assuming all dice are d6
     rate_of_fire = models.IntegerField(default=1)
+    # For skill chips: skill key this chip enhances, e.g. "education" or "martial_arts(krav maga)"
+    skill_chip_target = models.CharField(max_length=80, blank=True, null=True)
 
     def __str__(self):
         return self.name
@@ -156,6 +158,8 @@ CYBERWARE_HUMANITY_LOSS = {
     "Radar/Sonar Implant": 7,
     "Vampyres": 14,
     "Skin Weave": 7,
+    "Sycust Fleshweave": 7,
+    "Sycust Cyberspine": 7,
     "Subdermal Armor": 14,
     "Cyberarm": 7,
     "Standard Hand": 0,
@@ -254,6 +258,8 @@ CYBERWARE_COSTS = {
         "Vampyres": 500,
 		"Hidden Holster": 500,
 	    "Skin Weave": 500,
+        "Sycust Fleshweave": 1000,
+        "Sycust Cyberspine": 1000,
         "Subdermal Armor": 1000,
         "Subdermal Pocket": 100,
     	"Cyberarm": 500,

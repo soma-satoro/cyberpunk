@@ -3,15 +3,20 @@ Repair and Juryrig commands for equipment maintenance.
 
 +repair <armor name> - Open a job to repair armor (staff handles roll, money, approve)
 +repair/approve <character>=<item> - Staff: reset armor SP to original
++repair/subdermal - Skin Weave / Subdermal: +1 SP each (24h between uses); Sycust Fleshweave: full repair
++armor/staff <char>=<name>, sp=<n|full> - Staff: set worn armor or implanted layer SP
 juryrig <name>=<item> - Tech role: temporarily repair at DV (quick fix)
 juryrig/off <name>=<item> - Tech or staff: turn off juryrig
 """
+
+import re
 
 from evennia.commands.default.muxcommand import MuxCommand
 from world.inventory.models import Armor, Inventory, InventoryArmor
 from world.jobs.models import Job, Queue
 from world.utils.character_utils import get_character_sheet
 from world.cyberpunk_sheets.services import CharacterSheetMoneyService
+from world.cyberware.implanted_armor import repair_subdermal_command, staff_set_implanted_sp
 
 
 def _get_inventory_for_character(char):
@@ -43,6 +48,7 @@ class CmdRepair(MuxCommand):
 
     Usage:
       +repair <armor name>           - Open a repair job for your armor
+      +repair/subdermal             - Repair implanted Skin Weave / Subdermal / Sycust (see help)
       +repair/approve <character>=<item> - Staff: mark item repaired (reset SP)
 
     Repair workflow:
@@ -110,6 +116,11 @@ class CmdRepair(MuxCommand):
         self.caller.msg(
             "Staff will ask you to roll into the job. Use: |wroll/job <job#>=<stat> + <skill>|n"
         )
+
+    def _repair_subdermal_implanted(self):
+        ok, msg = repair_subdermal_command(self.caller)
+        color = "|g" if ok else "|r"
+        self.caller.msg(f"{color}{msg}|n")
 
     def _repair_approve(self):
         """Staff: +repair/approve <character>=<item> - Reset armor SP to original."""
@@ -257,3 +268,105 @@ class CmdJuryrig(MuxCommand):
         self.caller.msg(f"|yJuryrig turned off for {armor.name} ({char.key}).|n")
         if char != self.caller:
             char.msg(f"The juryrig on your {armor.name} has been turned off.")
+
+
+_IMPLANT_KEY_ALIASES = {
+    "skin_weave": "skin_weave",
+    "skin weave": "skin_weave",
+    "subdermal": "subdermal_armor",
+    "subdermal_armor": "subdermal_armor",
+    "subdermal armor": "subdermal_armor",
+    "sycust": "sycust_fleshweave",
+    "sycust_fleshweave": "sycust_fleshweave",
+    "sycust fleshweave": "sycust_fleshweave",
+}
+
+
+class CmdArmorStaff(MuxCommand):
+    """
+    Staff: set armor SP for a character (worn inventory armor or implanted layers).
+
+    Usage:
+      +armor/staff <character>=<armor name>, sp=<number>
+      +armor/staff <character>=<armor name>, sp=full
+      +armor/staff <character>=subdermal, sp=11
+      +armor/staff <character>=skin_weave, sp=7
+
+    Implanted keys: skin_weave, subdermal_armor, sycust_fleshweave (aliases: subdermal, sycust, …)
+    """
+
+    key = "+armor"
+    help_category = "Admin"
+
+    def func(self):
+        if "staff" not in self.switches:
+            self.caller.msg("Usage: +armor/staff <char>=<armor or implant key>, sp=<n|full>")
+            return
+        if not (
+            hasattr(self.caller, "check_permstring")
+            and (self.caller.check_permstring("builders") or self.caller.check_permstring("wizards"))
+        ):
+            self.caller.msg("Only staff can use +armor/staff.")
+            return
+        raw = (self.args or "").strip()
+        m = re.match(
+            r"^\s*(.+?)\s*=\s*(.+?),\s*sp\s*=\s*(.+)\s*$",
+            raw,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not m:
+            self.caller.msg("Usage: +armor/staff <char>=<armor name or implant>, sp=<number|full>")
+            return
+        char_name = m.group(1).strip()
+        ident = m.group(2).strip()
+        sp_raw = m.group(3).strip().lower()
+
+        char = self.caller.search(char_name, global_search=True)
+        if not char:
+            return
+        if not hasattr(char, "character_sheet") or not char.character_sheet:
+            self.caller.msg(f"{char.key} has no character sheet.")
+            return
+        sheet = char.character_sheet
+
+        if sp_raw == "full":
+            sp_val = None
+        else:
+            try:
+                sp_val = int(sp_raw)
+            except ValueError:
+                self.caller.msg("sp= must be an integer or 'full'.")
+                return
+
+        ident_l = ident.lower()
+        implant_key = _IMPLANT_KEY_ALIASES.get(ident_l)
+        if implant_key:
+            from world.cyberware.implanted_armor import ensure_implanted_armor_for_sheet
+
+            ensure_implanted_armor_for_sheet(sheet)
+            ok, msg = staff_set_implanted_sp(sheet, implant_key, sp_val)
+            if ok:
+                self.caller.msg(f"|g{char.key}:|n {msg}")
+                if char != self.caller:
+                    char.msg(f"Staff adjusted your implanted {implant_key} armor: {msg}")
+            else:
+                self.caller.msg(f"|r{msg}|n")
+            return
+
+        inv = _get_inventory_for_character(char)
+        armor, inst = _find_armor_in_inventory(inv, ident)
+        if not armor:
+            self.caller.msg(f"No armor or implant key matching '{ident}'.")
+            return
+        base = inst.original_sp if inst.original_sp is not None else armor.sp
+        if sp_val is None:
+            new_sp = base
+        else:
+            new_sp = max(0, min(int(sp_val), int(base)))
+        inst.current_sp = new_sp
+        if inst.original_sp is None:
+            inst.original_sp = base
+        inst.save()
+        self.caller.msg(f"|g{char.key}|n — {armor.name} SP set to {new_sp} (max {base}).")
+        if char != self.caller:
+            char.msg(f"Staff set your {armor.name} SP to {new_sp}.")

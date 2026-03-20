@@ -24,6 +24,7 @@ from world.ip_config import (
     IPConfigScript,
 )
 from world.inventory.models import CyberwareInstance, Inventory, Weapon, Armor, Gear
+from world.cyberware.utils import cascade_uninstall_installed_descendants
 from world.cyberpunk_sheets.models import CharacterSheet
 from world.cyberpunk_sheets.services import CharacterSheetMoneyService
 from world.cyberpunk_sheets.edgerunner import EdgerunnerChargen
@@ -227,6 +228,135 @@ class CmdRemoveCyberware(MuxCommand):
                 )
             else:
                 target_char.msg(f"Your {cyberware.name} has been removed.")
+
+
+class CmdUninstallCyberware(MuxCommand):
+    """
+    Uninstall cyberware from a character but keep it in inventory (staff only).
+
+    Usage:
+      uninstallcyberware <character>=<cyberware name>
+
+    Sets installed=False on the instance. Cyberware stays in inventory.
+    Any installed options or nested pieces parented under this instance are
+    also uninstalled (parent cleared) so the tree stays consistent.
+    Humanity loss is preserved - reinstalling the same type will not cost
+    additional humanity. Use removecyberware to delete entirely.
+    """
+
+    key = "uninstallcyberware"
+    aliases = ["uninstcyberware"]
+    locks = "cmd:perm(Admin)"
+    help_category = "Admin"
+
+    def func(self):
+        if not self.args or "=" not in self.args:
+            self.caller.msg("Usage: uninstallcyberware <character>=<cyberware name>")
+            return
+
+        character_name = self.lhs.strip().strip('"')
+        cyberware_name = self.rhs.strip().strip('"')
+
+        character, char_sheet = get_character_and_sheet(self.caller, character_name)
+        if not character and not char_sheet:
+            self.caller.msg(f"Could not find character '{character_name}'.")
+            return
+        if not char_sheet:
+            self.caller.msg(f"No character sheet for {character_name}.")
+            return
+
+        inv_target = character if character else getattr(char_sheet, 'character', None)
+        if inv_target:
+            inventory, _ = Inventory.get_or_create_for_character(inv_target)
+        else:
+            inventory, _ = Inventory.objects.get_or_create(character=char_sheet)
+        if not inventory:
+            self.caller.msg(f"No inventory found for {character_name}.")
+            return
+
+        cw_instances = inventory.cyberware.filter(
+            cyberware__name__iexact=cyberware_name, installed=True
+        )
+        if not cw_instances.exists():
+            char_obj = character if character else char_sheet.character
+            if char_obj:
+                cw_instances = CyberwareInstance.objects.filter(
+                    character_object=char_obj,
+                    cyberware__name__iexact=cyberware_name,
+                    installed=True,
+                )
+            if not cw_instances.exists():
+                cw_instances = CyberwareInstance.objects.filter(
+                    character_sheet=char_sheet,
+                    cyberware__name__iexact=cyberware_name,
+                    installed=True,
+                )
+            if not cw_instances.exists():
+                self.caller.msg(
+                    f"'{cyberware_name}' not found in {character_name}'s installed cyberware."
+                )
+                return
+
+        cw_instance = cw_instances.first()
+        cyberware = cw_instance.cyberware
+        humanity_loss = cyberware.humanity_loss
+
+        # Options / nested limbs still point at this parent; uninstall them first so the
+        # sheet stays consistent (same idea as cybereye display rebuild from DB parents).
+        n_cascade = cascade_uninstall_installed_descendants(cw_instance, char_sheet)
+
+        # Uninstall (keep in inventory)
+        cw_instance.installed = False
+        cw_instance.active = False
+        cw_instance.parent = None  # Clear parent link on the uninstalled root
+        cw_instance.save()
+
+        # Preserve humanity: add to uninstalled_cyberware_hl so reinstall doesn't cost extra
+        if humanity_loss > 0 and hasattr(char_sheet, "uninstalled_cyberware_hl"):
+            uhl = getattr(char_sheet, "uninstalled_cyberware_hl", None) or {}
+            if not isinstance(uhl, dict):
+                uhl = {}
+            cw_name = cyberware.name
+            uhl[cw_name] = uhl.get(cw_name, 0) + humanity_loss
+            char_sheet.uninstalled_cyberware_hl = uhl
+            char_sheet.save(skip_recalculation=True)
+
+        # Update has_cyberarm if we uninstalled a Cyberarm
+        if cyberware.name.lower() == "cyberarm":
+            remaining_cyberarms = CyberwareInstance.objects.filter(
+                character_sheet=char_sheet, installed=True,
+                cyberware__name__iexact="Cyberarm"
+            ).exists()
+            char_sheet.has_cyberarm = remaining_cyberarms
+            char_sheet.recalculate_derived_stats()
+
+        # Recalculate humanity
+        if char_sheet:
+            char_sheet.calculate_humanity_loss()
+            try:
+                from world.cyberware.implanted_armor import ensure_implanted_armor_for_sheet
+
+                ensure_implanted_armor_for_sheet(char_sheet)
+            except Exception:
+                pass
+        if character:
+            EdgerunnerChargen.recalculate_humanity_for_typeclass(character)
+        elif char_sheet.character:
+            EdgerunnerChargen.recalculate_humanity_for_typeclass(char_sheet.character)
+
+        msg = (
+            f"Uninstalled {cyberware.name} from {character_name}. "
+            f"Humanity preserved - reinstall same type for no extra humanity cost."
+        )
+        if n_cascade:
+            msg += f" Also uninstalled {n_cascade} attached option(s)/nested piece(s)."
+        self.caller.msg(msg)
+        target_char = character or (char_sheet.character if hasattr(char_sheet, "character") else None)
+        if target_char and hasattr(target_char, "msg"):
+            target_char.msg(
+                f"Your {cyberware.name} has been uninstalled. "
+                f"It remains in your inventory. Reinstalling it won't cost additional humanity."
+            )
 
 
 class CmdSetLifepath(MuxCommand):

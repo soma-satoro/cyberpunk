@@ -294,7 +294,7 @@ class ChargenRoom(DefaultRoom):
         from world.chargen_constants import CHARGEN_REQUIRED_SKILLS, CHARGEN_REQUIRED_SKILL_MIN
 
         # Stats: all must be set (>= 0 is valid; prefer character.db, fallback to sheet)
-        required_stats = ['intelligence', 'reflexes', 'dexterity', 'technology', 'cool',
+        required_stats = ['intelligence', 'reflexes', 'dexterity', 'technique', 'cool',
                          'willpower', 'luck', 'move', 'body', 'empathy']
         try:
             for stat in required_stats:

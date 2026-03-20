@@ -7,8 +7,18 @@ from evennia.utils import gametime
 from world.cyberpunk_sheets.services import CharacterMoneyService
 from world.inventory.models import Weapon, Armor, Gear, Vehicle as VehicleModel, CyberwareInstance, Inventory, Ammunition
 from world.equipment_data import weapons, armors, gears, cyberdecks as cyberdecks_data, vehicles as vehicles_data, ammunition as ammunition_data
+from world.edgerunner_weapon_flavor import resolve_weapon_for_inventory
 from world.cyberware.models import Cyberware
 from world.cyberware.merchants import check_cyberware_requirements
+from world.cyberware.validation import (
+    validate_parent_for_new_child,
+    find_best_cyberaudio_parent,
+    select_balanced_parent_instance,
+    PAIRABLE_NAMES,
+    allows_multiples,
+    FOUNDATION_EYE_NAME_LOWERS,
+    _CYBEREYE_INSTANCE_NAMES,
+)
 from world.cyberware.cyberware_data import BODYCULPT_PACKAGES
 from evennia.utils.evmenu import get_input, EvMenu
 from world.cyberpunk_sheets.merchants import Merchant
@@ -379,8 +389,9 @@ class CmdBuy(MuxCommand):
       buy <item name> from <merchant>   - Buy from an NPC vendor
       buy <item name>                   - In chargen or vendor room: buy equipment
       buy/cyberware <name>              - Buy body cyberware (implants)
-      buy/cyberware pair=<name>         - Buy paired Cybereye/Cyberarm/Cyberleg (requires existing)
+      buy/cyberware pair=<Name> <Name>   - Buy paired Cybereye/Cyberarm/Cyberleg (requires existing, e.g. pair=Cybereye Cybereye)
       buy/cyberware parent=<option>/<parent> - Buy option and attach to parent limb
+          (if you have several with that name, e.g. multiple Cybereyes, the emptiest is chosen)
       buy/stash <cyberware>             - Buy cyberware without installing (use with /cyberware)
 
     Vendor rooms are locations tagged with item categories (e.g. handguns, drugs, cyberware).
@@ -426,7 +437,7 @@ class CmdBuy(MuxCommand):
                 self.caller.msg(
                     "Usage: buy <item name> - Purchase equipment (weapons, armor, gear, cyberdecks). "
                     "Use buy/cyberware <name> for body cyberware. "
-                    "Use buy/cyberware pair=<name> for paired Cybereye/Cyberarm/Cyberleg. "
+                    "Use buy/cyberware pair=Cybereye Cybereye for paired limbs. "
                     "Use buy/cyberware parent=<option>/<parent> to attach options to a limb. "
                     "Use 'list chargen/weapons', 'list chargen/armor', 'list chargen/gear', "
                     "or 'list chargen/cyberware' to see available items."
@@ -435,7 +446,7 @@ class CmdBuy(MuxCommand):
                 self.caller.msg(
                     "Usage: buy <item name> - Purchase from this vendor. "
                     "Use buy/cyberware <name> for cyberware. "
-                    "Use buy/cyberware pair=<name> for paired Cybereye/Cyberarm/Cyberleg. "
+                    "Use buy/cyberware pair=Cybereye Cybereye for paired limbs. "
                     "Use buy/cyberware parent=<option>/<parent> to attach options to a limb. "
                     "Use 'list' to see available items."
                 )
@@ -460,7 +471,16 @@ class CmdBuy(MuxCommand):
             lhs, rhs = self.args.strip().split("=", 1)
             lhs, rhs = lhs.strip().lower(), rhs.strip()
             if lhs == "pair":
-                self._buy_cyberware_pair(rhs, chargen_purchase=False)
+                # Require item name to be explicitly stated: "pair=Cybereye Cybereye" not just "pair=cybereye"
+                if " " not in rhs or not rhs.strip():
+                    self.caller.msg(
+                        "You must explicitly state the item name when buying a paired limb. "
+                        "Correct syntax: |wbuy/cyberware pair=Cybereye Cybereye|n "
+                        "(or Cyberarm/Cyberleg)."
+                    )
+                    return
+                cyberware_name = rhs.split(None, 1)[0]
+                self._buy_cyberware_pair(cyberware_name, chargen_purchase=False)
                 return
             if lhs == "parent" and "/" in rhs:
                 opt, parent = rhs.split("/", 1)
@@ -576,7 +596,16 @@ class CmdBuy(MuxCommand):
             lhs, rhs = item_name.split("=", 1) if "=" in item_name else (item_name, "")
             lhs, rhs = lhs.strip().lower(), rhs.strip()
             if lhs == "pair":
-                self._buy_cyberware_pair(rhs, chargen_purchase=True)
+                # Require item name to be explicitly stated: "pair=Cybereye Cybereye" not just "pair=cybereye"
+                if " " not in rhs or not rhs.strip():
+                    self.caller.msg(
+                        "You must explicitly state the item name when buying a paired limb. "
+                        "Correct syntax: |wbuy/cyberware pair=Cybereye Cybereye|n "
+                        "(or Cyberarm/Cyberleg)."
+                    )
+                    return
+                cyberware_name = rhs.split(None, 1)[0]
+                self._buy_cyberware_pair(cyberware_name, chargen_purchase=True)
                 return
             if lhs == "parent" and "/" in rhs:
                 opt, parent = rhs.split("/", 1)
@@ -709,6 +738,7 @@ class CmdBuy(MuxCommand):
                 installed=True,
             )
             inventory.cyberware.add(instance)
+            character_sheet.consume_uninstalled_hl_for_cyberware(cw)
             added.append(cw_name)
             if cw.name.lower() == "cyberarm":
                 character_sheet.has_cyberarm = True
@@ -743,27 +773,92 @@ class CmdBuy(MuxCommand):
         if getattr(cyberware, "type", "") == "Bodysculpt Package":
             self._buy_bodysculpt_package(cyberware, chargen_purchase)
             return
+        try:
+            character_sheet = self.caller.character_sheet
+        except AttributeError:
+            self.caller.msg("No character sheet found for your character.")
+            return
+        inventory, _ = Inventory.get_or_create_for_character(self.caller)
         # Popup Melee/Ranged require weapon selection at install - must stash
         cw_lower = cyberware.name.lower()
         if not stash and cw_lower in ("popup melee weapon", "popup ranged weapon"):
             stash = True
             self.caller.msg(
                 f"{cyberware.name} requires selecting a weapon when installing. "
-                f"Use: cyberware/install \"{cyberware.name}\" = \"<weapon>\""
+                f"Use: cyberware/install \"{cyberware.name}\" = \"<weapon>\" (e.g. Light Melee Weapon, Heavy Pistol)"
             )
+        # Pairable items (Cybereye, Cyberarm, Cyberleg): handle 2nd/3rd purchase
+        if cw_lower in PAIRABLE_NAMES:
+            count = CyberwareInstance.objects.filter(
+                character_sheet=character_sheet,
+                cyberware__name__in=list(_CYBEREYE_INSTANCE_NAMES) + [
+                    "Cyberarm", "Neo-Soviet Cyberarm", "Cyberleg",
+                ],
+                installed=True,
+            ).count()
+            # Normalize: only count matching type
+            if cw_lower == "cyberleg":
+                count = CyberwareInstance.objects.filter(
+                    character_sheet=character_sheet,
+                    cyberware__name__iexact="Cyberleg",
+                    installed=True,
+                ).count()
+            elif cw_lower in ("cyberarm", "neo-soviet cyberarm"):
+                count = CyberwareInstance.objects.filter(
+                    character_sheet=character_sheet,
+                    cyberware__name__in=["Cyberarm", "Neo-Soviet Cyberarm"],
+                    installed=True,
+                ).count()
+            elif cw_lower in FOUNDATION_EYE_NAME_LOWERS:
+                count = CyberwareInstance.objects.filter(
+                    character_sheet=character_sheet,
+                    cyberware__name__in=_CYBEREYE_INSTANCE_NAMES,
+                    installed=True,
+                ).count()
+            if count == 1:
+                self.caller.msg(
+                    f"You already have one {cyberware.name}. To add a second (paired), use: "
+                    f"|wbuy/cyberware pair={cyberware.name} {cyberware.name}|n"
+                )
+                return
+            if count >= 2 and cw_lower == "cyberleg":
+                stash = True
+                self.caller.msg(
+                    f"You cannot install a third Cyberleg. It will be added to your inventory (uninstalled). "
+                    f"You can sell it, transfer it, or refund it. No humanity loss."
+                )
+            elif count >= 2 and cw_lower in ("cyberarm", "neo-soviet cyberarm"):
+                has_asm = CyberwareInstance.objects.filter(
+                    character_sheet=character_sheet,
+                    cyberware__name__iexact="Artificial Shoulder Mount",
+                    installed=True,
+                ).exists()
+                if not has_asm:
+                    stash = True
+                    self.caller.msg(
+                        f"You need an Artificial Shoulder Mount to install more than two Cyberarms. "
+                        f"It will be added to your inventory (uninstalled). "
+                        f"Install an Artificial Shoulder Mount first, then use |wcyberware/install {cyberware.name}|n. No humanity loss."
+                    )
+            elif count >= 2 and cw_lower in FOUNDATION_EYE_NAME_LOWERS:
+                has_mom = CyberwareInstance.objects.filter(
+                    character_sheet=character_sheet,
+                    cyberware__name__iexact="MultiOptic Mount",
+                    installed=True,
+                ).exists()
+                if not has_mom:
+                    stash = True
+                    self.caller.msg(
+                        f"You need a MultiOptic Mount to install more than two Cybereyes. "
+                        f"It will be added to your inventory (uninstalled). "
+                        f"Install a MultiOptic Mount first, then use |wcyberware/install {cyberware.name}|n. No humanity loss."
+                    )
         base_cost = cyberware.cost
         # Chargen purchases use full price - no role discounts
         discount = 0 if chargen_purchase else get_purchase_discount_percent(self.caller, "cyberware", None)
         final_cost = calculate_final_price(base_cost, discount)
 
-        try:
-            character_sheet = self.caller.character_sheet
-        except AttributeError:
-            self.caller.msg("No character sheet found for your character.")
-            return
-
-        inventory, _ = Inventory.get_or_create_for_character(self.caller)
-        if not stash and inventory.cyberware.filter(cyberware=cyberware, installed=True).exists():
+        if not stash and not allows_multiples(cyberware) and inventory.cyberware.filter(cyberware=cyberware, installed=True).exists():
             self.caller.msg(f"You already have {cyberware.name} installed.")
             return
 
@@ -851,6 +946,7 @@ class CmdBuy(MuxCommand):
 
         character_sheet.refresh_from_db()
         if not stash:
+            character_sheet.consume_uninstalled_hl_for_cyberware(cyberware)
             character_sheet.calculate_humanity_loss()
         character_sheet.save()
 
@@ -881,15 +977,24 @@ class CmdBuy(MuxCommand):
             self.caller.msg(f"You have purchased and installed {cyberware.name} for {final_cost} eb.")
         if not stash:
             self.caller.msg(f"Your new humanity is {character_sheet.humanity}.")
+            # Keep puppet HP/death save in sync with sheet (effective BODY from cyberware)
+            if hasattr(self.caller, "recalculate_derived_stats"):
+                self.caller.recalculate_derived_stats()
+            try:
+                from world.cyberware.implanted_armor import ensure_implanted_armor_for_sheet
+
+                ensure_implanted_armor_for_sheet(character_sheet)
+            except Exception:
+                pass
 
     def _buy_cyberware_pair(self, cyberware_name, chargen_purchase=False):
         """Buy a paired second Cybereye/Cyberarm/Cyberleg. Requires existing unpaired instance."""
-        PAIRABLE = ("cybereye", "cyberarm", "cyberleg")
         name_lower = cyberware_name.lower()
-        if name_lower not in PAIRABLE:
+        if name_lower not in PAIRABLE_NAMES:
             self.caller.msg(
-                f"Only Cybereye, Cyberarm, and Cyberleg can be purchased as paired. "
-                f"Use buy/cyberware pair=Cybereye (or Cyberarm/Cyberleg)."
+                "Only pairable cyberlimbs or cybereyes can be purchased as paired (see |whelp buy|n). "
+                "Examples: pair=Cybereye Cybereye, pair=Sponsored Cybereye Sponsored Cybereye, "
+                "pair=Cyberarm Cyberarm, pair=Cyberleg Cyberleg."
             )
             return
         if chargen_purchase:
@@ -907,10 +1012,12 @@ class CmdBuy(MuxCommand):
             self.caller.msg("No character sheet found.")
             return
         inventory, _ = Inventory.get_or_create_for_character(self.caller)
+        # Only pair root-level limbs (not those under MultiOptic/Artificial Shoulder Mount)
         first_instance = inventory.cyberware.filter(
             cyberware__name__iexact=cyberware_name,
             installed=True,
             paired_with__isnull=True,
+            parent__isnull=True,
         ).first()
         if not first_instance:
             self.caller.msg(
@@ -956,6 +1063,7 @@ class CmdBuy(MuxCommand):
             paired_with=first_instance,
         )
         inventory.cyberware.add(instance)
+        character_sheet.consume_uninstalled_hl_for_cyberware(cyberware)
         character_sheet.calculate_humanity_loss()
         if cyberware.name.lower() == "cyberarm":
             character_sheet.has_cyberarm = True
@@ -986,14 +1094,37 @@ class CmdBuy(MuxCommand):
         except AttributeError:
             self.caller.msg("No character sheet found.")
             return
+        requirements_met, error_message = check_cyberware_requirements(character_sheet, cyberware)
+        if not requirements_met:
+            self.caller.msg(error_message)
+            return
         inventory, _ = Inventory.get_or_create_for_character(self.caller)
-        parent_inst = inventory.cyberware.filter(
+        parent_candidates = list(inventory.cyberware.filter(
             cyberware__name__iexact=parent_name,
             installed=True,
-        ).first()
-        if not parent_inst:
+        ).select_related("cyberware"))
+        if not parent_candidates:
             self.caller.msg(f"You don't have {parent_name} installed. Install the parent limb first.")
             return
+        # For Cyberaudio Suite: try main suite first, then Sensor Array when full
+        parent_inst = None
+        if parent_name.lower() in ("cyberaudio suite", "discount cyberaudio suite"):
+            parent_inst, err = find_best_cyberaudio_parent(character_sheet, cyberware)
+            if err:
+                self.caller.msg(err)
+                return
+        # For Chipware Socket / Budget Chipware Socket: find one with available slots
+        elif parent_name.lower() in ("chipware socket", "budget chipware socket"):
+            for cand in parent_candidates:
+                ok, _ = validate_parent_for_new_child(cand, cyberware)
+                if ok:
+                    parent_inst = cand
+                    break
+        if parent_inst is None:
+            parent_inst, err = select_balanced_parent_instance(parent_candidates, cyberware)
+            if err:
+                self.caller.msg(err)
+                return
         base_cost = cyberware.cost
         # Chargen purchases use full price - no role discounts
         discount = 0 if chargen_purchase else get_purchase_discount_percent(self.caller, "cyberware", None)
@@ -1025,14 +1156,16 @@ class CmdBuy(MuxCommand):
             parent=parent_inst,
         )
         inventory.cyberware.add(instance)
+        character_sheet.consume_uninstalled_hl_for_cyberware(cyberware)
         character_sheet.calculate_humanity_loss()
         if chargen_purchase:
             purchased = inventory.chargen_purchased or []
             purchased.append({"type": "cyberware", "name": cyberware.name})
             inventory.chargen_purchased = purchased
             inventory.save()
+        actual_parent = parent_inst.cyberware.name if parent_inst and parent_inst.cyberware else parent_name
         self.caller.msg(
-            f"You have purchased and installed {cyberware.name} (on {parent_name}) for {final_cost} eb."
+            f"You have purchased and installed {cyberware.name} (on {actual_parent}) for {final_cost} eb."
         )
         self.caller.msg(f"Your new humanity is {character_sheet.humanity}.")
 
@@ -1098,14 +1231,23 @@ class CmdBuy(MuxCommand):
             )
             return
 
-        self._add_item_to_inventory(self.caller, item, merchant_type)
+        resolved_item = dict(item)
+        if merchant_type == "arms_dealer":
+            resolved_item = resolve_weapon_for_inventory(
+                dict(item),
+                quality=(item.get("quality") or "standard"),
+                paid_value=price,
+                source_note="Vendor purchase",
+            )
+        self._add_item_to_inventory(self.caller, resolved_item, merchant_type)
+        display_name = resolved_item.get("name", item["name"])
         if discount > 0:
             self.caller.msg(
-                f"You have purchased {item['name']} for {price} eb "
+                f"You have purchased {display_name} for {price} eb "
                 f"(base {base_price} eb, {discount}% role discount applied)."
             )
         else:
-            self.caller.msg(f"You have purchased {item['name']} for {price} eb.")
+            self.caller.msg(f"You have purchased {display_name} for {price} eb.")
 
     def get_character_inventory(self, character):
         """Get a character's inventory, checking typeclass first, then character sheet"""
@@ -1172,6 +1314,7 @@ class CmdBuy(MuxCommand):
                     'max_ammo': clip,
                     'current_ammo': 0,
                     'attachment_slots': slots or 0,
+                    'description': item.get('description', ''),
                 }
             )
             inventory.weapons.add(weapon)
@@ -1338,27 +1481,41 @@ class CmdBuy(MuxCommand):
             return
 
         inventory, _ = Inventory.get_or_create_for_character(self.caller)
-        clip = base_weapon.get("clip", 0)
-        weapon = Weapon.objects.create(
-            name=base_weapon["name"],
-            damage=base_weapon.get("damage", "2d6"),
-            rof=base_weapon.get("rof", "1"),
-            hands=base_weapon.get("hands", 1),
-            concealable=base_weapon.get("concealable", False),
-            weight=base_weapon.get("weight", 1),
-            value=price,
-            category=base_weapon.get("category", "handgun"),
+        merged = dict(base_weapon)
+        merged["quality"] = quality
+        resolved = resolve_weapon_for_inventory(
+            merged,
             quality=quality,
-            weapon_type=base_weapon.get("weapon_type", ""),
-            ammo_type=base_weapon.get("ammo_type", "Basic"),
+            paid_value=price,
+            source_note="Purchase",
+        )
+        from world.weapon_constants import DEFAULT_RANGED_ATTACHMENT_SLOTS
+        clip = int(resolved.get("clip", 0))
+        slots = resolved.get("attachment_slots")
+        if slots is None and resolved.get("category") in ("handgun", "shoulder_arms", "heavy_weapons"):
+            slots = DEFAULT_RANGED_ATTACHMENT_SLOTS
+        weapon = Weapon.objects.create(
+            name=resolved["name"],
+            damage=resolved.get("damage", "2d6"),
+            rof=resolved.get("rof", "1"),
+            hands=resolved.get("hands", 1),
+            concealable=resolved.get("concealable", False),
+            weight=resolved.get("weight", 1),
+            value=price,
+            category=resolved.get("category", "handgun"),
+            quality=quality,
+            weapon_type=resolved.get("weapon_type", ""),
+            ammo_type=resolved.get("ammo_type", "Basic"),
             clip=clip,
             max_ammo=clip,
             current_ammo=0,
+            attachment_slots=int(slots or 0),
+            description=resolved.get("description", ""),
         )
         inventory.weapons.add(weapon)
         if in_chargen:
             purchased = inventory.chargen_purchased or []
-            purchased.append({"type": "weapon", "name": base_weapon["name"]})
+            purchased.append({"type": "weapon", "name": resolved["name"]})
             inventory.chargen_purchased = purchased
             inventory.save()
         qual_str = f" ({quality} quality)" if quality != "standard" else ""
@@ -1694,7 +1851,7 @@ class CmdListItems(MuxCommand):
         elif main_cat == "cyberware":
             output.append(self._format_chargen_cyberware(catalog))
             output.append(
-                "|wCyberware pairs:|n buy/cyberware pair=Cybereye | "
+                "|wCyberware pairs:|n buy/cyberware pair=Cybereye Cybereye | "
                 "|wAttach option:|n buy/cyberware parent=Image Enhance/Cybereye"
             )
 
@@ -1908,7 +2065,7 @@ class CmdListItems(MuxCommand):
             nm = crop(str(name), width=28, suffix="...")
             out.append(f"|c{nm:<28}|n |gType:|n {str(ctype):<20} |gSlots:|n {slots} |gHL:|n {hl} |gValue:|n |y{value} eb|n")
         out.append(section_header("", width=78))
-        out.append("|wBuy:|n buy/cyberware <name> | buy/cyberware pair=<Cybereye/Cyberarm/Cyberleg> | buy/cyberware parent=<option>/<parent>")
+        out.append("|wBuy:|n buy/cyberware <name> | buy/cyberware pair=Cybereye Cybereye | buy/cyberware parent=<option>/<parent>")
         return "\n".join(out) + "\n"
 
 class CleanExitEvMenu(EvMenu):

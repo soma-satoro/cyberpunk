@@ -366,8 +366,17 @@ class CmdStat(AdminCommand):
                 sheet_attr = f'_{hp_attr}' if hp_attr in ('current_hp', 'max_hp') else hp_attr
                 if hasattr(char.db, db_attr) and hasattr(sheet, sheet_attr):
                     setattr(sheet, sheet_attr, getattr(char.db, db_attr))
-            sheet.recalculate_derived_stats()
-            sheet.save()
+            # Empathy affects humanity cap; run sheet recalc so humanity uses correct total HL
+            # (prevents inflated humanity from stale total_cyberware_humanity_loss)
+            if full_key == "empathy" and hasattr(sheet, "calculate_humanity_loss"):
+                sheet.calculate_humanity_loss(quiet=True)
+                char.db.humanity = sheet.humanity
+                char.db.total_cyberware_humanity_loss = getattr(
+                    sheet, "total_cyberware_humanity_loss", 0
+                ) or 0
+            else:
+                sheet.recalculate_derived_stats()
+                sheet.save()
             # Sync unarmed damage (derived from BODY/has_cyberarm) to character
             if hasattr(sheet, 'unarmed_damage_dice'):
                 char.db.unarmed_damage_dice = sheet.unarmed_damage_dice

@@ -525,6 +525,8 @@ def _set_neuroport(caller, raw_string, has_neuroport=True, **kwargs):
                         installed=True,
                     )
                     inventory.cyberware.add(cw_instance)
+                    if hasattr(sheet, "consume_uninstalled_hl_for_cyberware"):
+                        sheet.consume_uninstalled_hl_for_cyberware(cyberware)
                     if hasattr(sheet, "calculate_humanity_loss"):
                         sheet.calculate_humanity_loss()
                     sheet.save()

@@ -181,6 +181,48 @@ def _find_item_info(name):
     return (None, None)
 
 
+def _catalog_fuzzy_candidates():
+    """Unique display names across equipdb-backed DB rows and netrunning lists."""
+    seen = set()
+    rows = []
+
+    def add(name):
+        if name and name not in seen:
+            seen.add(name)
+            rows.append((name, name))
+
+    for n in Weapon.objects.values_list("name", flat=True):
+        add(n)
+    for n in Armor.objects.values_list("name", flat=True):
+        add(n)
+    for n in Gear.objects.values_list("name", flat=True):
+        add(n)
+    for n in Vehicle.objects.values_list("name", flat=True):
+        add(n)
+    for n in Ammunition.objects.values_list("name", flat=True):
+        add(n)
+    for n in Cyberdeck.objects.values_list("name", flat=True):
+        add(n)
+    for n in WeaponAttachment.objects.values_list("name", flat=True):
+        add(n)
+    for n in Cyberware.objects.values_list("name", flat=True):
+        add(n)
+    for seq in (programs, hardware, black_ice, quickhacks):
+        for x in seq:
+            add(x.get("name"))
+    return rows
+
+
+def try_resolve_equipdb_catalog_name(query: str):
+    """
+    Fuzzy-match user input to one catalog name (equipdb). Returns (name, None) or
+    (None, error_message). Used when exact / word matching in ``_find_item_info`` fails.
+    """
+    from world.utils.name_fuzzy import pick_named_candidate
+
+    return pick_named_candidate(query.strip(), _catalog_fuzzy_candidates())
+
+
 def format_item_info(source, data):
     """Format item info for display. Returns list of output lines."""
     out = [section_header(f"{source}: {data.get('name', '')}", width=78)]

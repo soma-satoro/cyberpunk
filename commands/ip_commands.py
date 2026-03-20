@@ -7,6 +7,10 @@ Improvement Points (IP) commands.
 +ip/log - View full IP history (or +ip/log <name> for staff)
 +ip/award <name>=<amount> - Staff: Award IP to a player
 +ip/remove <name>=<amount> - Staff: Remove IP from a player
+
+Multi-role: any role ability can be raised with IP at the standard role-ability cost table
+(60 IP for rank 1, then 120, …). After chargen, +ip/buy can add other roles' abilities;
+your +sheet Role line lists multiple roles (e.g. Solo / Medtech).
 """
 from evennia.commands.default.muxcommand import MuxCommand
 from world.utils.formatting import header, footer, divider
@@ -125,6 +129,10 @@ class CmdIP(MuxCommand):
       +ip/refund
       +ip/award Bob=25
       +ip/remove Jane=10
+
+    Multi-role: You can buy any role ability with IP (same costs as your primary role's
+    ability). Example: a Solo can |w+ip/buy medicine|n to gain Medicine (menu picks specialty);
+    +sheet Role shows |wSolo / Medtech|n when Medicine is greater than 0.
     """
 
     key = "+ip"
@@ -302,23 +310,14 @@ class CmdIP(MuxCommand):
             )
             return
 
-        # Medicine: launch menu to pick specialty (surgery/pharma/cryo) - Medtech only
+        # Medicine: launch menu to pick specialty (surgery/pharma/cryo). Any character can buy with IP (multi-role).
         medicine_specialty = None
         if stat_key == "medicine":
-            if (getattr(char.db, "role", None) or "").strip() != "Medtech":
-                self.caller.msg("Medicine is a Medtech role ability. Only Medtechs can purchase it.")
-                return
             parts = stat_name.split()
             if len(parts) >= 2:
                 spec = parts[1].lower()
                 if spec in ("surgery", "pharma", "cryo", "cryosystem"):
                     medicine_specialty = "cryo" if spec == "cryosystem" else spec
-
-        # Maker: launch menu to allocate 2 points - Tech only
-        if stat_key == "maker":
-            if (getattr(char.db, "role", None) or "").strip() != "Tech":
-                self.caller.msg("Maker is a Tech role ability. Only Techs can purchase it.")
-                return
 
         if not is_valid_stat(stat_name.split()[0] if stat_name else stat_name):
             self.caller.msg(f"'{stat_name}' is not a valid skill or attribute to purchase.")

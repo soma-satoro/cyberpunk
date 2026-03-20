@@ -500,6 +500,16 @@ class CmdRest(MuxCommand):
                 f"|gSuccess!|n You focus your mind. Recovered {gain} Focus. "
                 f"({focus_obj.current_focus}/{max_focus})"
             )
+            # CPR: successful rest day — nanomachines repair Skin Weave / Subdermal +1 SP each (if installed)
+            if hasattr(char, "character_sheet") and char.character_sheet:
+                try:
+                    from world.cyberware.implanted_armor import apply_daily_natural_healing_implanted_armor
+
+                    healed, hmsg = apply_daily_natural_healing_implanted_armor(char.character_sheet)
+                    if healed and hmsg:
+                        self.caller.msg(f"|cImplanted armor:|n {hmsg}")
+                except Exception:
+                    pass
         else:
             focus_obj.save()
             self.caller.msg(
@@ -897,7 +907,7 @@ def _skill_to_stat(skill_name):
                     "handgun", "heavy_weapons", "shoulder_arms"],
         "dexterity": ["athletics", "contortionist", "dance", "endurance", "resist_torture_drugs",
                      "stealth", "brawling", "evasion", "martial_arts", "melee"],
-        "technology": ["basic_tech", "cybertech", "demolitions", "electronics_security_tech", "first_aid",
+        "technique": ["basic_tech", "cybertech", "demolitions", "electronics_security_tech", "first_aid",
                       "forgery", "paramedic", "medicine", "surgery", "pick_lock", "weaponstech",
                       "air_vehicle_tech", "land_vehicle_tech", "sea_vehicle_tech"],
         "cool": ["acting", "play_instrument", "style", "bribery", "conversation", "human_perception",

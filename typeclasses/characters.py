@@ -42,7 +42,7 @@ class Character(DefaultCharacter):
         self.db.intelligence = 1
         self.db.reflexes = 1
         self.db.dexterity = 1
-        self.db.technology = 1
+        self.db.technique = 1
         self.db.cool = 1
         self.db.willpower = 1
         self.db.luck = 1
@@ -265,7 +265,7 @@ class Character(DefaultCharacter):
         sheet.intelligence = 1
         sheet.reflexes = 1
         sheet.dexterity = 1
-        sheet.technology = 1
+        sheet.technique = 1
         sheet.cool = 1
         sheet.willpower = 1
         sheet.luck = 1
@@ -622,7 +622,10 @@ class Character(DefaultCharacter):
     def recalculate_derived_stats(self):
         """Recalculate all derived statistics."""
         from world.hp_chart import get_hp_from_chart
-        self.db.max_hp = get_hp_from_chart(self.db.body, self.db.willpower)
+        from world.cyberware.stat_bonuses import get_effective_body
+
+        effective_body = get_effective_body(self)
+        self.db.max_hp = get_hp_from_chart(effective_body, self.db.willpower)
         
         # Ensure current HP doesn't exceed max HP
         if self.db.current_hp > self.db.max_hp:
@@ -635,9 +638,9 @@ class Character(DefaultCharacter):
         # Ensure current HP is never negative
         self.db.current_hp = max(0, self.db.current_hp)
         
-        # Death save and serious wounds based on body
-        self.db.death_save = self.db.body
-        self.db.serious_wounds = self.db.body
+        # Death save and serious wounds use effective BODY (lace, linear frames)
+        self.db.death_save = effective_body
+        self.db.serious_wounds = effective_body
         
         # Calculate humanity based on empathy and cyberware
         self.calculate_humanity()
@@ -662,29 +665,33 @@ class Character(DefaultCharacter):
         self.db.total_cyberware_humanity_loss = total_humanity_loss
     
     def calculate_cyberware_humanity_loss(self):
-        """Calculate total humanity loss from installed cyberware."""
+        """Calculate total humanity loss from installed cyberware.
+        Prefer character_sheet when available, since commerce creates instances with
+        character_sheet; this keeps Character and CharacterSheet counts in sync."""
         from django.apps import apps
         CyberwareInstance = apps.get_model('inventory', 'CyberwareInstance')
 
-        # Use pk to avoid "Model instances passed to related filters must be saved" error
-        char_pk = getattr(self, 'pk', None) or getattr(self, 'id', None)
-
-        if char_pk is not None:
-            installed_cyberware = CyberwareInstance.objects.filter(
-                character_object_id=char_pk, installed=True
-            )
-        else:
+        # Prefer character_sheet - commerce/cyberware install uses character_sheet_id
+        try:
+            character_sheet = self.character_sheet
+            if character_sheet and getattr(character_sheet, 'pk', None):
+                installed_cyberware = CyberwareInstance.objects.filter(
+                    character_sheet_id=character_sheet.pk, installed=True
+                )
+            else:
+                installed_cyberware = CyberwareInstance.objects.none()
+        except Exception:
             installed_cyberware = CyberwareInstance.objects.none()
 
+        # Fallback to character_object if no sheet (e.g. NPCs)
         if not installed_cyberware.exists():
-            try:
-                character_sheet = self.character_sheet
-                if character_sheet and getattr(character_sheet, 'pk', None):
-                    installed_cyberware = CyberwareInstance.objects.filter(
-                        character_sheet_id=character_sheet.pk, installed=True
-                    )
-            except Exception:
-                pass
+            char_pk = getattr(self, 'pk', None) or getattr(self, 'id', None)
+            if char_pk is not None:
+                installed_cyberware = CyberwareInstance.objects.filter(
+                    character_object_id=char_pk, installed=True
+                )
+            else:
+                installed_cyberware = CyberwareInstance.objects.none()
 
         # Sum humanity loss from all installed cyberware
         return sum(cw.cyberware.humanity_loss for cw in installed_cyberware)
@@ -948,7 +955,8 @@ class Character(DefaultCharacter):
         self.db.intelligence = sheet.intelligence
         self.db.reflexes = sheet.reflexes
         self.db.dexterity = sheet.dexterity
-        self.db.technology = sheet.technology
+        from world.utils.character_utils import get_technique_value
+        self.db.technique = get_technique_value(sheet) or sheet.technique or 1
         self.db.cool = sheet.cool
         self.db.willpower = sheet.willpower
         self.db.luck = sheet.luck
@@ -983,7 +991,7 @@ class Character(DefaultCharacter):
             if (isinstance(getattr(sheet, field_name, None), int) and 
                 not field_name.startswith('_') and 
                 field_name not in ['id', 'eurodollars', 'reputation_points', 'rep', 
-                                  'intelligence', 'reflexes', 'dexterity', 'technology',
+                                  'intelligence', 'reflexes', 'dexterity', 'technique',
                                   'cool', 'willpower', 'luck', 'current_luck', 'move', 
                                   'body', 'empathy', 'age', 'height', 'weight',
                                   'humanity', 'humanity_loss', 'total_cyberware_humanity_loss',
@@ -1023,7 +1031,8 @@ class Character(DefaultCharacter):
         sheet.intelligence = self.db.intelligence
         sheet.reflexes = self.db.reflexes
         sheet.dexterity = self.db.dexterity
-        sheet.technology = self.db.technology
+        from world.utils.character_utils import get_technique_value
+        sheet.technique = get_technique_value(self) or self.db.technique or 1
         sheet.cool = self.db.cool
         sheet.willpower = self.db.willpower
         sheet.luck = self.db.luck
@@ -1161,7 +1170,9 @@ class Character(DefaultCharacter):
 
     def calculate_base_unarmed_damage(self):
         """Brawling damage scales with BODY; Cyberarm grants minimum 2d6 (CPR p.169)."""
-        body = getattr(self.db, 'body', 1) or 1
+        from world.cyberware.stat_bonuses import get_effective_body
+
+        body = get_effective_body(self)
         has_cyberarm = getattr(self.db, 'has_cyberarm', False) or False
         if body >= 11:
             return 4
@@ -1296,7 +1307,7 @@ class Character(DefaultCharacter):
         # Stats - use (x or 0) to handle None from uninitialized attributes
         stat_points = sum([
             self.db.intelligence or 0, self.db.reflexes or 0, self.db.dexterity or 0,
-            self.db.technology or 0, self.db.cool or 0, self.db.willpower or 0,
+            self.db.technique or 0, self.db.cool or 0, self.db.willpower or 0,
             self.db.luck or 0, self.db.move or 0, self.db.body or 0, self.db.empathy or 0
         ])
 

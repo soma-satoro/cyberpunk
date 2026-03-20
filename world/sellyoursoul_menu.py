@@ -211,6 +211,7 @@ def menunode_do_confirm(caller, raw_string, **kwargs):
                 installed=True,
             )
             inventory.cyberware.add(instance)
+            sheet.consume_uninstalled_hl_for_cyberware(neural_link)
             sheet.calculate_humanity_loss()
             sheet.save()
             caller.msg("Neural Link installed (free).")

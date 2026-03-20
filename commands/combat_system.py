@@ -98,8 +98,13 @@ def make_death_save(character):
     Returns:
         bool: True if the character survives, False if they die
     """
-    # Get the body attribute for the death save
-    body = character.db.body
+    # Death save target uses effective BODY (cyberware-augmented)
+    try:
+        from world.cyberware.stat_bonuses import get_effective_body
+
+        body = get_effective_body(character)
+    except Exception:
+        body = character.db.body
     
     # Roll 1d10 + modifier
     roll = random.randint(1, 10)

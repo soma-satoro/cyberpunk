@@ -84,30 +84,15 @@ def is_dead(character):
 
 def get_armor_sp(character, aim_location=None):
     """
-    Get effective SP for target. Uses InventoryArmor current SP (after ablation) when available.
-    For aimed shots, use location-specific SP if armor has it.
+    Highest SP among all sources that protect this hit location (worn armor + implants).
+    Implants (Skin Weave / Subdermal / Sycust) use tracked current SP on the character sheet.
     """
-    sheet = getattr(character, "character_sheet", None)
-    armor = None
-    if sheet:
-        armor = getattr(sheet, "eqarmor", None)
-    if not armor and hasattr(character, "db") and getattr(character.db, "eqarmor", None):
-        armor = character.db.eqarmor
-    if not armor:
+    try:
+        from world.cyberware.implanted_armor import get_total_armor_sp_for_location
+
+        return get_total_armor_sp_for_location(character, aim_location)
+    except Exception:
         return 0
-    sp = getattr(armor, "sp", 0) or 0
-    # Use InventoryArmor effective SP (ablated) when character has inventory
-    if sheet:
-        inv = getattr(sheet, "inventory", None)
-        if inv and armor:
-            try:
-                from world.inventory.models import InventoryArmor
-                inst = InventoryArmor.objects.filter(inventory=inv, armor=armor).first()
-                if inst:
-                    return inst.get_effective_sp()
-            except Exception:
-                pass
-    return sp
 
 
 def get_cover_sp(character):
@@ -314,9 +299,10 @@ def make_death_save(character):
     Each roll adds +1 to death_save_penalty. Base comes from injuries only; stabilization resets to base.
     Returns (success: bool, roll: int, total: int, penalty_used: int).
     """
-    body = getattr(character.db, "death_save", 0) or 0
-    if hasattr(character, "character_sheet") and character.character_sheet:
-        body = getattr(character.character_sheet, "death_save", body) or body
+    from world.cyberware.stat_bonuses import get_effective_body
+
+    # Effective BODY (lace, linear frames) — matches sheet.death_save after recalculate_derived_stats
+    body = get_effective_body(character)
     penalty = 0
     if hasattr(character, "character_sheet") and character.character_sheet:
         penalty = getattr(character.character_sheet, "death_save_penalty", 0) or 0

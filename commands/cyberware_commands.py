@@ -5,6 +5,7 @@ from world.utils.character_utils import get_staff_target_character
 from world.cyberware.models import Cyberware
 from evennia.commands.default.muxcommand import MuxCommand
 from world.utils.formatting import sheet_header, footer, header, divider
+from world.utils.name_fuzzy import pick_named_candidate
 from django.db.models import Q
 from world.equipment_data import (
     get_popup_melee_weapons,
@@ -12,6 +13,12 @@ from world.equipment_data import (
     get_weapon_by_name,
     get_weapon_damage_dice,
 )
+from world.cyberware.validation import (
+    validate_parent_child,
+    validate_parent_for_new_child,
+    select_child_instance_for_parenting,
+)
+from world.cyberware.merchants import check_cyberware_requirements
 
 class CmdCyberware(MuxCommand):
     """
@@ -27,7 +34,7 @@ class CmdCyberware(MuxCommand):
       cyberware/install <name>
       cyberware/install "Popup Melee Weapon" = "<weapon>"
       cyberware/install "Popup Ranged Weapon" = "<weapon>"
-      cyberware/parent <cyberware child>=<cyberware parent>
+      cyberware/parent <option>=<parent>   - Assign option to parent (e.g. image enhance=cybereye)
       cyberware/unparent <cyberware child>     - Disconnect option from parent; uninstall and refund humanity
       cyberware/unparent <name>/<child>       - Staff: unparent from another character
 
@@ -86,11 +93,14 @@ class CmdCyberware(MuxCommand):
                 self.install_cyberware(character_sheet, raw, None)
             return
         if self.switches and "parent" in self.switches:
-            if "=" not in raw:
-                self.caller.msg("Usage: cyberware/parent <cyberware child>=<cyberware parent>")
+            if "=" in raw:
+                option_name, parent_name = raw.split("=", 1)
+            elif "/" in raw:
+                option_name, parent_name = raw.split("/", 1)
+            else:
+                self.caller.msg("Usage: cyberware/parent <option>=<parent> (e.g. cyberware/parent image enhance=cybereye)")
                 return
-            child_name, parent_name = raw.split("=", 1)
-            self._do_parent(character_sheet, child_name.strip(), parent_name.strip())
+            self._do_parent(character_sheet, option_name.strip(), parent_name.strip())
             return
         if self.switches and "unparent" in self.switches:
             if not raw:
@@ -148,12 +158,12 @@ class CmdCyberware(MuxCommand):
 
     def _do_parent(self, character_sheet, child_name, parent_name):
         """Assign a cyberware option (child) to its parent limb."""
-        child_inst = CyberwareInstance.objects.filter(
+        child_candidates = CyberwareInstance.objects.filter(
             character_sheet=character_sheet,
             installed=True,
             cyberware__name__iexact=child_name,
-        ).first()
-        if not child_inst:
+        )
+        if not child_candidates.exists():
             self.caller.msg(f"You don't have installed cyberware named '{child_name}'.")
             return
         parent_inst = CyberwareInstance.objects.filter(
@@ -164,8 +174,19 @@ class CmdCyberware(MuxCommand):
         if not parent_inst:
             self.caller.msg(f"You don't have installed cyberware named '{parent_name}'.")
             return
-        if child_inst.parent_id == parent_inst.id:
+        child_inst, pick_status = select_child_instance_for_parenting(child_candidates, parent_inst)
+        if pick_status == "already":
             self.caller.msg(f"{child_inst.cyberware.name} is already assigned to {parent_inst.cyberware.name}.")
+            return
+        if pick_status == "all_busy" or child_inst is None:
+            self.caller.msg(
+                f"Every '{child_name}' you have is already assigned to another limb. "
+                f"Unparent or uninstall one first, or buy another copy."
+            )
+            return
+        ok, err = validate_parent_child(parent_inst, child_inst)
+        if not ok:
+            self.caller.msg(err)
             return
         child_inst.parent = parent_inst
         child_inst.save()
@@ -225,25 +246,24 @@ class CmdCyberware(MuxCommand):
                 inv = None
         if inv:
             installed = list(
-                inv.cyberware.filter(installed=True).select_related("cyberware", "parent", "paired_with")
+                inv.cyberware.filter(installed=True).select_related(
+                    "cyberware", "parent", "parent__cyberware", "paired_with"
+                )
             )
         else:
             installed = list(
                 CyberwareInstance.objects.filter(character_sheet=character_sheet, installed=True)
-                .select_related("cyberware", "parent", "paired_with")
+                .select_related("cyberware", "parent", "parent__cyberware", "paired_with")
             )
         if not installed:
             self.caller.msg("You have no cyberware installed.")
             return
 
-        from world.cyberware.utils import format_cyberware_for_display
-        rows = format_cyberware_for_display(installed, with_roots=True)
+        from world.cyberware.utils import format_cyberware_by_category
 
         W = 78
         output = sheet_header("Installed Cyberware", width=W)
-        output += f"|y{'Name':<45}{'Type':<18}{'Humanity Loss':<12}|n\n"
-        for display_name, cw_type, humanity_loss in rows:
-            output += f"|w{display_name[:44]:<45}{cw_type:<18}{humanity_loss:<12}|n\n"
+        output += format_cyberware_by_category(installed, character_sheet)
         output += footer(width=W, fillchar="-")
         output += "\nUse cyberware/info <cyberware name> for more information."
         self.caller.msg(output)
@@ -258,23 +278,30 @@ class CmdCyberware(MuxCommand):
             inv = None
         if inv:
             instances = list(
-                inv.cyberware.filter(
-                    cyberware__name__iexact=cyberware_name,
-                    installed=True,
-                ).select_related("cyberware", "parent", "paired_with")
+                inv.cyberware.filter(installed=True).select_related(
+                    "cyberware", "parent", "paired_with"
+                )
             )
         else:
             instances = list(
                 CyberwareInstance.objects.filter(
                     character_sheet=character_sheet,
-                    cyberware__name__iexact=cyberware_name,
                     installed=True,
                 ).select_related("cyberware", "parent", "paired_with")
             )
         if not instances:
-            self.caller.msg(f"You don't have a piece of cyberware named '{cyberware_name}' installed.")
+            self.caller.msg("You have no cyberware installed.")
             return
-        cyberware_instance = instances[0]
+        candidates = [(inst.cyberware.name or "", inst) for inst in instances]
+        cyberware_instance, err = pick_named_candidate(cyberware_name, candidates)
+        if err:
+            self.caller.msg(err)
+            return
+        if not cyberware_instance:
+            self.caller.msg(
+                f"You don't have a piece of cyberware named '{cyberware_name}' installed."
+            )
+            return
 
         cyberware = cyberware_instance.cyberware
         
@@ -311,13 +338,20 @@ class CmdCyberware(MuxCommand):
             return
         cw = cw_instance.cyberware
         cw_lower = cw.name.lower()
-        # Popup Melee/Ranged require weapon selection
+        # Popup Melee/Ranged require weapon selection - you must specify the weapon
         if cw_lower == "popup melee weapon":
-            if not weapon_name:
+            if not weapon_name or not weapon_name.strip():
                 melee_list = get_popup_melee_weapons()
                 names = ", ".join(w["name"] for w in melee_list[:15])
-                self.caller.msg(f"Popup Melee Weapon requires a one-handed melee weapon. Usage: cyberware/install \"Popup Melee Weapon\" = \"<weapon>\"")
-                self.caller.msg(f"Eligible: {names}{'...' if len(melee_list) > 15 else ''}")
+                self.caller.msg(
+                    "|rError:|n Popup Melee Weapon requires specifying a one-handed melee weapon. "
+                    "You must provide the weapon name."
+                )
+                self.caller.msg(
+                    f"Usage: |wcyberware/install \"Popup Melee Weapon\" = \"<weapon>\"|n "
+                    "(e.g. Light Melee Weapon, Medium Melee Weapon, Heavy Melee Weapon)"
+                )
+                self.caller.msg(f"Eligible one-handed melee weapons: {names}{'...' if len(melee_list) > 15 else ''}")
                 return
             w = get_weapon_by_name(weapon_name)
             if not w or w.get("category") != "melee" or w.get("hands", 2) != 1:
@@ -325,26 +359,67 @@ class CmdCyberware(MuxCommand):
                 return
             cw_instance.popup_weapon_name = w["name"]
         elif cw_lower == "popup ranged weapon":
-            if not weapon_name:
+            if not weapon_name or not weapon_name.strip():
                 ranged_list = get_popup_ranged_weapons()
                 names = ", ".join(w["name"] for w in ranged_list[:15])
-                self.caller.msg(f"Popup Ranged Weapon requires a one-handed handgun/SMG. Usage: cyberware/install \"Popup Ranged Weapon\" = \"<weapon>\"")
-                self.caller.msg(f"Eligible: {names}{'...' if len(ranged_list) > 15 else ''}")
+                self.caller.msg(
+                    "|rError:|n Popup Ranged Weapon requires specifying a one-handed handgun. "
+                    "You must provide the weapon name."
+                )
+                self.caller.msg(
+                    f"Usage: |wcyberware/install \"Popup Ranged Weapon\" = \"<weapon>\"|n "
+                    "(e.g. Medium Pistol, Heavy Pistol, Very Heavy Pistol)"
+                )
+                self.caller.msg(f"Eligible one-handed handguns: {names}{'...' if len(ranged_list) > 15 else ''}")
                 return
             w = get_weapon_by_name(weapon_name)
             if not w or w.get("category") != "handgun" or w.get("hands", 2) != 1:
                 self.caller.msg(f"'{weapon_name}' is not a one-handed handgun/SMG. Use equipdb weapons to browse.")
                 return
             cw_instance.popup_weapon_name = w["name"]
+        # Popup Melee/Ranged require a Cyberarm parent with available slots
+        if cw_lower in ("popup melee weapon", "popup ranged weapon"):
+            parent_arm = None
+            for inst in CyberwareInstance.objects.filter(
+                character_sheet=character_sheet,
+                installed=True,
+                cyberware__name__in=["Cyberarm", "Neo-Soviet Cyberarm"],
+            ).select_related("cyberware"):
+                ok, _ = validate_parent_for_new_child(inst, cw_instance.cyberware)
+                if ok:
+                    parent_arm = inst
+                    break
+            if not parent_arm:
+                self.caller.msg(
+                    f"You need an installed Cyberarm (or Neo-Soviet Cyberarm) with at least 2 free option slots "
+                    f"to install {cw.name}. Install a Cyberarm first, or free up slots with cyberware/unparent."
+                )
+                return
+            cw_instance.parent = parent_arm
+        # Validate requirements (solo-limb, Self-ICE limit, etc.) same as purchase
+        requirements_met, error_message = check_cyberware_requirements(character_sheet, cw)
+        if not requirements_met:
+            self.caller.msg(error_message)
+            return
         cw_instance.installed = True
         if not cw_instance.character_sheet:
             cw_instance.character_sheet = character_sheet
         cw_instance.save()
+        character_sheet.consume_uninstalled_hl_for_cyberware(cw)
         character_sheet.calculate_humanity_loss()
         # Cyberarm grants minimum 2d6 brawling damage (CPR p.169)
         if cw_lower == "cyberarm":
             character_sheet.has_cyberarm = True
             character_sheet.recalculate_derived_stats()
+        char = getattr(character_sheet, "character", None)
+        if char and hasattr(char, "recalculate_derived_stats"):
+            char.recalculate_derived_stats()
+        try:
+            from world.cyberware.implanted_armor import ensure_implanted_armor_for_sheet
+
+            ensure_implanted_armor_for_sheet(character_sheet)
+        except Exception:
+            pass
         msg = f"You have installed {cw.name}."
         if cw_instance.popup_weapon_name:
             msg += f" Weapon: {cw_instance.popup_weapon_name}."

@@ -2,7 +2,7 @@ import random
 import re
 from evennia import Command, logger, search_object, default_cmds
 from typeclasses.rental import CharacterSheetMoneyService
-from world.utils.character_utils import get_full_attribute_name, fuzzy_match_stat, fuzzy_match_skill, fuzzy_match_stat_or_skill, ALL_ATTRIBUTES, TOPSHEET_MAPPING, is_staff
+from world.utils.character_utils import get_full_attribute_name, fuzzy_match_stat, fuzzy_match_skill, fuzzy_match_stat_or_skill, ALL_ATTRIBUTES, TOPSHEET_MAPPING, is_staff, get_technique_value
 from world.list_data import STAT_DESCRIPTIONS, SKILL_TO_STAT_LOOKUP, SKILL_DISPLAY_OVERRIDES
 from world.utils.calculation_utils import get_remaining_points, STAT_MAPPING, SKILL_MAPPING
 from typeclasses.chargen import ChargenRoom
@@ -21,6 +21,8 @@ from evennia.commands.default.muxcommand import MuxCommand
 from world.lifepath_dictionary import CULTURAL_ORIGINS, PERSONALITIES, CLOTHING_STYLES, HAIRSTYLES, AFFECTATIONS, MOTIVATIONS, LIFE_GOALS, ROLE_SPECIFIC_LIFEPATHS, VALUED_PERSON, VALUED_POSSESSION, FAMILY_BACKGROUND, ENVIRONMENT, FAMILY_CRISIS
 from world.utils.difficulty_values import parse_dv
 from world.improvement_points import get_character_stat_value, get_stat_display_name
+from world.cyberware.skill_chips import get_effective_skill_value, get_installed_skill_chip_targets
+from world.cyberware.stat_bonuses import get_effective_body
 from math import ceil
 
 class CmdSheet(MuxCommand):
@@ -321,9 +323,12 @@ class CmdSheet(MuxCommand):
 
         # Stats
         output += sheet_section("STATS", width=W)
+        natural_bod = target.db.body
+        eff_bod = get_effective_body(target)
+        body_disp = f"{natural_bod} ({eff_bod})" if eff_bod != natural_bod else natural_bod
         stats = [
-            ("Intelligence:", target.db.intelligence, "Technology:", target.db.technology, "Move:", target.db.move),
-            ("Reflexes:", target.db.reflexes, "Cool:", target.db.cool, "Body:", target.db.body),
+            ("Intelligence:", target.db.intelligence, "Technique:", get_technique_value(target), "Move:", target.db.move),
+            ("Reflexes:", target.db.reflexes, "Cool:", target.db.cool, "Body:", body_disp),
             ("Dexterity:", target.db.dexterity, "Willpower:", target.db.willpower, "Empathy:", target.db.empathy)
         ]
         for row in stats:
@@ -502,7 +507,8 @@ class CmdSheet(MuxCommand):
 
     def get_display_roles(self, char):
         """
-        Build role display string: primary role + any secondary roles from role abilities.
+        Build role display string: primary role + any secondary roles from role abilities
+        (including role abilities bought with IP after chargen).
         E.g. "Solo / Rockerboy / Medtech" if primary is Solo but they also have Charismatic Impact and Medicine.
         """
         primary = (char.db.role or "").strip()
@@ -526,11 +532,14 @@ class CmdSheet(MuxCommand):
 
         return " / ".join(roles_ordered) if roles_ordered else "None"
 
-    # Keys in db.skills that are derived stats or chargen-only, not actual skills (exclude from SKILLS section)
+    # Keys in db.skills that are derived stats, core stats, or chargen-only (exclude from SKILLS section)
     NON_SKILL_KEYS = frozenset({
         'total_cyberware_humanity_loss', 'humanity', 'death_save', 'serious_wounds',
         'unarmed_damage_die_type', 'unarmed_damage_dice',
         'fashion_budget_remaining',  # Chargen-only; use-it-or-lose-it for clothing/fashionware
+        # Core stats (may have been stored in db.skills by legacy sync)
+        'intelligence', 'reflexes', 'dexterity', 'technique', 'technology', 'cool',
+        'willpower', 'luck', 'move', 'body', 'empathy',
     })
 
     # Role ability keys - displayed in Role Abilities section, excluded from SKILLS
@@ -576,36 +585,82 @@ class CmdSheet(MuxCommand):
 
     def get_active_skills(self, char):
         """
-        Get a list of active skills (skills with value > 0) directly from the character.
+        Get a list of active skills (natural > 0 or effective > 0 from skill chips).
+        Displays natural(effective) when a skill chip boosts the value.
         Excludes derived stats that may be stored in db.skills.
         """
         skill_list = []
+        seen_keys = set()
 
         # Get skills from character's skills dictionary (exclude role abilities)
         if hasattr(char, 'db') and char.db.skills:
-            for skill_name, value in char.db.skills.items():
-                if value > 0 and skill_name not in self.NON_SKILL_KEYS and skill_name not in self.ROLE_ABILITY_KEYS:
+            for skill_name, natural in char.db.skills.items():
+                if skill_name in self.NON_SKILL_KEYS or skill_name in self.ROLE_ABILITY_KEYS:
+                    continue
+                effective = get_effective_skill_value(char, skill_name, natural)
+                if effective > 0:
+                    seen_keys.add(skill_name)
                     display_name = self._format_skill_for_sheet(
                         skill_name.replace('_', ' ').title(),
                         base_skill=skill_name,
                     )
-                    skill_list.append([display_name, value])
+                    val_str = f"{natural}({effective})" if natural != effective else str(effective)
+                    skill_list.append([display_name, val_str])
 
         # Add skill instances from character typeclass
         if hasattr(char, 'db') and char.db.skill_instances:
-            for skill_key, value in char.db.skill_instances.items():
-                if value > 0 and "(" in skill_key and ")" in skill_key:
-                    # Extract the base name and instance from the key (format: "base_skill(instance)")
+            for skill_key, natural in char.db.skill_instances.items():
+                if "(" not in skill_key or ")" not in skill_key:
+                    continue
+                effective = get_effective_skill_value(char, skill_key, natural)
+                if effective > 0:
+                    seen_keys.add(skill_key)
                     base_name, instance = skill_key.split("(", 1)
                     instance = instance.rstrip(")")
-                    # Format for sheet (abbreviated + truncated)
                     formatted_name = self._format_skill_for_sheet(
                         f"{base_name.replace('_', ' ').title()} ({instance})",
                         skill_key=skill_key,
                     )
-                    skill_list.append([formatted_name, value])
+                    val_str = f"{natural}({effective})" if natural != effective else str(effective)
+                    skill_list.append([formatted_name, val_str])
 
-        skill_list.sort(key=lambda x: (x[0].lower(), -x[1]))  # Alphabetical by name, then by value desc
+        # Add skills that have 0 natural but an installed skill chip (effective 3)
+        for chip_target in get_installed_skill_chip_targets(char):
+            if chip_target in seen_keys:
+                continue
+            natural = 0
+            if "(" in chip_target:
+                base, inst = chip_target.split("(", 1)
+                inst = inst.rstrip(")")
+                if hasattr(char, "get_skill_instance"):
+                    natural = char.get_skill_instance(base, inst)
+                else:
+                    natural = (char.db.skill_instances or {}).get(chip_target, 0)
+            else:
+                natural = (char.db.skills or {}).get(chip_target, 0)
+            effective = get_effective_skill_value(char, chip_target, natural)
+            if effective > 0 and natural == 0:
+                seen_keys.add(chip_target)
+                if "(" in chip_target:
+                    base_name, instance = chip_target.split("(", 1)
+                    instance = instance.rstrip(")")
+                    formatted_name = self._format_skill_for_sheet(
+                        f"{base_name.replace('_', ' ').title()} ({instance})",
+                        skill_key=chip_target,
+                    )
+                else:
+                    formatted_name = self._format_skill_for_sheet(
+                        chip_target.replace('_', ' ').title(),
+                        base_skill=chip_target,
+                    )
+                skill_list.append([formatted_name, f"0({effective})"])
+
+        def _effective_val(v):
+            if "(" in v:
+                parts = v.rstrip(")").split("(")
+                return int(parts[-1]) if len(parts) > 1 else 0
+            return int(v) if (v and v.replace("-", "").isdigit()) else 0
+        skill_list.sort(key=lambda x: (x[0].lower(), -_effective_val(x[1])))
         return skill_list
 
     def get_role_abilities(self, char):
@@ -764,6 +819,11 @@ class CmdRoll(MuxCommand):
 
     def _get_stat_value(self, char, field_name, is_stat):
         """Get stat or skill value using canonical get_character_stat_value (handles role abilities)."""
+        from world.improvement_points import parse_skill_instance
+
+        base, _ = parse_skill_instance(field_name)
+        if base == "body":
+            return get_effective_body(char)
         val = get_character_stat_value(char, field_name)
         return val if val is not None else 0
 

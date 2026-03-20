@@ -1,5 +1,7 @@
 import traceback
 from django.conf import settings
+from django.db import transaction
+from django.db.models import Q
 from evennia import Command, CmdSet
 from world.jobs.models import Job, Queue
 from world.languages.language_dictionary import LANGUAGES
@@ -43,6 +45,104 @@ from world.chargen_constants import (
 def get_character_model():
     return class_from_module(settings.BASE_CHARACTER_TYPECLASS)
 
+
+def _delete_character_sheet_core(sheet_pk):
+    """
+    ORM teardown for one CharacterSheet pk (no transaction wrapper).
+    Caller wraps with SQLite PRAGMA foreign_keys and/or transaction.atomic() as needed.
+    """
+    from world.inventory.models import (
+        CyberwareInstance as InventoryCyberwareInstance,
+        Inventory,
+    )
+    from world.cyberware.models import CyberwareInstance as LegacyCyberwareInstance
+    from world.netrunning.models import Cyberdeck, NetrunSession
+    from world.mystery.models import CharacterFocus
+    from world.elflines.models import ElflineSheet
+
+    char_object_id = (
+        CharacterSheet.objects.filter(pk=sheet_pk)
+        .values_list("character_id", flat=True)
+        .first()
+    )
+    inv_filter = Q(character_id=sheet_pk)
+    if char_object_id:
+        inv_filter |= Q(character_object_id=char_object_id)
+
+    CharacterSheet.objects.filter(pk=sheet_pk).update(eqweapon_id=None, eqarmor_id=None)
+    NetrunSession.objects.filter(netrunner_id=sheet_pk).delete()
+
+    inst_ids = set(
+        InventoryCyberwareInstance.objects.filter(character_sheet_id=sheet_pk).values_list(
+            "pk", flat=True
+        )
+    )
+    for inv in Inventory.objects.filter(inv_filter):
+        inst_ids.update(inv.cyberware.values_list("pk", flat=True))
+    inst_ids = list(inst_ids)
+
+    deck_q = Q(owner_id=sheet_pk)
+    if inst_ids:
+        deck_q |= Q(cyberware_id__in=inst_ids)
+    Cyberdeck.objects.filter(deck_q).update(
+        owner_id=None, cyberware_id=None, cyberdeck_gear_id=None
+    )
+    if inst_ids:
+        InventoryCyberwareInstance.objects.filter(paired_with_id__in=inst_ids).update(
+            paired_with=None
+        )
+        InventoryCyberwareInstance.objects.filter(pk__in=inst_ids).update(
+            paired_with=None, parent=None
+        )
+
+    CharacterLanguage.objects.filter(character_sheet_id=sheet_pk).delete()
+    CharacterFocus.objects.filter(
+        character_sheet_id=sheet_pk, character_object_id__isnull=True
+    ).delete()
+    CharacterFocus.objects.filter(character_sheet_id=sheet_pk).update(
+        character_sheet_id=None
+    )
+    ElflineSheet.objects.filter(
+        character_sheet_id=sheet_pk, character_id__isnull=True
+    ).delete()
+    ElflineSheet.objects.filter(character_sheet_id=sheet_pk).update(
+        character_sheet_id=None
+    )
+
+    LegacyCyberwareInstance.objects.filter(character_sheet_id=sheet_pk).delete()
+
+    Inventory.objects.filter(inv_filter).delete()
+
+    if inst_ids:
+        InventoryCyberwareInstance.objects.filter(pk__in=inst_ids).delete()
+    InventoryCyberwareInstance.objects.filter(character_sheet_id=sheet_pk).delete()
+
+    CharacterSheet.objects.filter(pk=sheet_pk).delete()
+
+
+def _delete_character_sheet_sqlite_safe(sheet_pk):
+    """
+    Delete sheet + dependents. SQLite enforces NO ACTION FKs on commit in ways that
+    defeat ORM ordering; turn off FK checks for this teardown only (admin chargen reset).
+    Other backends use a normal atomic transaction.
+    """
+    from django.db import connection
+
+    if connection.vendor != "sqlite":
+        with transaction.atomic():
+            _delete_character_sheet_core(sheet_pk)
+        return
+
+    connection.ensure_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("PRAGMA foreign_keys = OFF")
+        _delete_character_sheet_core(sheet_pk)
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("PRAGMA foreign_keys = ON")
+
+
 class ChargenManager:
     @staticmethod
     def edgerunner_chargen(sheet):
@@ -57,7 +157,7 @@ class ChargenManager:
         final_stats, rows_selected = EdgerunnerChargen.calculate_final_stats(stat_templates)
         
         # Assign stats to sheet
-        stat_names = ['intelligence', 'reflexes', 'dexterity', 'technology', 'cool',
+        stat_names = ['intelligence', 'reflexes', 'dexterity', 'technique', 'cool',
                       'willpower', 'luck', 'move', 'body', 'empathy']
         for stat, value in zip(stat_names, final_stats):
             setattr(sheet, stat, value)
@@ -410,7 +510,7 @@ class CmdChargen(MuxCommand):
         final_stats, rows_selected = EdgerunnerChargen.calculate_final_stats(stat_templates)
         
         # Assign stats to character
-        stat_names = ['intelligence', 'reflexes', 'dexterity', 'technology', 'cool',
+        stat_names = ['intelligence', 'reflexes', 'dexterity', 'technique', 'cool',
                     'willpower', 'luck', 'move', 'body', 'empathy']
         
         # Store in character db
@@ -621,15 +721,23 @@ class CmdChargen(MuxCommand):
             pass
 
         # --- Delete character sheets (and cascade: inventory, cyberware, sell your soul, etc.) ---
-        if hasattr(char, 'character_sheet') and char.character_sheet:
-            sheet = char.character_sheet
-            if sheet.pk is not None:
-                sheet.delete()
+        sheet_pks = []
+        if hasattr(char, "character_sheet") and char.character_sheet:
+            spk = getattr(char.character_sheet, "pk", None)
+            if spk:
+                sheet_pks.append(spk)
+        if char_pk is not None:
+            for pk in CharacterSheet.objects.filter(character_id=char_pk).values_list(
+                "pk", flat=True
+            ):
+                if pk not in sheet_pks:
+                    sheet_pks.append(pk)
         try:
-            if char_pk is not None:
-                CharacterSheet.objects.filter(character_id=char_pk).delete()
+            for pk in sheet_pks:
+                _delete_character_sheet_sqlite_safe(pk)
         except Exception:
-            pass
+            logger.log_trace()
+            raise
         char.db.character_sheet_id = None
 
         # --- Core identity & stats ---
@@ -646,7 +754,7 @@ class CmdChargen(MuxCommand):
         char.db.intelligence = 1
         char.db.reflexes = 1
         char.db.dexterity = 1
-        char.db.technology = 1
+        char.db.technique = 1
         char.db.cool = 1
         char.db.willpower = 1
         char.db.luck = 1

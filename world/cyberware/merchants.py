@@ -31,96 +31,147 @@ MAIN_CYBERWARE_SLOTS = {
 MAIN_CYBERWARE_EXCLUDE = ["Cybereye", "Cyberaudio Suite", "Discount Cyberaudio Suite", "Cyberarm", "Cyberleg"]
 
 def check_cyberware_requirements(character, cyberware):
-    print(f"Debug: Entering check_cyberware_requirements for {cyberware.name}")
-    
-    # Specific checks for main cyberware
-    if cyberware.name.lower() == "cybereye":
-        cybereye_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cybereye", installed=True).count()
-        print(f"Debug: Current Cybereye count: {cybereye_count}")
-        
-        if cybereye_count >= 2:
-            multioptic_mount = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="MultiOptic Mount", installed=True).exists()
-            print(f"Debug: MultiOptic Mount exists: {multioptic_mount}")
-            
-            if not multioptic_mount:
-                print("Debug: MultiOptic Mount required but not found")
-                return False, "You need to install a MultiOptic Mount to have more than two Cybereyes."
-            elif cybereye_count >= 7:
-                print("Debug: Maximum number of Cybereyes (7) reached")
-                return False, "You cannot install more than seven Cybereyes, even with a MultiOptic Mount."
-    
-    elif cyberware.name.lower() == "cyberarm":
-        cyberarm_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cyberarm", installed=True).count()
-        print(f"Debug: Current Cyberarm count: {cyberarm_count}")
-        
-        if cyberarm_count >= 4:
-            print("Debug: Maximum number of Cyberarms (4) reached")
-            return False, "You cannot install more than four Cyberarms, even with an Artificial Shoulder Mount."
-        
-        if cyberarm_count >= 2:
-            artificial_shoulder_mount = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Artificial Shoulder Mount", installed=True).exists()
-            print(f"Debug: Artificial Shoulder Mount exists: {artificial_shoulder_mount}")
-            
-            if not artificial_shoulder_mount:
-                print("Debug: Artificial Shoulder Mount required but not found")
-                return False, "You need to install an Artificial Shoulder Mount to have more than two Cyberarms."
-    
-    elif cyberware.name.lower() in [n.lower() for n in MAIN_CYBERWARE_NAMES["cyberaudio"]]:
-        # Count both standard and discount - you can only have one total without Sensor Array
-        cyberaudio_suite_count = CyberwareInstance.objects.filter(
+    """
+    Validate cyberware installation requirements using the unified validation module.
+    Checks: required parent, bodyware slots, pairable limits (Cybereye/Cyberarm/Cyberleg),
+    Self-ICE limit, solo-limb rules.
+    """
+    from world.cyberware.validation import (
+        check_has_required_parent,
+        check_bodyware_slots,
+        check_self_ice_limit,
+        check_limb_decor_capacity,
+        check_paired_arm_weapon_install_limit,
+        check_foundation_eye_exclusive_option_capacity,
+        check_cyberlimb_exclusive_option_capacity,
+        FOUNDATION_EYE_NAME_LOWERS,
+        _CYBEREYE_INSTANCE_NAMES,
+    )
+
+    # 1. Required parent (e.g. Kerenzikov needs Neural Link). Includes solo-limb override.
+    ok, msg = check_has_required_parent(character, cyberware)
+    if not ok:
+        return False, msg
+
+    # 1b. Cybereye-only options: need at least one eye with room (per-eye, not global pool)
+    ok, msg = check_foundation_eye_exclusive_option_capacity(character, cyberware)
+    if not ok:
+        return False, msg
+
+    # 1c. Cyberlimb-only options (no eye in valid parents): need at least one limb with room
+    ok, msg = check_cyberlimb_exclusive_option_capacity(character, cyberware)
+    if not ok:
+        return False, msg
+
+    # 2. Self-ICE limit (max 3)
+    cw_lower = (cyberware.name or "").strip().lower()
+    if cw_lower == "self-ice":
+        ok, msg = check_self_ice_limit(character)
+        if not ok:
+            return False, msg
+
+    # 2. Bodyware slot limit (7 for Internal/External Body)
+    ok, msg = check_bodyware_slots(character, cyberware)
+    if not ok:
+        return False, msg
+
+    # 2b. Gorilla Arm / Mantis Blade: max two; limb cosmetics: max one per eligible parent
+    ok, msg = check_paired_arm_weapon_install_limit(character, cyberware)
+    if not ok:
+        return False, msg
+    ok, msg = check_limb_decor_capacity(character, cyberware, installing=True)
+    if not ok:
+        return False, msg
+
+    # Linear frames: prerequisites use *natural* BODY on the character sheet, not effective BODY.
+    name_lower = (cyberware.name or "").strip().lower()
+    if name_lower == "implanted linear frame sigma":
+        natural = int(getattr(character, "body", None) or 1)
+        lace = CyberwareInstance.objects.filter(
             character_sheet=character,
-            cyberware__name__in=MAIN_CYBERWARE_NAMES["cyberaudio"],
-            installed=True
+            cyberware__name__iexact="Grafted Muscle and Bone Lace",
+            installed=True,
         ).count()
-        print(f"Debug: Current Cyberaudio Suite count: {cyberaudio_suite_count}")
-        
-        if cyberaudio_suite_count >= 1:
-            sensor_array = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Sensor Array", installed=True).exists()
-            print(f"Debug: Sensor Array exists: {sensor_array}")
-            
-            if not sensor_array:
-                print("Debug: Sensor Array required but not found")
-                return False, "You need to install a Sensor Array to have more than one Cyberaudio Suite."
-    
-    elif cyberware.name.lower() == "cyberleg":
-        cyberleg_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cyberleg", installed=True).count()
-        print(f"Debug: Current Cyberleg count: {cyberleg_count}")
-        if cyberleg_count >= 2:
-            print("Debug: Maximum number of Cyberlegs (2) reached")
+        if natural < 6:
+            return False, "Implanted Linear Frame Sigma requires natural BODY 6 or higher."
+        if lace < 1:
+            return False, "Implanted Linear Frame Sigma requires at least one installed Grafted Muscle and Bone Lace."
+    elif name_lower == "implanted linear frame beta":
+        natural = int(getattr(character, "body", None) or 1)
+        lace = CyberwareInstance.objects.filter(
+            character_sheet=character,
+            cyberware__name__iexact="Grafted Muscle and Bone Lace",
+            installed=True,
+        ).count()
+        if natural < 8:
+            return False, "Implanted Linear Frame Beta requires natural BODY 8 or higher."
+        if lace < 2:
+            return False, "Implanted Linear Frame Beta requires two installed Grafted Muscle and Bone Lace."
+
+    # 3. Pairable limits: Cybereye, Cyberarm, Cyberleg
+    cw_lower = (cyberware.name or "").strip().lower()
+
+    if cw_lower in FOUNDATION_EYE_NAME_LOWERS:
+        count = CyberwareInstance.objects.filter(
+            character_sheet=character,
+            cyberware__name__in=_CYBEREYE_INSTANCE_NAMES,
+            installed=True,
+        ).count()
+        if count >= 2:
+            if not CyberwareInstance.objects.filter(
+                character_sheet=character,
+                cyberware__name__iexact="MultiOptic Mount",
+                installed=True,
+            ).exists():
+                return False, (
+                    "You already have two Cybereyes. To install more, you need a MultiOptic Mount. "
+                    "Use buy/cyberware MultiOptic Mount first."
+                )
+        if count >= 7:
+            return False, "You cannot install more than seven Cybereyes, even with a MultiOptic Mount."
+
+    elif cw_lower in ("cyberarm", "neo-soviet cyberarm"):
+        count = CyberwareInstance.objects.filter(
+            character_sheet=character,
+            cyberware__name__in=["Cyberarm", "Neo-Soviet Cyberarm"],
+            installed=True,
+        ).count()
+        if count >= 4:
+            return False, "You cannot install more than four Cyberarms, even with an Artificial Shoulder Mount."
+        if count >= 2:
+            if not CyberwareInstance.objects.filter(
+                character_sheet=character,
+                cyberware__name__iexact="Artificial Shoulder Mount",
+                installed=True,
+            ).exists():
+                return False, (
+                    "You already have two Cyberarms. To install more, you need an Artificial Shoulder Mount. "
+                    "Use buy/cyberware Artificial Shoulder Mount first."
+                )
+
+    elif cw_lower in ("cyberaudio suite", "discount cyberaudio suite"):
+        count = CyberwareInstance.objects.filter(
+            character_sheet=character,
+            cyberware__name__in=["Cyberaudio Suite", "Discount Cyberaudio Suite"],
+            installed=True,
+        ).count()
+        if count >= 1:
+            if not CyberwareInstance.objects.filter(
+                character_sheet=character,
+                cyberware__name__iexact="Sensor Array",
+                installed=True,
+            ).exists():
+                return False, "You already have a Cyberaudio Suite. You need a Sensor Array to install another."
+
+    elif cw_lower == "cyberleg":
+        count = CyberwareInstance.objects.filter(
+            character_sheet=character,
+            cyberware__name__iexact="Cyberleg",
+            installed=True,
+        ).count()
+        if count >= 2:
             return False, "You cannot install more than two Cyberlegs."
-    
-    # Check slot availability for cyberware options
-    elif cyberware.type.lower() in ["cybereye", "cyberaudio", "cyberarm", "cyberleg"]:
-        names_to_check = MAIN_CYBERWARE_NAMES.get(cyberware.type.lower(), [cyberware.type])
-        main_cyberware_count = CyberwareInstance.objects.filter(
-            character_sheet=character, cyberware__name__in=names_to_check, installed=True
-        ).count()
-        if main_cyberware_count == 0:
-            display_name = "Cyberaudio Suite" if cyberware.type.lower() == "cyberaudio" else cyberware.type
-            print(f"Debug: No {display_name} installed")
-            return False, f"You need to install a {display_name} before installing {cyberware.name}."
-        
-        total_slots, used_slots = count_available_slots(character, cyberware.type.lower())
-        if used_slots + cyberware.slots > total_slots:
-            print(f"Debug: Not enough slots available for {cyberware.name}")
-            return False, f"Not enough slots available to install {cyberware.name}. Available slots: {total_slots - used_slots}, Required slots: {cyberware.slots}"
 
-    # Check for cyberlimb options
-    elif cyberware.type.lower() == "cyberlimb":
-        cyberarm_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cyberarm", installed=True).count()
-        cyberleg_count = CyberwareInstance.objects.filter(character_sheet=character, cyberware__name__iexact="Cyberleg", installed=True).count()
-        
-        # Special checks for Grip Foot and Jump Booster
-        if cyberware.name.lower() in ["grip foot", "jump booster"]:
-            if cyberleg_count < 2:
-                print(f"Debug: Not enough Cyberlegs for {cyberware.name}")
-                return False, f"You need to install two Cyberlegs before installing {cyberware.name}."
-        else:
-            if cyberarm_count == 0 and cyberleg_count == 0:
-                print("Debug: No Cyberarm or Cyberleg installed")
-                return False, "You need to install at least one Cyberarm or Cyberleg before installing cyberlimb options."
-
-    print("Debug: All checks passed")
     return True, ""
 
 def count_available_slots(character, slot_type):
@@ -276,6 +327,7 @@ class CmdImplantCyberware(Command):
 
         character_sheet.refresh_from_db()
         if not stash:
+            character_sheet.consume_uninstalled_hl_for_cyberware(cyberware)
             character_sheet.calculate_humanity_loss()
         character_sheet.save()
 
@@ -348,6 +400,7 @@ class CmdImplantCyberware(Command):
             if cw.name.lower() == "cyberarm":
                 character_sheet.has_cyberarm = True
                 character_sheet.save()
+            character_sheet.consume_uninstalled_hl_for_cyberware(cw)
         if missing:
             self.caller.msg(
                 f"Warning: some package items not found: {', '.join(missing)}. "

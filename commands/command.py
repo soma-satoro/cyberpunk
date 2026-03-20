@@ -217,7 +217,7 @@ class CmdViewCharacterSheet(Command):
         sheet += f"  Intelligence: {char.intelligence}\n"
         sheet += f"  Reflexes: {char.reflexes}\n"
         sheet += f"  Dexterity: {char.dexterity}\n"
-        sheet += f"  Technology: {char.technology}\n"
+        sheet += f"  Technique: {char.technique}\n"
         sheet += f"  Cool: {char.cool}\n"
         sheet += f"  Willpower: {char.willpower}\n"
         sheet += f"  Luck: {char.luck}\n"

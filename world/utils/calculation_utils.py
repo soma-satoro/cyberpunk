@@ -5,7 +5,7 @@ STAT_MAPPING = {
     'INT': 'intelligence',
     'REF': 'reflexes',
     'DEX': 'dexterity',
-    'TECH': 'technology',
+    'TECH': 'technique',
     'COOL': 'cool',
     'WILL': 'willpower',
     'LUCK': 'luck',
@@ -106,7 +106,12 @@ SKILL_MAPPING = {
 }
 
 def calculate_points_spent(character):
-    stat_points = sum(getattr(character, attr, 0) for attr in STAT_MAPPING.values())
+    def _get_stat(char, attr):
+        if attr == 'technique':
+            from world.utils.character_utils import get_technique_value
+            return get_technique_value(char) or 0
+        return getattr(char, attr, 0) or 0
+    stat_points = sum(_get_stat(character, attr) for attr in STAT_MAPPING.values())
     double_cost_skills = ['autofire', 'martial_arts', 'pilot_air', 'heavy_weapons', 'demolitions', 'electronics_security_tech', 'paramedic']
     from world.chargen_constants import ROLE_ABILITY_FREE_POINTS, ROLE_ABILITY_SKILLS
     from world.cyberpunk_constants import STATS
@@ -118,7 +123,7 @@ def calculate_points_spent(character):
     medtech_derived_skills = frozenset(("paramedic", "surgery", "medical_tech"))
     for skill in SKILL_MAPPING.values():
         if skill in core_stats:
-            continue  # Never count stats as skills (e.g. technology)
+            continue  # Never count stats as skills (e.g. technique)
         if role == "Medtech" and skill in medtech_derived_skills:
             continue  # Derived from Medicine allocation; avoid double-count
         val = int(getattr(character, skill, 0) or 0)

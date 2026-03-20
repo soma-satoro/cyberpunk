@@ -152,11 +152,45 @@ def _parse_damage_dice(damage_str):
         return 0
 
 
+def _combat_weapon_name(weapon):
+    """Range DV / splash detection: append weapon_type + generic so flavored names still match rules."""
+    if not weapon:
+        return ""
+    from world.edgerunner_weapon_flavor import augmented_weapon_label_for_combat_rules
+
+    return augmented_weapon_label_for_combat_rules(weapon)
+
+
+def _weapon_supports_autofire(weapon):
+    """SMG / Heavy SMG / Assault Rifle — uses weapon_type and generic template, not display name."""
+    if not weapon:
+        return False
+    rw = _combat_weapon_name(weapon).lower()
+    wt = (getattr(weapon, "weapon_type", None) or "").strip().lower()
+    cat = (weapon.category or "").strip().lower()
+    if "assault rifle" in rw or wt == "assault rifle":
+        return True
+    if "smg" in rw or "heavy smg" in rw or wt in ("smg", "heavy smg") or cat == "smg":
+        return True
+    return False
+
+
+def _autofire_multiplier_for_weapon(weapon):
+    """CPR: AR x4 max, SMG x3 max."""
+    rw = _combat_weapon_name(weapon).lower()
+    wt = (getattr(weapon, "weapon_type", None) or "").strip().lower()
+    if "assault rifle" in rw or wt == "assault rifle":
+        return 4
+    return 3
+
+
 def _get_weapon_quality_bonus(weapon):
     """Attack bonus from weapon quality: Excellent +1, Standard 0, Poor 0 (but can jam on 1)."""
     if not weapon:
         return 0
-    q = (getattr(weapon, "quality", None) or "standard").strip().lower()
+    from world.edgerunner_weapon_flavor import effective_weapon_quality_tier
+
+    q = effective_weapon_quality_tier(weapon)
     return 1 if q == "excellent" else 0
 
 
@@ -164,12 +198,30 @@ def _is_weapon_poor_quality(weapon):
     """True if weapon is poor quality (can jam on natural 1)."""
     if not weapon:
         return False
-    return (getattr(weapon, "quality", None) or "standard").strip().lower() == "poor"
+    from world.edgerunner_weapon_flavor import effective_weapon_quality_tier
+
+    return effective_weapon_quality_tier(weapon) == "poor"
 
 
 def _is_weapon_jammed(weapon):
     """True if poor quality weapon is currently jammed."""
     return weapon and _is_weapon_poor_quality(weapon) and getattr(weapon, "jammed", False)
+
+
+def _equipped_weapon_matches_name(caller, char, weapon, input_name: str) -> bool:
+    """True if input matches equipped weapon by exact name, generic category, or flavor chart alias."""
+    if not weapon or not (input_name or "").strip():
+        return False
+    if (weapon.name or "").strip().lower() == input_name.strip().lower():
+        return True
+    sheet = _get_sheet(char)
+    inv = getattr(sheet, "inventory", None) if sheet else None
+    if not inv:
+        return False
+    from commands.inventory_commands import _find_weapon_for_equip
+
+    found = _find_weapon_for_equip(caller, inv, input_name.strip())
+    return found is not None and found.pk == weapon.pk
 
 
 def _get_cyberware_weapon_quality_bonus(cw_attack):
@@ -195,12 +247,19 @@ def _get_cyberware_weapon_quality_bonus(cw_attack):
 
 def _get_weapon_attack_info(weapon):
     """Get (stat, skill, skill_display, num_dice) for a Weapon model."""
+    from world.edgerunner_weapon_flavor import resolve_weapon_equipment_template
+
     cat = (weapon.category or "").strip().lower()
     mapping = WEAPON_SKILL_MAP.get(cat)
     if not mapping:
         mapping = WEAPON_SKILL_MAP.get("handgun")  # fallback
     stat_field, skill_field, skill_display = mapping
+    tpl = resolve_weapon_equipment_template(weapon)
     num_dice = _parse_damage_dice(getattr(weapon, "damage", None))
+    if not num_dice and tpl:
+        num_dice = _parse_damage_dice(tpl.get("damage"))
+    if not num_dice and tpl:
+        num_dice = get_weapon_damage_dice(tpl.get("name") or "")
     if not num_dice:
         num_dice = get_weapon_damage_dice(weapon.name)
     return stat_field, skill_field, skill_display, num_dice
@@ -353,7 +412,7 @@ def _resolve_pending_autofire(target, dodge_total):
                 weapon = None
             dv = pending_af.get("dv", 17)
             beat = max(0, attack_roll - dv)
-            mult = 4 if weapon and "assault rifle" in (weapon.name or "").lower() else 3
+            mult = _autofire_multiplier_for_weapon(weapon) if weapon else 3
             mult = min(beat, mult)
             d1, d2 = random.randint(1, 6), random.randint(1, 6)
             dmg = (d1 + d2) * mult
@@ -472,32 +531,6 @@ def _get_reflexes(target):
     return getattr(target.db, "reflexes", 0) or 0
 
 
-def _apply_armor_ablation(target, amount, msg_lines):
-    """Reduce target's equipped armor SP by amount (ablation)."""
-    sheet = _get_sheet(target)
-    if not sheet:
-        return
-    armor = getattr(sheet, "eqarmor", None)
-    if not armor:
-        return
-    inv = getattr(sheet, "inventory", None)
-    if not inv:
-        return
-    try:
-        from world.inventory.models import InventoryArmor
-        inst, created = InventoryArmor.objects.get_or_create(
-            inventory=inv, armor=armor,
-            defaults={"current_sp": armor.sp, "original_sp": armor.sp}
-        )
-        base = inst.original_sp if inst.original_sp is not None else armor.sp
-        current = inst.current_sp if inst.current_sp is not None else armor.sp
-        new_sp = max(0, current - amount)
-        inst.current_sp = new_sp
-        inst.save()
-    except Exception:
-        pass
-
-
 def _apply_attack_damage(target, total_damage, aim_location, location, msg_lines):
     """
     Apply attack damage to target: armor SP, cover, then HP.
@@ -520,14 +553,23 @@ def _apply_attack_damage(target, total_damage, aim_location, location, msg_lines
     armor_sp = get_armor_sp(target, aim_location)
     damage_after_armor = max(0, total_damage - armor_sp) * head_mult
 
-    # Armor ablation: when armor stops any damage, reduce its SP by 1
+    # Armor ablation (CPR): every SP source that covers this location loses SP together
     if armor_sp > 0 and total_damage > 0:
         absorbed = min(armor_sp, total_damage)
-        _apply_armor_ablation(target, 1, msg_lines)
-        sheet = _get_sheet(target)
-        armor = getattr(sheet, "eqarmor", None) if sheet else None
-        if armor:
-            msg_lines.append(f"  |w{target.key}|n's {armor.name} absorbs |c{absorbed}|n damage ({armor_sp} -> {armor_sp - 1} SP).")
+        try:
+            from world.cyberware.implanted_armor import (
+                ablate_all_armor_for_location,
+                get_total_armor_sp_for_location,
+            )
+
+            ablate_all_armor_for_location(target, aim_location, 1)
+            new_total = get_total_armor_sp_for_location(target, aim_location)
+            msg_lines.append(
+                f"  |w{target.key}|n's armor absorbs |c{absorbed}|n damage "
+                f"(location SP {armor_sp} -> {new_total})."
+            )
+        except Exception:
+            msg_lines.append(f"  |w{target.key}|n's armor absorbs |c{absorbed}|n damage.")
 
     # Cover absorbs damage first
     cover_hp, cover_current = get_cover_sp(target)
@@ -692,13 +734,21 @@ def execute_attack_roll(attacker, target, dv, dv_name, location, aim_location=No
     ]
 
     # Consume ammo for ranged weapons (1 round for single shot)
-    if weapon and getattr(weapon, "clip", 0) and weapon.category not in ("archery", "melee"):
-        if (weapon.current_ammo or 0) < 1:
-            if location:
-                location.msg_contents(f"|w{attacker.key}|n's {weapon.name} is |rempty|n! Reload with |wattack/reload {weapon.name}|n.")
-            return
-        weapon.current_ammo = (weapon.current_ammo or 0) - 1
-        weapon.save()
+    if weapon and weapon.category not in ("archery", "melee"):
+        from world.weapon_constants import get_effective_clip
+
+        inv = getattr(sheet, "inventory", None) if sheet else None
+        eff_clip = get_effective_clip(weapon, inv)
+        if eff_clip:
+            if (weapon.current_ammo or 0) < 1:
+                if location:
+                    location.msg_contents(
+                        f"|w{attacker.key}|n's {weapon.name} is |rempty|n! "
+                        f"Reload with |wattack/reload {weapon.name}|n."
+                    )
+                return
+            weapon.current_ammo = (weapon.current_ammo or 0) - 1
+            weapon.save()
 
     if success:
         damage_rolls = [random.randint(1, 6) for _ in range(num_dice)]
@@ -1020,7 +1070,7 @@ class CmdAttack(MuxCommand):
         if not weapon:
             self.caller.msg("You have no weapon equipped.")
             return
-        if (weapon.name or "").lower() != weapon_name.lower():
+        if not _equipped_weapon_matches_name(self.caller, char, weapon, weapon_name):
             self.caller.msg(f"Your equipped weapon is {weapon.name}, not '{weapon_name}'.")
             return
         if not getattr(weapon, "jammed", False):
@@ -1113,7 +1163,7 @@ class CmdAttack(MuxCommand):
         if not weapon and not cw_attack:
             self.caller.msg("You need a ranged weapon equipped for attack/distance.")
             return
-        w_name = weapon.name if weapon else (cw_attack[1] if cw_attack else "")
+        w_name = _combat_weapon_name(weapon) if weapon else (cw_attack[1] if cw_attack else "")
         w_cat = weapon.category if weapon else ("handgun" if cw_attack and cw_attack[3] == "handgun" else "heavy_weapons")
         dv, dv_name = get_dv_for_range(w_name, w_cat, distance, autofire=False)
         if dv is None:
@@ -1252,7 +1302,7 @@ class CmdAttack(MuxCommand):
         w_name = ""
         w_cat = ""
         if weapon:
-            w_name = weapon.name or ""
+            w_name = _combat_weapon_name(weapon) or ""
             w_cat = weapon.category or ""
         elif cw_attack:
             w_name = cw_attack[1] or ""
@@ -1604,8 +1654,7 @@ class CmdAttack(MuxCommand):
         if not weapon or weapon.current_ammo < 10:
             self.caller.msg("You need a weapon with at least 10 bullets for autofire.")
             return
-        w_name = (weapon.name or "").lower()
-        if "smg" not in w_name and "assault rifle" not in w_name:
+        if not _weapon_supports_autofire(weapon):
             self.caller.msg("Autofire requires an SMG or Assault Rifle.")
             return
         names = [n.strip() for n in args.split(",") if n.strip()]
@@ -1617,7 +1666,7 @@ class CmdAttack(MuxCommand):
         if not targets:
             self.caller.msg("No valid targets found.")
             return
-        dv, _ = get_dv_for_range(weapon.name, weapon.category, 0, autofire=True)
+        dv, _ = get_dv_for_range(_combat_weapon_name(weapon), weapon.category, 0, autofire=True)
         dv = dv or 17
         ref = _get_stat(sheet, "reflexes")
         af = _get_skill(sheet, "autofire")
@@ -1639,7 +1688,7 @@ class CmdAttack(MuxCommand):
                 t.msg(f"|yYou are in the line of autofire!|n Dodge to beat {attack_roll}.")
         if no_dodge:
             beat = max(0, attack_roll - dv)
-            mult = 4 if "assault rifle" in (weapon.name or "").lower() else 3
+            mult = _autofire_multiplier_for_weapon(weapon)
             mult = min(beat, mult)
             for t in no_dodge:
                 d1, d2 = random.randint(1, 6), random.randint(1, 6)
@@ -1799,31 +1848,18 @@ def _build_hud_for_char(char, include_header=False):
     current_hp = get_current_hp(char)
     max_hp = get_max_hp(char)
     parts.append(f"{current_hp}/{max_hp} hp")
-    # Armor
-    armor = getattr(sheet, "eqarmor", None)
-    if armor:
-        inv = getattr(sheet, "inventory", None)
-        current_sp = armor.sp
-        base_sp = armor.sp
-        if inv:
-            from world.inventory.models import InventoryArmor
-            try:
-                inst, _ = InventoryArmor.objects.get_or_create(
-                    inventory=inv, armor=armor,
-                    defaults={"current_sp": armor.sp, "original_sp": armor.sp}
-                )
-                current_sp = inst.get_effective_sp()
-                base_sp = inst.original_sp if inst.original_sp is not None else armor.sp
-            except Exception:
-                pass
-        parts.append(f"{armor.name}, {current_sp}/{base_sp} SP")
-    else:
-        parts.append("no armor")
+    # Armor (worn if strictly better than implants on body; else show implant SP)
+    from world.cyberware.implanted_armor import get_hud_armor_display_line
+
+    parts.append(get_hud_armor_display_line(char, sheet))
     # Weapon
     weapon = _get_equipped_weapon(char)
     if weapon:
-        quality = getattr(weapon, "quality", "standard") or "standard"
-        damage = weapon.damage or "N/A"
+        from world.edgerunner_weapon_flavor import effective_weapon_quality_tier, resolve_weapon_equipment_template
+
+        quality = effective_weapon_quality_tier(weapon)
+        tpl = resolve_weapon_equipment_template(weapon)
+        damage = weapon.damage or (tpl.get("damage") if tpl else None) or "N/A"
         parts.append(f"{weapon.name} ({quality}): {damage}")
     else:
         parts.append("no weapon")
