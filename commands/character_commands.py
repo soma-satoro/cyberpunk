@@ -1253,7 +1253,7 @@ class CmdPlusOoc(MuxCommand):
         caller.db.pre_ooc_location = current_location
 
         # Find Limbo (object #2)
-        limbo = search_object("#2")[0]
+        limbo = search_object("#6")[0]
 
         if not limbo:
             caller.msg("Error: Limbo not found.")
