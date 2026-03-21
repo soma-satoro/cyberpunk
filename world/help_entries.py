@@ -1070,7 +1070,7 @@ You do |wnot|n see staff clues until you |wnotice|n them.
 
 # How evidence works
 
-Each lead has a DV. Roll |wSkill + Stat + 1d10|n vs DV (exact hit fails). |gSuccess:|n deals damage to mystery complexity; staff may show |wdescription|n text. |rFailure:|n costs Focus; fumbles may add complications. One attempt per lead per day.
+Each lead has a DV. Roll |wSkill + Stat + 1d10|n vs DV (exact hit fails). The game shows your |wstat + skill + dice|n breakdown, the |wDV|n, and |wby how much|n you beat or missed the DV. |gSuccess:|n deals damage to mystery complexity; staff may show |wdescription|n text. |rFailure:|n costs Focus; fumbles may add complications. One attempt per lead per day.
 
 See also: +help facilitating mysteries (staff)
         """,

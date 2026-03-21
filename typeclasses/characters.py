@@ -572,14 +572,19 @@ class Character(DefaultCharacter):
             if skill_key == "medical_tech":
                 from world.chargen_constants import get_medical_tech_skill
                 return get_medical_tech_skill(self.db.medicine_pharma, self.db.medicine_cryo)
-        val = (self.db.skills or {}).get(skill_key, 0)
-        if val:
-            return val
+        skills = self.db.skills or {}
+        # Honor explicit 0 in db.skills; "if val" would treat 0 as missing and wrongly use sheet (stale value).
+        if skill_key in skills:
+            try:
+                v = skills[skill_key]
+                return int(v) if v is not None else 0
+            except (TypeError, ValueError):
+                return 0
         # Fallback to character_sheet for role abilities and other skills stored on sheet
         if hasattr(self, "character_sheet") and self.character_sheet and hasattr(self.character_sheet, skill_key):
             sheet_val = getattr(self.character_sheet, skill_key, 0)
             return sheet_val if sheet_val is not None else 0
-        return val
+        return 0
     
     def get_medicine_specialties(self):
         """Return (surgery, pharma, cryo) allocation for Medtech."""
@@ -1349,8 +1354,9 @@ class Character(DefaultCharacter):
         skill_points = 0
         role_ability_skill = ROLE_ABILITY_SKILLS.get(role) if role else None
         # Medtech: Surgery and Medical Tech are derived from Medicine specialties (medicine_surgery,
-        # medicine_pharma, medicine_cryo). Never count paramedic, surgery, or medical_tech.
-        medtech_derived_skills = frozenset(("paramedic", "surgery", "medical_tech"))
+        # medicine_pharma, medicine_cryo). Do not count those three from db.skills (avoid double-count).
+        # Paramedic is a normal purchased skill for Medtech (double cost), not derived from Medicine.
+        medtech_derived_skills = frozenset(("surgery", "medical_tech"))
         for skill, value in skills.items():
             if skill in skills_with_instances:
                 continue  # Instance counts instead; avoid double-count

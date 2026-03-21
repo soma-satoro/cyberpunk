@@ -121,3 +121,34 @@ def format_roll_details(details: dict, stat_val: int, skill_val: int, modifier: 
     if details.get("luck_spent", 0) > 0:
         segments.append(f"+ {details['luck_spent']} (luck)")
     return " ".join(segments)
+
+
+def format_roll_vs_dv_message(
+    stat_label: str,
+    skill_label: str,
+    stat_val: int,
+    skill_val: int,
+    modifier: int,
+    total: int,
+    dv: int,
+    details: dict,
+) -> str:
+    """
+    One player-facing line: stat + skill + dice breakdown, total vs DV, margin.
+
+    Success = total > dv (tie fails). Uses format_roll_details for the math chain.
+    """
+    breakdown = format_roll_details(details, stat_val, skill_val, modifier=modifier)
+    if total > dv:
+        margin_txt = f"|gBeat DV by {total - dv}|n"
+    else:
+        margin_txt = f"|rShort by {dv + 1 - total}|n (need total |y{dv + 1}+|n)"
+    crit = ""
+    if details.get("is_crit_success"):
+        crit = " |m(Critical d10)|n"
+    elif details.get("is_crit_failure"):
+        crit = " |r(Fumble d10)|n"
+    return (
+        f"|wRoll:|n {stat_label} + {skill_label} |c--|n {breakdown} "
+        f"= |w{total}|n vs |yDV {dv}|n |c--|n {margin_txt}{crit}"
+    )

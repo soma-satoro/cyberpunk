@@ -233,6 +233,11 @@ def _skill_to_stat(skill_name):
     return "intelligence"
 
 
+def _humanize_skill_stat_name(name: str) -> str:
+    """Display label for db stat/skill keys (e.g. electronics_security_tech -> title case)."""
+    return (name or "").replace("_", " ").strip().title()
+
+
 def _collect_scan_locs(caller, char, arg):
     """Return (room, list of ClueLocation) for scan scope, or (None, error message)."""
     if not char.location:
@@ -293,10 +298,12 @@ def _execute_evidence_check(caller, char, focus_obj, clue):
 
     skill_name = clue.get_skills_list()[0] if clue.get_skills_list() else "deduction"
     skill_val = getattr(char.db, skill_name, 0) or 0
+    if hasattr(char, "get_skill"):
+        skill_val = char.get_skill(skill_name)
     stat_name = _skill_to_stat(skill_name)
     stat_val = getattr(char.db, stat_name, 5) or 5
 
-    from world.utils.roll_utils import roll_skill_check, check_success
+    from world.utils.roll_utils import roll_skill_check, check_success, format_roll_vs_dv_message
     from world.wound_utils import get_action_penalty
 
     action_penalty = get_action_penalty(char)
@@ -304,6 +311,19 @@ def _execute_evidence_check(caller, char, focus_obj, clue):
     target = clue.dv
     success = check_success(total, target)
     fumble = details.get("is_crit_failure", False)
+
+    caller.msg(
+        format_roll_vs_dv_message(
+            _humanize_skill_stat_name(stat_name),
+            _humanize_skill_stat_name(skill_name),
+            stat_val,
+            skill_val,
+            action_penalty,
+            total,
+            target,
+            details,
+        )
+    )
 
     if success:
         damage = max(0, _roll_dice(clue.damage_dice) - clue.obfuscation)
@@ -578,17 +598,32 @@ class CmdInvestigate(MuxCommand):
         scan_dv = _max_scan_dv(clues)
 
         skill_val = getattr(char.db, "perception", 0) or 0
+        if hasattr(char, "get_skill"):
+            skill_val = char.get_skill("perception")
         stat_val = getattr(char.db, "intelligence", 5) or 5
-        from world.utils.roll_utils import roll_skill_check, check_success
+        from world.utils.roll_utils import roll_skill_check, check_success, format_roll_vs_dv_message
         from world.wound_utils import get_action_penalty
 
         action_penalty = get_action_penalty(char)
-        total, _ = roll_skill_check(stat_val, skill_val, modifier=action_penalty)
+        total, details = roll_skill_check(stat_val, skill_val, modifier=action_penalty)
         success = check_success(total, scan_dv)
 
         focus_damage = _roll_dice("1d6")
         focus_obj.current_focus -= focus_damage
         focus_obj.save()
+
+        self.caller.msg(
+            format_roll_vs_dv_message(
+                "Intelligence",
+                "Perception",
+                stat_val,
+                skill_val,
+                action_penalty,
+                total,
+                scan_dv,
+                details,
+            )
+        )
 
         if not success:
             self.caller.msg(
@@ -632,16 +667,30 @@ class CmdInvestigate(MuxCommand):
             self.caller.msg("Your Focus is depleted.")
             return
         skill_val = getattr(char.db, "deduction", 0) or 0
+        if hasattr(char, "get_skill"):
+            skill_val = char.get_skill("deduction")
         stat_val = getattr(char.db, "intelligence", 5) or 5
-        from world.utils.roll_utils import roll_skill_check, check_success
+        from world.utils.roll_utils import roll_skill_check, check_success, format_roll_vs_dv_message
         from world.wound_utils import get_action_penalty
 
         action_penalty = get_action_penalty(char)
-        total, _ = roll_skill_check(stat_val, skill_val, modifier=action_penalty)
+        total, details = roll_skill_check(stat_val, skill_val, modifier=action_penalty)
         success = check_success(total, 15)
         focus_damage = _roll_dice("1d6")
         focus_obj.current_focus -= focus_damage
         focus_obj.save()
+        self.caller.msg(
+            format_roll_vs_dv_message(
+                "Intelligence",
+                "Deduction",
+                stat_val,
+                skill_val,
+                action_penalty,
+                total,
+                15,
+                details,
+            )
+        )
         if success:
             self.caller.msg(
                 f"|gHint:|n The GM should provide a nudge. (Lost {focus_damage} Focus.)"
@@ -679,11 +728,11 @@ class CmdInvestigate(MuxCommand):
         stat_name = _skill_to_stat(skill_name)
         stat_val = getattr(char.db, stat_name, 5) or 5
 
-        from world.utils.roll_utils import roll_skill_check, check_success
+        from world.utils.roll_utils import roll_skill_check, check_success, format_roll_vs_dv_message
         from world.wound_utils import get_action_penalty
 
         action_penalty = get_action_penalty(char)
-        total, _ = roll_skill_check(stat_val, skill_val, modifier=action_penalty)
+        total, details = roll_skill_check(stat_val, skill_val, modifier=action_penalty)
         success = check_success(total, obstacle.dv)
         focus_damage = _roll_dice("1d6") if success else _roll_dice("2d6")
 
@@ -695,6 +744,18 @@ class CmdInvestigate(MuxCommand):
             attempted_date=today,
             success=success,
             focus_lost=focus_damage,
+        )
+        self.caller.msg(
+            format_roll_vs_dv_message(
+                _humanize_skill_stat_name(stat_name),
+                _humanize_skill_stat_name(skill_name),
+                stat_val,
+                skill_val,
+                action_penalty,
+                total,
+                obstacle.dv,
+                details,
+            )
         )
         if success:
             self.caller.msg(
@@ -1468,12 +1529,25 @@ class CmdRest(MuxCommand):
         if hasattr(char, "get_skill"):
             skill_val = char.get_skill("concentration")
         stat_val = getattr(char.db, "willpower", 5) or 5
-        from world.utils.roll_utils import roll_skill_check, check_success
+        from world.utils.roll_utils import roll_skill_check, check_success, format_roll_vs_dv_message
         from world.wound_utils import get_action_penalty
 
         action_penalty = get_action_penalty(char)
         total, details = roll_skill_check(stat_val, skill_val, modifier=action_penalty)
         success = check_success(total, 15)
+
+        self.caller.msg(
+            format_roll_vs_dv_message(
+                "Willpower",
+                "Concentration",
+                stat_val,
+                skill_val,
+                action_penalty,
+                total,
+                15,
+                details,
+            )
+        )
 
         focus_obj.last_concentrate_date = today
         if success:

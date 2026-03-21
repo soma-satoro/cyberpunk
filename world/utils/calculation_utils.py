@@ -119,8 +119,8 @@ def calculate_points_spent(character):
     role = (getattr(character, 'role', None) or "").strip()
     role_ability_skill = ROLE_ABILITY_SKILLS.get(role) if role else None
     skill_points = 0
-    # Medtech: Surgery and Medical Tech are derived from Medicine specialties. Never count paramedic.
-    medtech_derived_skills = frozenset(("paramedic", "surgery", "medical_tech"))
+    # Medtech: Surgery and Medical Tech are derived from Medicine specialties. 
+    medtech_derived_skills = frozenset(("surgery", "medical_tech"))
     for skill in SKILL_MAPPING.values():
         if skill in core_stats:
             continue  # Never count stats as skills (e.g. technique)
