@@ -27,9 +27,19 @@ from world.utils.character_utils import is_character_approved
 from world.inventory.models import CyberwareInstance
 from world.netrunning.deck_loadout import (
     format_deck_sheet,
+    installable_program_or_ice,
     install_deck_item,
+    ensure_program_gear,
     remove_deck_item,
 )
+from world.netrunning.models import NetFloorLead
+from world.netrunning import net_discovery as net_disc
+from world.netrunning import deckoptions
+from world.cyberpunk_sheets.services import CharacterMoneyService
+from world.inventory.models import Inventory
+from world.utils.name_fuzzy import pick_named_candidate
+from world.maker.services import create_program_order
+from world.maker.scripts import get_or_create_maker_script
 
 
 def _roll_dice(dice: str) -> int:
@@ -58,9 +68,14 @@ class CmdNet(MuxCommand):
         +net/zap [=target]              - target: ICE name or index when multiple
         +net/attack <program> [=target] - target: ICE name or index when multiple
         +net/slide [=target]             - target: ICE name or index when multiple
+        +net/buy <program or Black ICE>  - Purchase to inventory (for deck install later)
+        +net/craft <program>             - Queue program crafting job (same as +make/program/add)
         +net/deck                        - Same as |wdeck|n (full cyberdeck sheet)
         +net/deck/install <deck>=<item> - Install program, Black ICE, or hardware
         +net/deck/remove <deck>=<item> - Unload to inventory (|wdeck/...|n also works)
+        +net/delve                        - Sweep current floor for hidden staff-placed leads (Interface)
+        +net/trace [lead id]              - Crack a swept lead (Interface); grants paydata / program / text
+        +net/leads                        - Notebook: swept leads on this floor and links
 
     Staff/Storyteller usage:
         +net/create <name>=<difficulty>[,<floors>]
@@ -69,6 +84,8 @@ class CmdNet(MuxCommand):
         +net/setfloor <arch>=<floor>/<type>[/<value>]
         +net/autopaydata <arch>=<on|off>
         +net/refreshpaydata
+        +net/lead/create|list|destroy|requires|link|paydata|program|text|teaser|priority|notes
+            - Floor narrative leads (Builder)
     """
 
     key = "+net"
@@ -84,6 +101,12 @@ class CmdNet(MuxCommand):
             return
 
         switch = self.switches[0].lower()
+        if switch == "lead":
+            if not check_builder_permission(self.caller):
+                self.caller.msg("Only staff/storytellers can manage NET floor leads.")
+                return
+            self._cmd_net_lead()
+            return
         if switch == "deck":
             self._cmd_deck()
             return
@@ -108,12 +131,17 @@ class CmdNet(MuxCommand):
             "zap": self.cmd_zap,
             "attack": self.cmd_attack_program,
             "slide": self.cmd_slide,
+            "buy": self.cmd_buy_program,
+            "craft": self.cmd_craft_program,
             "create": self.cmd_create_architecture,
             "generate": self.cmd_generate_architecture,
             "show": self.cmd_show_architecture,
             "setfloor": self.cmd_setfloor,
             "autopaydata": self.cmd_autopaydata,
             "refreshpaydata": self.cmd_refresh_paydata,
+            "delve": self.cmd_delve,
+            "trace": self.cmd_trace,
+            "leads": self.cmd_leads,
         }
         handler = dispatch.get(switch)
         if not handler:
@@ -233,6 +261,133 @@ class CmdNet(MuxCommand):
         ice_state[str(floor_num)] = data
         state["ice_state"] = ice_state
 
+    def _net_actions_available(self, state):
+        """
+        Effective NET actions this turn.
+        Interface sets baseline, with a minimum of 2 and optional penalties.
+        """
+        rank = max(1, get_interface_rank(self.caller))
+        base_actions = int(net_actions_for_rank(rank))
+        penalty = int(state.get("action_penalty", 0) or 0)
+        return max(2, base_actions - penalty)
+
+    def _ice_program_damage_dice(self, ice_name):
+        key = normalize_name(ice_name or "")
+        if key in {"dragon", "sabertooth"}:
+            return "6d6"
+        if key == "killer":
+            return "4d6"
+        return "3d6"
+
+    def _ice_brain_damage_dice(self, ice_name):
+        key = normalize_name(ice_name or "")
+        if key in {"giant", "kraken"}:
+            return "3d6"
+        if key == "hellhound":
+            return "2d6"
+        if key in {"raven", "wisp"}:
+            return "1d6"
+        return None
+
+    def _run_ice_turn(self, state):
+        """Run one ICE attack pass after the runner spends their turn."""
+        if not self._is_jacked_in():
+            return
+        arch = self._current_architecture()
+        if not arch:
+            return
+        floor = self._get_floor(arch, state)
+        if not floor:
+            return
+        floor_ice = [i for i in self._ensure_floor_ice_state(state, floor) if i.get("active")]
+        if not floor_ice:
+            self.caller.msg("|xNo active ICE takes a turn this round.|n")
+            return
+
+        active_programs = state.get("active_programs", {})
+        runner_rank = max(1, get_interface_rank(self.caller))
+        self.caller.msg("|rICE TURN: Hostile routines execute.|n")
+        for ice_instance in floor_ice:
+            if not self._is_jacked_in():
+                return
+            if not ice_instance.get("active"):
+                continue
+            ice = get_black_ice(normalize_name(ice_instance.get("name", "")))
+            if not ice:
+                continue
+
+            atk_total = int(ice.get("atk", 0)) + random.randint(1, 10)
+            def_total = runner_rank + random.randint(1, 10)
+            self.caller.msg(
+                f"  {ice['name']} attack: {atk_total} vs Interface defense {def_total}"
+            )
+            if atk_total < def_total:
+                self.caller.msg(f"  |g{ice['name']} misses.|n")
+                continue
+
+            ice_class = (ice.get("class") or "").lower()
+            ice_key = normalize_name(ice.get("name", ""))
+            if "anti-program" in ice_class:
+                if not active_programs:
+                    self.caller.msg(f"  |y{ice['name']} finds no active programs to shred.|n")
+                    continue
+                target_key = random.choice(list(active_programs.keys()))
+                target = active_programs.get(target_key) or {}
+                damage = _roll_dice(self._ice_program_damage_dice(ice.get("name")))
+                target["rez"] = int(target.get("rez", 0)) - damage
+                target_name = target.get("name", target_key.replace("_", " ").title())
+                self.caller.msg(f"  |r{ice['name']} hits {target_name} for {damage} REZ.|n")
+                if target["rez"] <= 0:
+                    del active_programs[target_key]
+                    self.caller.msg(f"  |y{target_name} is Derezzed by {ice['name']}.|n")
+                else:
+                    active_programs[target_key] = target
+                continue
+
+            # Anti-personnel and special attacks.
+            damage_dice = self._ice_brain_damage_dice(ice.get("name"))
+            if damage_dice:
+                damage = _roll_dice(damage_dice)
+                self._brain_damage(damage, ice["name"])
+
+            if ice_key == "asp" and active_programs:
+                target_key = random.choice(list(active_programs.keys()))
+                target_name = active_programs[target_key].get("name", target_key.replace("_", " ").title())
+                del active_programs[target_key]
+                self.caller.msg(f"  |rAsp destroys {target_name}.|n")
+            elif ice_key == "wisp":
+                state["action_penalty_next"] = max(1, int(state.get("action_penalty_next", 0) or 0))
+                self.caller.msg("  |yWisp static will reduce your next turn's NET actions by 1 (minimum 2).|n")
+            elif ice_key == "giant":
+                self.caller.msg("  |rGiant slams your connection out of the Architecture!|n")
+                self._do_jackout(unsafe=True)
+                return
+            elif ice.get("effect"):
+                self.caller.msg(f"  |xEffect: {ice['effect']}|n")
+
+        state["active_programs"] = active_programs
+
+    def _consume_net_action(self, state, label="NET Action"):
+        """Spend one NET action; trigger ICE turn when the turn budget is exhausted."""
+        if not self._is_jacked_in():
+            return
+        max_actions = self._net_actions_available(state)
+        used = int(state.get("net_actions_used", 0) or 0) + 1
+        state["net_actions_used"] = used
+        remaining = max_actions - used
+        if remaining > 0:
+            self.caller.msg(f"|x{label} used. NET Actions left: {remaining}/{max_actions}.|n")
+            self._set_state(state)
+            return
+
+        self.caller.msg(f"|x{label} used. NET action budget spent ({max_actions}/{max_actions}).|n")
+        self._run_ice_turn(state)
+        if not self._is_jacked_in():
+            return
+        state["net_actions_used"] = 0
+        state["action_penalty"] = int(state.pop("action_penalty_next", 0) or 0)
+        self._set_state(state)
+
     def _pick_ice_target(self, floor_ice, target_arg):
         """Resolve ICE target from optional name or 1-based index. Returns (ice_dict, index) or (None, -1)."""
         if not floor_ice:
@@ -250,6 +405,63 @@ class CmdNet(MuxCommand):
             if normalize_name(ice_dict.get("name", "")) == arg_lower:
                 return ice_dict, i
         return None, -1
+
+    def _resolve_program_or_ice(self, query):
+        """Resolve player input to canonical Program/Black ICE data row."""
+        text = (query or "").strip()
+        if not text:
+            return None, "Specify a program or Black ICE name."
+        direct = installable_program_or_ice(text)
+        if direct:
+            return direct, None
+
+        candidates = []
+        for p in deckoptions.programs:
+            nm = p.get("name")
+            if nm:
+                candidates.append((nm, nm))
+        for b in deckoptions.black_ice:
+            nm = b.get("name")
+            if nm:
+                candidates.append((nm, nm))
+        picked, err = pick_named_candidate(text, candidates)
+        if err:
+            return None, err
+        if not picked:
+            return None, f"Unknown program or Black ICE: '{text}'."
+        resolved = installable_program_or_ice(picked)
+        if not resolved:
+            return None, f"Unable to resolve '{picked}'."
+        return resolved, None
+
+    def _can_buy_programs_here(self):
+        """
+        Gate +net/buy to tagged rooms.
+        Requires at least one role tag and one stock tag:
+          role: netrunner or hacker
+          stock: program or deck
+        """
+        room = getattr(self.caller, "location", None)
+        if not room:
+            return False
+        room_tags = set()
+
+        db_tags = getattr(room.db, "tags", None) or []
+        for t in db_tags:
+            if not t:
+                continue
+            room_tags.add(str(t).strip().lower().replace(" ", "_"))
+
+        try:
+            if hasattr(room, "tags"):
+                for tag in room.tags.get() or []:
+                    room_tags.add(str(tag).strip().lower().replace(" ", "_"))
+        except Exception:
+            pass
+
+        has_role_tag = bool({"netrunner", "hacker"} & room_tags)
+        has_stock_tag = bool({"program", "deck"} & room_tags)
+        return has_role_tag and has_stock_tag
 
     def _parse_ice_names(self, floor):
         ftype = floor.get("type")
@@ -319,6 +531,8 @@ class CmdNet(MuxCommand):
             active = [i for i in self._ensure_floor_ice_state(state, floor) if i.get("active")]
             if active:
                 self.caller.msg("  |rHostile ICE:|n " + ", ".join(f"{i['name']}({i['rez']} REZ)" for i in active))
+        if NetFloorLead.objects.filter(architecture_object_id=arch.id, floor_number=floor_num).exists():
+            self.caller.msg("  |cConcealed data trails may exist on this floor.|n |w+net/delve|n  |w+net/leads|n")
 
     def _has_netrunning_gear(self):
         sheet = getattr(self.caller, "character_sheet", None)
@@ -444,6 +658,9 @@ class CmdNet(MuxCommand):
             "cleared_passwords": [],
             "controlled_nodes": [],
             "ice_state": {},
+            "net_actions_used": 0,
+            "action_penalty": 0,
+            "action_penalty_next": 0,
         }
         self._set_state(state)
 
@@ -475,10 +692,13 @@ class CmdNet(MuxCommand):
             return
         state = self._get_state()
         rank = get_interface_rank(self.caller)
-        actions = net_actions_for_rank(rank)
+        actions = self._net_actions_available(state)
+        used = int(state.get("net_actions_used", 0) or 0)
+        remaining = max(0, actions - used)
         active_programs = state.get("active_programs", {})
         self.caller.msg(
-            f"|cNetrun Status|n  Arch: |w{arch.key}|n  Interface: {rank}  NET Actions/turn: {actions}"
+            f"|cNetrun Status|n  Arch: |w{arch.key}|n  Interface: {rank}  "
+            f"NET Actions: {remaining}/{actions} this turn"
         )
         if active_programs:
             self.caller.msg("Active programs: " + ", ".join(active_programs.keys()))
@@ -547,6 +767,7 @@ class CmdNet(MuxCommand):
         self.caller.msg(f"|cPathfinder|n Interface {rank} + {dice_str} = |w{total}|n")
         for floor in visible:
             self.caller.msg(f"  F{floor['floor']}: {floor.get('name', '?')} ({floor.get('type')})")
+        self._consume_net_action(state, "Pathfinder")
 
     def cmd_backdoor(self):
         if not self._require_netrun():
@@ -572,6 +793,7 @@ class CmdNet(MuxCommand):
             self.caller.msg("|gPassword bypassed.|n")
         else:
             self.caller.msg("|rAccess denied.|n")
+        self._consume_net_action(state, "Backdoor")
 
     def cmd_eyedee(self):
         if not self._require_netrun():
@@ -588,6 +810,7 @@ class CmdNet(MuxCommand):
         self.caller.msg(f"|cEye-Dee|n Interface {rank} + {dice_str} = {total} vs DV {dv}")
         if total <= dv:
             self.caller.msg("|rYou cannot decode this payload yet.|n")
+            self._consume_net_action(state, "Eye-Dee")
             return
         paydata = floor.get("paydata")
         if paydata:
@@ -597,6 +820,7 @@ class CmdNet(MuxCommand):
             )
         else:
             self.caller.msg("|gYou identify a file node. It appears valuable.|n")
+        self._consume_net_action(state, "Eye-Dee")
 
     def cmd_control(self):
         if not self._require_netrun():
@@ -621,6 +845,7 @@ class CmdNet(MuxCommand):
             self.caller.msg("|gControl node seized. You can now issue remote operations in-scene.|n")
         else:
             self.caller.msg("|rControl node resists your command.|n")
+        self._consume_net_action(state, "Control")
 
     def cmd_grab(self):
         if not self._require_netrun():
@@ -675,6 +900,9 @@ class CmdNet(MuxCommand):
         )
 
     def cmd_programs(self):
+        subs = [s.lower() for s in (self.switches or [])[1:]]
+        if "shop" in subs:
+            return self._show_program_shop()
         active = (self._get_state().get("active_programs", {}) if self._is_jacked_in() else {})
         lines = ["|cProgram Catalog|n"]
         for key, data in sorted(ALL_PROGRAMS.items(), key=lambda item: item[1]["name"]):
@@ -683,7 +911,94 @@ class CmdNet(MuxCommand):
                 f"  {data['name']}{marker} - {data['class']} "
                 f"(ATK {data['atk']} DEF {data['def']} REZ {data['rez']})"
             )
+        lines.append("")
+        lines.append("Acquire: |w+net/programs/shop|n  |w+net/buy <name>|n  |w+net/craft <name>|n")
         self.caller.msg("\n".join(lines))
+
+    def _show_program_shop(self):
+        """Display all purchasable programs and Black ICE with prices."""
+        from world.utils.formatting import header, footer
+
+        lines = [header("Netrunner Program Market"), "  |wPrograms|n"]
+        for p in sorted(deckoptions.programs, key=lambda row: (row.get("type", ""), row.get("name", ""))):
+            nm = p.get("name", "?")
+            typ = p.get("type", "program")
+            cost = int(p.get("cost", 0) or 0)
+            lines.append(f"  - {nm} ({typ}) |y{cost} eb|n")
+        lines.append("")
+        lines.append("  |wBlack ICE (deployable package)|n")
+        for b in sorted(deckoptions.black_ice, key=lambda row: row.get("name", "")):
+            nm = b.get("name", "?")
+            cost = int(b.get("cost", 0) or 0)
+            lines.append(f"  - {nm} |y{cost} eb|n")
+        lines.append("")
+        lines.append("Buy now: |w+net/buy <program or black ice>|n")
+        lines.append("Craft as Netrunner: |w+net/craft <program>|n or |w+make/program/add <name>|n")
+        lines.append(footer())
+        self.caller.msg("\n".join(lines))
+
+    def cmd_buy_program(self):
+        """Buy a program/Black ICE and add as gear to inventory."""
+        if not self._can_buy_programs_here():
+            self.caller.msg(
+                "You need to be in a tagged netrunner vendor room to buy programs "
+                "(requires room tags like netrunner/hacker and program/deck)."
+            )
+            return
+        if not self.args:
+            self.caller.msg("Usage: +net/buy <program or Black ICE name>")
+            return
+        data, err = self._resolve_program_or_ice(self.args)
+        if err:
+            self.caller.msg(err)
+            return
+        name = data.get("name", "").strip()
+        if not name:
+            self.caller.msg("Unable to resolve that item.")
+            return
+        cost = int(data.get("cost", 0) or 0)
+        balance = CharacterMoneyService.get_balance(self.caller)
+        if balance < cost:
+            self.caller.msg(f"You need {cost} eb, but only have {balance} eb.")
+            return
+        if not CharacterMoneyService.spend_money(self.caller, cost):
+            self.caller.msg("Purchase failed; funds could not be deducted.")
+            return
+        gear = ensure_program_gear(name)
+        if not gear:
+            CharacterMoneyService.add_money(self.caller, cost)
+            self.caller.msg("Purchase failed; item could not be materialized.")
+            return
+        inv, _ = Inventory.get_or_create_for_character(self.caller)
+        inv.add_gear(gear)
+        self.caller.msg(
+            f"|gPurchased|n {name} for |y{cost} eb|n. "
+            f"It is in your inventory (use |wdeck/install <deck>={name}|n)."
+        )
+
+    def cmd_craft_program(self):
+        """Queue a Netrunner program craft order (same backend as +make/program/add)."""
+        if not self.args:
+            self.caller.msg("Usage: +net/craft <program name>")
+            return
+        raw = self.args.strip()
+        data, err = self._resolve_program_or_ice(raw)
+        if err:
+            self.caller.msg(err)
+            return
+        # Program crafting currently covers standard Programs, not Black ICE packages.
+        if not any((p.get("name") or "").lower() == (data.get("name") or "").lower() for p in deckoptions.programs):
+            self.caller.msg("Only standard Programs can be crafted with +net/craft right now.")
+            return
+        order, create_err = create_program_order(self.caller, data.get("name", raw))
+        if create_err:
+            self.caller.msg(f"|r{create_err}|n")
+            return
+        self.caller.msg(
+            f"|gQueued program craft: {order.item_name}.|n "
+            f"Materials: {order.materials_cost} eb. DV{order.dv}, ~{order.time_hours}h."
+        )
+        get_or_create_maker_script()
 
     def cmd_activate(self):
         if not self._require_netrun():
@@ -705,6 +1020,7 @@ class CmdNet(MuxCommand):
         state["active_programs"] = active
         self._set_state(state)
         self.caller.msg(f"|gActivated {prog['name']}.|n")
+        self._consume_net_action(state, "Activate Program")
 
     def cmd_deactivate(self):
         if not self._require_netrun():
@@ -723,6 +1039,7 @@ class CmdNet(MuxCommand):
         state["active_programs"] = active
         self._set_state(state)
         self.caller.msg(f"|yDeactivated {name}.|n")
+        self._consume_net_action(state, "Deactivate Program")
 
     def cmd_zap(self):
         if not self._require_netrun():
@@ -758,6 +1075,7 @@ class CmdNet(MuxCommand):
         )
         if atk_total < def_total:
             self.caller.msg("|rZap misses.|n")
+            self._consume_net_action(state, "Zap")
             return
         dmg = _roll_dice("1d6")
         target["rez"] -= dmg
@@ -767,6 +1085,7 @@ class CmdNet(MuxCommand):
             self.caller.msg(f"|y{ice['name']} is Derezzed.|n")
         self._set_active_ice_on_floor(state, floor["floor"], floor_ice)
         self._set_state(state)
+        self._consume_net_action(state, "Zap")
 
     def cmd_attack_program(self):
         if not self._require_netrun():
@@ -827,10 +1146,11 @@ class CmdNet(MuxCommand):
                 self.caller.msg(f"|y{ice['name']} is Derezzed.|n")
         else:
             self.caller.msg("|rProgram attack misses.|n")
-        del active[pkey]
+        # Attacker programs remain active until manually deactivated.
         state["active_programs"] = active
         self._set_active_ice_on_floor(state, floor["floor"], floor_ice)
         self._set_state(state)
+        self._consume_net_action(state, f"{prog['name']} attack")
 
     def cmd_slide(self):
         if not self._require_netrun():
@@ -871,6 +1191,387 @@ class CmdNet(MuxCommand):
             self.caller.msg(f"|gYou evade {ice['name']}; it stops pursuit on this floor.|n")
         else:
             self.caller.msg("|rSlide fails; the ICE stays on you.|n")
+        self._consume_net_action(state, "Slide")
+
+    def cmd_delve(self):
+        if not self._require_netrun():
+            return
+        arch = self._current_architecture()
+        if not arch:
+            self.caller.msg("Architecture not found.")
+            return
+        state = self._get_state()
+        floor_num = int(state.get("floor", 1))
+        _lead, msg = net_disc.delve_next_lead(self.caller, arch, floor_num)
+        self.caller.msg(msg)
+        self._consume_net_action(state, "Delve")
+
+    def cmd_trace(self):
+        if not self._require_netrun():
+            return
+        arch = self._current_architecture()
+        if not arch:
+            self.caller.msg("Architecture not found.")
+            return
+        state = self._get_state()
+        floor_num = int(state.get("floor", 1))
+        if self.args and str(self.args).strip():
+            if not str(self.args).strip().isdigit():
+                self.caller.msg("Usage: +net/trace <lead id>")
+                return
+            lead_id = int(str(self.args).strip())
+        else:
+            unresolved = net_disc.exposed_unresolved_leads(self.caller, arch, floor_num)
+            if not unresolved:
+                self.caller.msg(
+                    "No open swept leads to trace on this floor. Use |w+net/delve|n first."
+                )
+                return
+            if len(unresolved) > 1:
+                lines = ["Multiple open leads. Use |w+net/trace <id>|n:"]
+                for lead in unresolved:
+                    lines.append(f"  |w#{lead.pk}|n {lead.label}")
+                self.caller.msg("\n".join(lines))
+                return
+            lead_id = unresolved[0].pk
+        _ok, msg = net_disc.trace_lead(self.caller, arch, floor_num, lead_id)
+        self.caller.msg(msg)
+        self._consume_net_action(state, "Trace")
+
+    def cmd_leads(self):
+        if not self._require_netrun():
+            return
+        arch = self._current_architecture()
+        if not arch:
+            self.caller.msg("Architecture not found.")
+            return
+        state = self._get_state()
+        floor_num = int(state.get("floor", 1))
+        self.caller.msg(net_disc.format_leads_notebook(self.caller, arch, floor_num))
+
+    def _cmd_net_lead(self):
+        subs = [s.lower() for s in (self.switches or [])[1:]]
+        if not subs:
+            self.caller.msg(
+                "Staff NET leads: |w+net/lead/create|n, |w+net/lead/list|n, |w+net/lead/destroy|n, "
+                "|w+net/lead/requires|n, |w+net/lead/link|n, |w+net/lead/paydata|n, "
+                "|w+net/lead/program|n, |w+net/lead/text|n, |w+net/lead/teaser|n, "
+                "|w+net/lead/priority|n, |w+net/lead/notes|n"
+            )
+            return
+        sub = subs[0]
+        if sub == "create":
+            self._net_lead_create()
+        elif sub == "list":
+            self._net_lead_list()
+        elif sub == "destroy":
+            self._net_lead_destroy()
+        elif sub == "requires":
+            self._net_lead_requires()
+        elif sub == "link":
+            self._net_lead_link()
+        elif sub == "paydata":
+            self._net_lead_paydata()
+        elif sub == "program":
+            self._net_lead_program()
+        elif sub == "text":
+            self._net_lead_text()
+        elif sub == "teaser":
+            self._net_lead_teaser()
+        elif sub == "priority":
+            self._net_lead_priority()
+        elif sub == "notes":
+            self._net_lead_notes()
+        else:
+            self.caller.msg("Unknown +net/lead subcommand.")
+
+    def _net_lead_create(self):
+        raw = (self.args or "").strip()
+        if "=" not in raw:
+            self.caller.msg(
+                "Usage: +net/lead/create <architecture>=<floor>/<slug>/<type>/<scan>/<inv>/<label>[|<extra>]"
+            )
+            self.caller.msg(
+                "Types: |wpaydata|n, |wprogram|n, |wnarrative|n, |wflavor|n. "
+                "Extra after |: paydata eb value, program name, or flavor/narrative text."
+            )
+            return
+        arch_part, rhs = raw.split("=", 1)
+        arch = self._find_architecture(arch_part.strip())
+        if not arch:
+            self.caller.msg("Architecture not found.")
+            return
+        rhs = rhs.strip()
+        extra = ""
+        if "|" in rhs:
+            rhs, extra = rhs.rsplit("|", 1)
+            extra = extra.strip()
+        parts = rhs.split("/")
+        if len(parts) < 6:
+            self.caller.msg("Need |wfloor/slug/type/scan_dv/investigate_dv/label|n")
+            return
+        floor_s, slug, ltype, scan_s, inv_s = parts[:5]
+        label = "/".join(parts[5:])
+        try:
+            floor_num = int(floor_s)
+            scan_dv = int(scan_s)
+            inv_dv = int(inv_s)
+        except ValueError:
+            self.caller.msg("Floor and DVs must be integers.")
+            return
+        floors = arch.db.floors or []
+        if floor_num < 1 or floor_num > len(floors):
+            self.caller.msg(f"Floor must be between 1 and {len(floors)} for this architecture.")
+            return
+        if not slug.strip():
+            self.caller.msg("Slug is required.")
+            return
+        ltype = ltype.strip().lower()
+        if ltype not in ("paydata", "program", "narrative", "flavor"):
+            self.caller.msg("Type must be paydata, program, narrative, or flavor.")
+            return
+
+        lead = NetFloorLead(
+            architecture_object_id=arch.id,
+            floor_number=floor_num,
+            slug=slug.strip().lower()[:80],
+            label=label.strip()[:200],
+            scan_dv=scan_dv,
+            investigate_dv=inv_dv,
+            lead_type=ltype,
+        )
+        if ltype == "paydata":
+            lead.paydata_label = lead.label
+            if extra:
+                try:
+                    lead.paydata_value = int(extra)
+                except ValueError:
+                    self.caller.msg("For paydata, extra after | must be a number (eb).")
+                    return
+        elif ltype == "program" and extra:
+            lead.program_name = extra.strip()[:200]
+        elif ltype in ("narrative", "flavor") and extra:
+            lead.teaser = extra
+            if ltype == "flavor":
+                lead.success_text = extra
+        lead.save()
+        self.caller.msg(f"|gCreated lead|n id |w{lead.pk}|n ({lead.slug}) on |c{arch.key}|n floor {floor_num}.")
+
+    def _net_lead_list(self):
+        name = (self.args or "").strip()
+        arch = None
+        if name:
+            arch = self._find_architecture(name)
+        elif self._is_jacked_in():
+            arch = self._current_architecture()
+        if not arch:
+            self.caller.msg("Usage: +net/lead/list <architecture> (or jack in and omit name)")
+            return
+        qs = NetFloorLead.objects.filter(architecture_object_id=arch.id).order_by("floor_number", "discovery_priority", "id")
+        if not qs.exists():
+            self.caller.msg("No leads on that architecture.")
+            return
+        lines = [f"|c{arch.key}|n — NET floor leads"]
+        for lead in qs:
+            pre_ids = list(lead.prerequisite_leads.values_list("id", flat=True))
+            linked_ids = list(lead.linked_leads.values_list("id", flat=True))
+            meta = []
+            if pre_ids:
+                meta.append("requires: " + ",".join(f"#{x}" for x in pre_ids[:6]))
+            if linked_ids:
+                meta.append("links: " + ",".join(f"#{x}" for x in linked_ids[:6]))
+            lines.append(
+                f"  |wF{lead.floor_number}|n #{lead.pk} |y{lead.lead_type}|n {lead.slug} DV {lead.scan_dv}/{lead.investigate_dv} — {lead.label}"
+                + (f" |c({' | '.join(meta)})|n" if meta else "")
+            )
+        self.caller.msg("\n".join(lines))
+
+    def _net_lead_destroy(self):
+        if not self.args or not str(self.args).strip().isdigit():
+            self.caller.msg("Usage: +net/lead/destroy <lead id>")
+            return
+        pk = int(str(self.args).strip())
+        lead = NetFloorLead.objects.filter(pk=pk).first()
+        if not lead:
+            self.caller.msg("No such lead.")
+            return
+        lead.delete()
+        self.caller.msg("|gDeleted.|n")
+
+    def _net_lead_requires(self):
+        if "=" not in (self.args or ""):
+            self.caller.msg("Usage: +net/lead/requires <dependent id>=<prerequisite id>")
+            return
+        left, right = self.args.split("=", 1)
+        try:
+            child_id = int(left.strip())
+            parent_id = int(right.strip())
+        except ValueError:
+            self.caller.msg("Ids must be numbers.")
+            return
+        child = NetFloorLead.objects.filter(pk=child_id).first()
+        parent = NetFloorLead.objects.filter(pk=parent_id).first()
+        if not child or not parent:
+            self.caller.msg("Lead id not found.")
+            return
+        if child.pk == parent.pk:
+            self.caller.msg("A lead cannot require itself.")
+            return
+        if child.architecture_object_id != parent.architecture_object_id:
+            self.caller.msg("Both leads must belong to the same architecture.")
+            return
+        child.prerequisite_leads.add(parent)
+        self.caller.msg(f"|gLead #{child.pk} now requires #{parent.pk} resolved first.|n")
+
+    def _net_lead_link(self):
+        if "=" not in (self.args or ""):
+            self.caller.msg("Usage: +net/lead/link <lead id>=<related lead id>")
+            return
+        left, right = self.args.split("=", 1)
+        try:
+            a_id = int(left.strip())
+            b_id = int(right.strip())
+        except ValueError:
+            self.caller.msg("Ids must be numbers.")
+            return
+        a = NetFloorLead.objects.filter(pk=a_id).first()
+        b = NetFloorLead.objects.filter(pk=b_id).first()
+        if not a or not b:
+            self.caller.msg("Lead id not found.")
+            return
+        if a.pk == b.pk:
+            self.caller.msg("A lead cannot be linked to itself.")
+            return
+        if a.architecture_object_id != b.architecture_object_id:
+            self.caller.msg("Both leads must belong to the same architecture.")
+            return
+        a.linked_leads.add(b)
+        self.caller.msg(f"|gLinked leads #{a.pk} and #{b.pk} (notebook cross-reference).|n")
+
+    def _net_lead_paydata(self):
+        if "=" not in (self.args or ""):
+            self.caller.msg("Usage: +net/lead/paydata <id>=<eb value>[/<label>]")
+            return
+        left, right = self.args.split("=", 1)
+        try:
+            lead_id = int(left.strip())
+        except ValueError:
+            self.caller.msg("Lead id must be a number.")
+            return
+        lead = NetFloorLead.objects.filter(pk=lead_id).first()
+        if not lead:
+            self.caller.msg("No such lead.")
+            return
+        right = right.strip()
+        if "/" in right:
+            val_s, lab = right.split("/", 1)
+            try:
+                lead.paydata_value = int(val_s.strip())
+            except ValueError:
+                self.caller.msg("Value must be numeric.")
+                return
+            lead.paydata_label = lab.strip()[:200]
+        else:
+            try:
+                lead.paydata_value = int(right)
+            except ValueError:
+                self.caller.msg("Value must be numeric.")
+                return
+        lead.lead_type = NetFloorLead.LEAD_PAYDATA
+        lead.save()
+        self.caller.msg("|gUpdated paydata fields.|n")
+
+    def _net_lead_program(self):
+        if "=" not in (self.args or ""):
+            self.caller.msg("Usage: +net/lead/program <id>=<program name>")
+            return
+        left, right = self.args.split("=", 1)
+        try:
+            lead_id = int(left.strip())
+        except ValueError:
+            self.caller.msg("Lead id must be a number.")
+            return
+        lead = NetFloorLead.objects.filter(pk=lead_id).first()
+        if not lead:
+            self.caller.msg("No such lead.")
+            return
+        lead.program_name = right.strip()[:200]
+        lead.lead_type = NetFloorLead.LEAD_PROGRAM
+        lead.save()
+        self.caller.msg("|gUpdated program name.|n")
+
+    def _net_lead_text(self):
+        if "=" not in (self.args or ""):
+            self.caller.msg("Usage: +net/lead/text <id>=<success / narrative text>")
+            return
+        left, right = self.args.split("=", 1)
+        try:
+            lead_id = int(left.strip())
+        except ValueError:
+            self.caller.msg("Lead id must be a number.")
+            return
+        lead = NetFloorLead.objects.filter(pk=lead_id).first()
+        if not lead:
+            self.caller.msg("No such lead.")
+            return
+        lead.success_text = right.strip()
+        lead.save()
+        self.caller.msg("|gUpdated success text.|n")
+
+    def _net_lead_teaser(self):
+        if "=" not in (self.args or ""):
+            self.caller.msg("Usage: +net/lead/teaser <id>=<scan-time teaser text>")
+            return
+        left, right = self.args.split("=", 1)
+        try:
+            lead_id = int(left.strip())
+        except ValueError:
+            self.caller.msg("Lead id must be a number.")
+            return
+        lead = NetFloorLead.objects.filter(pk=lead_id).first()
+        if not lead:
+            self.caller.msg("No such lead.")
+            return
+        lead.teaser = right.strip()
+        lead.save()
+        self.caller.msg("|gUpdated teaser text.|n")
+
+    def _net_lead_priority(self):
+        if "=" not in (self.args or ""):
+            self.caller.msg("Usage: +net/lead/priority <id>=<number> (lower appears first)")
+            return
+        left, right = self.args.split("=", 1)
+        try:
+            lead_id = int(left.strip())
+            pri = int(right.strip())
+        except ValueError:
+            self.caller.msg("Lead id and priority must be numbers.")
+            return
+        lead = NetFloorLead.objects.filter(pk=lead_id).first()
+        if not lead:
+            self.caller.msg("No such lead.")
+            return
+        lead.discovery_priority = max(0, pri)
+        lead.save()
+        self.caller.msg(f"|gUpdated discovery priority to {lead.discovery_priority}.|n")
+
+    def _net_lead_notes(self):
+        if "=" not in (self.args or ""):
+            self.caller.msg("Usage: +net/lead/notes <id>=<staff notes>")
+            return
+        left, right = self.args.split("=", 1)
+        try:
+            lead_id = int(left.strip())
+        except ValueError:
+            self.caller.msg("Lead id must be a number.")
+            return
+        lead = NetFloorLead.objects.filter(pk=lead_id).first()
+        if not lead:
+            self.caller.msg("No such lead.")
+            return
+        lead.staff_notes = right.strip()
+        lead.save()
+        self.caller.msg("|gUpdated staff notes.|n")
 
     # ---- Staff switches ----
 

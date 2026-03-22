@@ -18,12 +18,19 @@ from world.mystery.models import (
     ClueLocation,
     ObstacleAttempt,
     ClueExposure,
+    MysteryFollower,
+)
+from world.mystery.services import (
+    follow_mystery_for_character,
+    unfollow_mystery_for_character,
+    sync_followers_when_mystery_linked_to_mission,
 )
 from world.mystery.mystery_data import (
     get_max_focus,
     CLUE_TYPES,
     COMPLEXITY_TIERS,
 )
+from world.list_data import SKILL_TO_STAT_LOOKUP
 from world.utils.character_utils import is_character_approved
 
 
@@ -138,6 +145,77 @@ def _obstacle_gate_passed(char, clue):
     return ObstacleAttempt.objects.filter(obstacle=obs, character=char, success=True).exists()
 
 
+def _obstacles_blocking_gated_clues_in_locs(char, locs):
+    """
+    Clues in this scan scope whose prereqs are met but gating obstacle is not overcome.
+    Returns dict obstacle_id -> MysteryObstacle (deduped).
+    """
+    out = {}
+    seen_clue = set()
+    for loc in locs:
+        c = loc.clue
+        if c.id in seen_clue:
+            continue
+        seen_clue.add(c.id)
+        if c.mystery.is_solved:
+            continue
+        if not _clue_prereqs_deciphered(c, char):
+            continue
+        if not c.gating_obstacle_id:
+            continue
+        if _obstacle_gate_passed(char, c):
+            continue
+        obs = c.gating_obstacle
+        out[obs.id] = obs
+    return out
+
+
+def _format_obstacle_overcome_hint(obstacle):
+    """One line: obstacle summary and exact +investigate/overcome command."""
+    sk = _format_obstacle_skills_display(obstacle)
+    desc = (obstacle.description or "").strip()
+    tail = ""
+    if desc:
+        tail = f" -- {desc[:100]}{'...' if len(desc) > 100 else ''}"
+    return (
+        f"  |m#{obstacle.id}|n {obstacle.obstacle_type}|n |wDV{obstacle.dv}|n "
+        f"({sk}){tail}  -> |c+investigate/overcome {obstacle.id}|n"
+    )
+
+
+def _pending_gating_obstacles_for_character(char):
+    """
+    Obstacles (deduped) that still block a clue in a mystery the character has started,
+    where prereqs for that clue are met. Used for +mystery list and +investigate/leads.
+    """
+    mids = (
+        ClueExposure.objects.filter(character=char)
+        .values_list("clue__mystery_id", flat=True)
+        .distinct()
+    )
+    if not mids:
+        return []
+    seen_obs = set()
+    out = []
+    for clue in (
+        MysteryClue.objects.filter(mystery_id__in=mids, gating_obstacle__isnull=False)
+        .select_related("gating_obstacle", "mystery")
+        .order_by("mystery_id", "id")
+    ):
+        if clue.mystery.is_solved:
+            continue
+        if not _clue_prereqs_deciphered(clue, char):
+            continue
+        if _obstacle_gate_passed(char, clue):
+            continue
+        obs = clue.gating_obstacle
+        if obs.id in seen_obs:
+            continue
+        seen_obs.add(obs.id)
+        out.append(obs)
+    return out
+
+
 def _clue_eligible_for_exposure(char, clue):
     if clue.mystery.is_solved:
         return False
@@ -194,6 +272,101 @@ def _clue_deciphered(char, clue):
     return ClueAttempt.objects.filter(clue=clue, character=char, success=True).exists()
 
 
+def _count_successful_decipher_clues(char):
+    """How many distinct clues this character has successfully deciphered."""
+    return (
+        ClueAttempt.objects.filter(character=char, success=True)
+        .values_list("clue_id", flat=True)
+        .distinct()
+        .count()
+    )
+
+
+def _find_pc_in_same_room(caller, arg):
+    """Resolve a single character; must share caller's location."""
+    if not arg or not caller.location:
+        return None
+    from evennia.utils.search import search_object
+
+    arg = arg.strip()
+    if arg.startswith("#"):
+        try:
+            dbref = int(arg[1:])
+            from evennia.objects.models import ObjectDB
+
+            obj = ObjectDB.objects.filter(id=dbref).first()
+            if obj and getattr(obj, "location", None) == caller.location:
+                return obj
+        except ValueError:
+            pass
+        return None
+    results = search_object(arg, typeclass="typeclasses.characters.Character")
+    if not results:
+        return None
+    here = [r for r in results if getattr(r, "location", None) == caller.location]
+    if len(here) == 1:
+        return here[0]
+    return None
+
+
+def _sync_exposure_to_target(initiator, target):
+    """
+    Copy lead exposure from initiator to target for clues the target can legally see.
+    Allowed only when target has deciphered at least as many clues as the initiator
+    (they are not behind on successful investigations).
+    """
+    n_i = _count_successful_decipher_clues(initiator)
+    n_t = _count_successful_decipher_clues(target)
+    if n_t < n_i:
+        return False, (
+            "They have successfully deciphered fewer leads than you; "
+            "they need to catch up on evidence checks before you can align their threads."
+        )
+    added = 0
+    for exp in ClueExposure.objects.filter(character=initiator).select_related("clue"):
+        clue = exp.clue
+        if clue.mystery.is_solved:
+            continue
+        if not _clue_eligible_for_exposure(target, clue):
+            continue
+        _e, created = ClueExposure.objects.get_or_create(character=target, clue=clue)
+        if created:
+            added += 1
+    return True, added
+
+
+def _narrative_lines_for_successful_clues(character):
+    """(mystery_name, text lines) for clues this character has successfully deciphered."""
+    attempts = (
+        ClueAttempt.objects.filter(character=character, success=True)
+        .select_related("clue", "clue__mystery")
+        .order_by("clue__mystery_id", "clue__discovery_priority", "clue_id")
+    )
+    by_mystery = []
+    current_mid = None
+    bucket = []
+    mname = ""
+    for a in attempts:
+        clue = a.clue
+        desc = (clue.description or "").strip()
+        if not desc:
+            continue
+        mid = clue.mystery_id
+        if current_mid is None:
+            current_mid = mid
+            mname = clue.mystery.name
+        elif mid != current_mid:
+            if bucket:
+                by_mystery.append((mname, bucket))
+            bucket = []
+            current_mid = mid
+            mname = clue.mystery.name
+        bucket.append(f"  * {desc}")
+    if bucket:
+        by_mystery.append((mname, bucket))
+    return by_mystery
+
+
 def _max_scan_dv(clues):
     if not clues:
         return 13
@@ -212,30 +385,99 @@ def _unique_clues_from_locs(locs):
 
 
 def _skill_to_stat(skill_name):
-    stat_map = {
-        "intelligence": ["concentration", "conceal_object", "lip_reading", "perception", "tracking",
-                        "accounting", "animal_handling", "bureaucracy", "business", "composition",
-                        "criminology", "cryptography", "deduction", "education", "library_search",
-                        "local_expert", "tactics", "wilderness_survival"],
-        "reflexes": ["drive_land", "pilot_air", "pilot_sea", "riding", "archery", "autofire",
-                    "handgun", "heavy_weapons", "shoulder_arms"],
-        "dexterity": ["athletics", "contortionist", "dance", "endurance", "resist_torture_drugs",
-                     "stealth", "brawling", "evasion", "martial_arts", "melee"],
-        "technique": ["basic_tech", "cybertech", "demolitions", "electronics_security_tech", "first_aid",
-                      "forgery", "paramedic", "medicine", "surgery", "pick_lock", "weaponstech",
-                      "air_vehicle_tech", "land_vehicle_tech", "sea_vehicle_tech"],
-        "cool": ["acting", "play_instrument", "style", "bribery", "conversation", "human_perception",
-                "interrogation", "persuasion", "streetwise", "trading"],
-    }
-    for stat, skills in stat_map.items():
-        if skill_name in skills:
-            return stat
-    return "intelligence"
+    """
+    Stat key for CPR skill checks — must match world.list_data.SKILL_TO_STAT (sheet / rules).
+    e.g. conversation -> empathy, persuasion -> cool, perception -> intelligence.
+    """
+    return SKILL_TO_STAT_LOOKUP.get(skill_name, "intelligence")
+
+
+def _normalize_skill_key(token: str) -> str:
+    """Normalize staff/player skill tokens to db keys (snake_case)."""
+    s = (token or "").strip().lower().replace(" ", "_")
+    return s
+
+
+def _get_skill_value(char, skill_name: str) -> int:
+    """Effective skill rank for mystery rolls."""
+    v = getattr(char.db, skill_name, 0) or 0
+    if hasattr(char, "get_skill"):
+        v = char.get_skill(skill_name)
+    if v is None:
+        return 0
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _evidence_skill_candidates(clue):
+    """
+    Skills usable for an evidence check: CLUE_TYPES defaults for clue_type, plus any
+    extras from skills_used (deduped). Lets gossip use conversation / persuasion /
+    streetwise even if the clue row only listed one skill.
+    """
+    type_defaults = CLUE_TYPES.get(clue.clue_type, {}).get("skills") or []
+    db_list = clue.get_skills_list()
+    seen = set()
+    out = []
+
+    def add_many(items):
+        for src in items:
+            k = _normalize_skill_key(src)
+            if k and k not in seen:
+                seen.add(k)
+                out.append(k)
+
+    if type_defaults:
+        add_many(type_defaults)
+        add_many(db_list)
+    else:
+        add_many(db_list)
+
+    return out if out else ["deduction"]
+
+
+def _obstacle_skill_candidates(obstacle):
+    """Parse obstacle.skill_used as comma-separated list; default streetwise."""
+    raw = (obstacle.skill_used or "").strip()
+    if not raw:
+        return ["streetwise"]
+    parts = [p.strip() for p in raw.replace(";", ",").split(",") if p.strip()]
+    keys = [_normalize_skill_key(p) for p in parts]
+    return keys if keys else ["streetwise"]
+
+
+def _pick_best_skill_for_roll(char, skill_names: list):
+    """
+    Choose the skill with the highest rank; ties keep the first listed candidate.
+    Returns (skill_name, skill_val, stat_name, stat_val).
+    """
+    if not skill_names:
+        skill_names = ["deduction"]
+    best_sk = skill_names[0]
+    best_val = _get_skill_value(char, best_sk)
+    for sk in skill_names[1:]:
+        val = _get_skill_value(char, sk)
+        if val > best_val:
+            best_val = val
+            best_sk = sk
+    stat_name = _skill_to_stat(best_sk)
+    stat_val = getattr(char.db, stat_name, 5) or 5
+    return (best_sk, best_val, stat_name, stat_val)
 
 
 def _humanize_skill_stat_name(name: str) -> str:
     """Display label for db stat/skill keys (e.g. electronics_security_tech -> title case)."""
     return (name or "").replace("_", " ").strip().title()
+
+
+def _format_obstacle_skills_display(obstacle):
+    """Player-facing skill list for an obstacle (overcome uses best among these)."""
+    cands = _obstacle_skill_candidates(obstacle)
+    if len(cands) <= 1:
+        return _humanize_skill_stat_name(cands[0] if cands else "streetwise")
+    return " / ".join(_humanize_skill_stat_name(s) for s in cands)
 
 
 def _collect_scan_locs(caller, char, arg):
@@ -277,8 +519,12 @@ def _execute_evidence_check(caller, char, focus_obj, clue):
         )
         return
     if not _obstacle_gate_passed(char, clue):
+        obs = clue.gating_obstacle
+        sk = _format_obstacle_skills_display(obs)
         caller.msg(
-            "Something is in the way of this lead -- overcome the obstacle before pushing further."
+            f"|yA block is in the way of this lead.|n Overcome obstacle |m#{obs.id}|n "
+            f"({obs.obstacle_type}, |wDV{obs.dv}|n, {sk}) with "
+            f"|c+investigate/overcome {obs.id}|n, then you can push the evidence check."
         )
         return
     for req in clue.required_clues.all():
@@ -296,12 +542,8 @@ def _execute_evidence_check(caller, char, focus_obj, clue):
         caller.msg("You've already attempted this lead today. Try again tomorrow.")
         return
 
-    skill_name = clue.get_skills_list()[0] if clue.get_skills_list() else "deduction"
-    skill_val = getattr(char.db, skill_name, 0) or 0
-    if hasattr(char, "get_skill"):
-        skill_val = char.get_skill(skill_name)
-    stat_name = _skill_to_stat(skill_name)
-    stat_val = getattr(char.db, stat_name, 5) or 5
+    candidates = _evidence_skill_candidates(clue)
+    skill_name, skill_val, stat_name, stat_val = _pick_best_skill_for_roll(char, candidates)
 
     from world.utils.roll_utils import roll_skill_check, check_success, format_roll_vs_dv_message
     from world.wound_utils import get_action_penalty
@@ -467,6 +709,8 @@ class CmdInvestigate(MuxCommand):
       +investigate <id or spot>        - Evidence check on a lead you already noticed
       +investigate/hint                - Ask the GM for a nudge (costs Focus)
       +investigate/overcome <id>       - Push past an obstacle
+      +investigate/sync <character>    - Align their uncovered threads to yours (IC, same room)
+      +investigate/tell <character>    - Share narrative text of leads you deciphered (IC, same room)
     """
 
     key = "+investigate"
@@ -497,13 +741,19 @@ class CmdInvestigate(MuxCommand):
         if "scan" in self.switches:
             self._do_scan(focus_obj)
             return
+        if "sync" in self.switches:
+            self._do_sync_leads()
+            return
+        if "tell" in self.switches:
+            self._do_tell_narrative()
+            return
 
         if not self.args:
             self.caller.msg(
                 "|c+investigate/scan|n [here|object|exit|element] -- look for leads.\n"
                 "|c+investigate <id>|n or name -- evidence check on a lead you noticed.\n"
                 "|c+investigate/leads|n -- uncovered leads, locations, and chains.\n"
-                "|c+investigate/hint|n |c+investigate/overcome <id>|n"
+                "|c+investigate/sync|n |c+investigate/tell|n (same room) |c+investigate/hint|n |c+investigate/overcome <id>|n"
             )
             return
 
@@ -566,6 +816,12 @@ class CmdInvestigate(MuxCommand):
             if hint:
                 lines.append(f"  Thread: {hint}")
             lines.append("")
+        pending_obs = _pending_gating_obstacles_for_character(char)
+        if pending_obs:
+            lines.append("|wStill in your way (clear to reveal more leads):|n")
+            for obs in pending_obs:
+                lines.append(_format_obstacle_overcome_hint(obs))
+            lines.append("")
         lines.append(footer())
         self.caller.msg("\n".join(lines))
 
@@ -582,16 +838,49 @@ class CmdInvestigate(MuxCommand):
             return
         locs = locs_or_err
 
+        if not locs:
+            self.caller.msg("There are no investigation placements in this scope.")
+            return
+
+        gated_here = _obstacles_blocking_gated_clues_in_locs(char, locs)
+
         eligible_locs = _filter_locs_eligible_for_exposure(char, locs)
         if not eligible_locs:
+            if gated_here:
+                lines = [
+                    "|ySomething is blocking new leads from surfacing here.|n "
+                    "Push past the obstacle first, then scan again:",
+                ]
+                for obs in sorted(gated_here.values(), key=lambda o: o.id):
+                    lines.append(_format_obstacle_overcome_hint(obs))
+                self.caller.msg("\n".join(lines))
+                return
             self.caller.msg(
                 "You sweep the area but nothing new surfaces -- "
-                "prerequisites may be missing, or an obstacle may be blocking."
+                "prerequisites may be missing (decipher earlier leads first)."
             )
             focus_damage = _roll_dice("1d6")
             focus_obj.current_focus -= focus_damage
             focus_obj.save()
             self.caller.msg(f"(Lost {focus_damage} Focus from the effort.)")
+            return
+
+        unexposed_eligible = [loc for loc in eligible_locs if not _is_exposed(char, loc.clue)]
+        if not unexposed_eligible:
+            if gated_here:
+                lines = [
+                    "|yYou already noticed every lead you can pick up here without a block.|n",
+                    "|mTo open what is still locked away, clear this first:|n",
+                ]
+                for obs in sorted(gated_here.values(), key=lambda o: o.id):
+                    lines.append(_format_obstacle_overcome_hint(obs))
+                self.caller.msg("\n".join(lines))
+                return
+            self.caller.msg(
+                "|yYou already noticed every lead you can find in this scope.|n "
+                "No need to scan here again until you |wmove to another spot|n "
+                "or |wdecipher a lead|n that unlocks more."
+            )
             return
 
         clues = _unique_clues_from_locs(eligible_locs)
@@ -634,7 +923,7 @@ class CmdInvestigate(MuxCommand):
 
         exposed = []
         for loc in sorted(
-            eligible_locs,
+            unexposed_eligible,
             key=lambda x: (x.clue.discovery_priority, x.clue_id),
         ):
             clue = loc.clue
@@ -645,7 +934,8 @@ class CmdInvestigate(MuxCommand):
 
         if not exposed:
             self.caller.msg(
-                f"You confirm what you already noticed. (Lost {focus_damage} Focus.)"
+                f"|yNothing new to notice.|n (Lost {focus_damage} Focus.) "
+                "If this keeps happening, ask staff -- you should not reach this after a successful scan."
             )
             return
 
@@ -721,12 +1011,8 @@ class CmdInvestigate(MuxCommand):
             self.caller.msg("You've already attempted this obstacle today.")
             return
 
-        skill_name = obstacle.skill_used or "streetwise"
-        skill_val = getattr(char.db, skill_name, 0) or 0
-        if hasattr(char, "get_skill"):
-            skill_val = char.get_skill(skill_name)
-        stat_name = _skill_to_stat(skill_name)
-        stat_val = getattr(char.db, stat_name, 5) or 5
+        ocandidates = _obstacle_skill_candidates(obstacle)
+        skill_name, skill_val, stat_name, stat_val = _pick_best_skill_for_roll(char, ocandidates)
 
         from world.utils.roll_utils import roll_skill_check, check_success, format_roll_vs_dv_message
         from world.wound_utils import get_action_penalty
@@ -768,6 +1054,64 @@ class CmdInvestigate(MuxCommand):
                 f"({focus_obj.current_focus} remaining)"
             )
 
+    def _do_sync_leads(self):
+        char = _get_character_for_caller(self.caller)
+        if not self.args:
+            self.caller.msg("Usage: +investigate/sync <character in the room>")
+            return
+        target = _find_pc_in_same_room(self.caller, self.args.strip())
+        if not target:
+            self.caller.msg("No single character by that name here.")
+            return
+        if target == char:
+            self.caller.msg("Pick someone else.")
+            return
+        ok, result = _sync_exposure_to_target(char, target)
+        if not ok:
+            self.caller.msg(result)
+            return
+        added = result
+        if added:
+            self.caller.msg(
+                f"|gYou bring them up to speed on what to look for.|n "
+                f"{added} new lead(s) now line up for them (|c+investigate/leads|n)."
+            )
+            target.msg(
+                f"|g{char.key}|n walks you through what they noticed; "
+                f"{added} new lead(s) click into place for you."
+            )
+        else:
+            self.caller.msg(
+                "|yThey already had every lead you could pass along|n (or nothing new applies)."
+            )
+
+    def _do_tell_narrative(self):
+        char = _get_character_for_caller(self.caller)
+        if not self.args:
+            self.caller.msg("Usage: +investigate/tell <character in the room>")
+            return
+        target = _find_pc_in_same_room(self.caller, self.args.strip())
+        if not target:
+            self.caller.msg("No single character by that name here.")
+            return
+        if target == char:
+            self.caller.msg("Pick someone else.")
+            return
+        blocks = _narrative_lines_for_successful_clues(char)
+        if not blocks:
+            self.caller.msg("You have no deciphered lead narratives to share yet.")
+            return
+        lines = ["|wWhat you share:|n"]
+        for mname, chunk in blocks:
+            lines.append(f"|c{mname}|n")
+            lines.extend(chunk)
+        self.caller.msg("\n".join(lines))
+        out = [f"|w{char.key} shares what they pieced together:|n"]
+        for mname, chunk in blocks:
+            out.append(f"|c{mname}|n")
+            out.extend(chunk)
+        target.msg("\n".join(out))
+
 
 class CmdMystery(MuxCommand):
     """
@@ -776,13 +1120,15 @@ class CmdMystery(MuxCommand):
     Usage:
       +mystery                    - Active mysteries and your Focus
       +mystery/focus              - Focus details
+      +mystery/follow <id>       - Follow a mystery (highlights in list)
+      +mystery/unfollow <id>     - Stop following
       +mystery/info <id>          - Mystery summary (no spoilers)
-      +mystery/create ...         - Staff: create mystery
+      +mystery/create ...         - Staff: create mystery (optional mission id at end of rhs)
       +mystery/public <id>=...    - Staff: player-facing description
       +mystery/start <id>=...     - Staff: where to start looking
       +mystery/scandv <id>=<n>    - Staff: scan DV for this mystery
       +mystery/obstacle ...       - Staff: add obstacle
-      +mystery/link ...           - Staff: link to mission
+      +mystery/link ...           - Staff: link to mission board mission (and its job if set)
       +mystery/unlink <id>        - Staff: unlink mission
     """
 
@@ -821,6 +1167,11 @@ class CmdMystery(MuxCommand):
         if "unlink" in self.switches:
             return self._staff_unlink()
 
+        if "follow" in self.switches:
+            return self._do_follow(char)
+        if "unfollow" in self.switches:
+            return self._do_unfollow(char)
+
         if "info" in self.switches:
             return self._show_info()
 
@@ -834,17 +1185,21 @@ class CmdMystery(MuxCommand):
             self.caller.msg("\n".join(out))
             return
 
-        self._list_mysteries(focus_obj, current, max_focus)
+        self._list_mysteries(char, focus_obj, current, max_focus)
 
-    def _list_mysteries(self, focus_obj, current, max_focus):
-        broad = Mystery.objects.filter(is_solved=False).order_by("name")
+    def _list_mysteries(self, char, focus_obj, current, max_focus):
+        broad = list(Mystery.objects.filter(is_solved=False))
+        followed_ids = set(
+            MysteryFollower.objects.filter(character=char).values_list("mystery_id", flat=True)
+        )
+        broad.sort(key=lambda m: (0 if m.id in followed_ids else 1, m.name.lower()))
         lines = [
             header("Mysteries & Investigation"),
             f"  |gFocus:|n {current}/{max_focus}",
             "",
-            "  |wOpen investigations:|n",
+            "  |wOpen investigations:|n  (|w★|n = you follow)",
         ]
-        if not broad.exists():
+        if not broad:
             lines.append("  (None listed -- ask staff or check the grid.)")
         else:
             for m in broad:
@@ -855,13 +1210,52 @@ class CmdMystery(MuxCommand):
                 else:
                     desc = (m.goal or "")[:120] + ("..." if len(m.goal or "") > 120 else "")
                 loc = f" |cStart:|n {hint}" if hint else ""
-                lines.append(f"  |y#{m.id}|n {m.name} -- {desc}{loc}")
+                star = "|w★|n " if m.id in followed_ids else ""
+                lines.append(f"  {star}|y#{m.id}|n {m.name} -- {desc}{loc}")
+        pending_obs = _pending_gating_obstacles_for_character(char)
+        if pending_obs:
+            lines.append("")
+            lines.append("  |yBlocks you can clear (then new leads may appear):|n")
+            for obs in pending_obs[:6]:
+                lines.append(_format_obstacle_overcome_hint(obs))
+            if len(pending_obs) > 6:
+                lines.append("  (see |c+investigate/leads|n for full list)")
         lines.append("")
-        lines.append("  |c+mystery/info <id>|n for details. |c+investigate/scan|n to notice leads.")
+        lines.append("  |c+mystery/info <id>|n |c+mystery/follow <id>|n  |c+investigate/scan|n")
         lines.append(footer())
         self.caller.msg("\n".join(lines))
 
+    def _do_follow(self, char):
+        if not self.args:
+            self.caller.msg("Usage: +mystery/follow <mystery id>")
+            return
+        try:
+            mid = int(self.args.strip())
+            m = Mystery.objects.get(id=mid)
+        except (ValueError, Mystery.DoesNotExist):
+            self.caller.msg("Mystery not found.")
+            return
+        if m.is_solved:
+            self.caller.msg("That mystery is already solved.")
+            return
+        follow_mystery_for_character(char, m)
+        self.caller.msg(f"You are now following |y{m.name}|n (★ on +mystery).")
+
+    def _do_unfollow(self, char):
+        if not self.args:
+            self.caller.msg("Usage: +mystery/unfollow <mystery id>")
+            return
+        try:
+            mid = int(self.args.strip())
+            m = Mystery.objects.get(id=mid)
+        except (ValueError, Mystery.DoesNotExist):
+            self.caller.msg("Mystery not found.")
+            return
+        unfollow_mystery_for_character(char, m)
+        self.caller.msg(f"You stopped following |y{m.name}|n.")
+
     def _show_info(self):
+        char = _get_character_for_caller(self.caller)
         if not self.args:
             self.caller.msg("Usage: +mystery/info <mystery id>")
             return
@@ -881,9 +1275,20 @@ class CmdMystery(MuxCommand):
             "",
             f"  |wClues in play:|n {nc}  |wObstacles:|n {no}",
         ]
+        if char and MysteryFollower.objects.filter(character=char, mystery=m).exists():
+            lines.append("  |wYou are following this investigation.|n")
         if sh:
             lines.append(f"  |wWhere to start:|n {sh}")
         lines.append(f"  |wStatus:|n {'Solved' if m.is_solved else 'Open'}")
+        if not m.is_solved and no > 0:
+            lines.append("")
+            lines.append("  |wObstacles (use when fiction hits a wall):|n")
+            for o in m.obstacles.all().order_by("id"):
+                sk = (o.skill_used or "any").replace("_", " ")
+                lines.append(
+                    f"    |m#{o.id}|n {o.obstacle_type} |wDV{o.dv}|n ({sk})  "
+                    f"|c+investigate/overcome {o.id}|n"
+                )
         lines.append(footer())
         self.caller.msg("\n".join(lines))
 
@@ -901,10 +1306,18 @@ class CmdMystery(MuxCommand):
         if not self._check_builder():
             return
         if not self.args or "=" not in self.args:
-            self.caller.msg("Usage: +mystery/create <name>=<goal>,<complexity or tier>")
+            self.caller.msg(
+                "Usage: +mystery/create <name>=<goal>,<complexity or tier>[,<mission id>]"
+            )
             return
         name = self.lhs.strip()
         rhs = self.rhs.strip()
+        mission_id = None
+        if "," in rhs:
+            left, right = rhs.rsplit(",", 1)
+            if right.strip().isdigit():
+                mission_id = int(right.strip())
+                rhs = left
         parts = [p.strip() for p in rhs.split(",", 1)]
         goal = parts[0] if parts else ""
         complexity_arg = (parts[1] if len(parts) > 1 else "50").strip().lower()
@@ -928,9 +1341,31 @@ class CmdMystery(MuxCommand):
             created_by=char,
             public_description=goal[:500],
         )
+        tail = ""
+        if mission_id is not None:
+            from world.mission_board.models import Mission
+
+            try:
+                miss = Mission.objects.get(id=mission_id)
+            except Mission.DoesNotExist:
+                tail = f" |r(Mission #{mission_id} not found -- not linked.)|n"
+            else:
+                m.mission = miss
+                m.save()
+                sync_followers_when_mystery_linked_to_mission(m)
+                if miss.job_id:
+                    tail = (
+                        f" |gLinked to mission #{miss.id}; job #{miss.job_id} "
+                        f"gets investigation updates on solve.|n"
+                    )
+                else:
+                    tail = (
+                        f" |gLinked to mission #{miss.id}|n "
+                        f"(that mission has no job yet; create one with mission acceptance flow)."
+                    )
         self.caller.msg(
             f"Created Mystery #{m.id}: {m.name}. Set |c+mystery/public {m.id}=...|n and "
-            f"|c+mystery/start {m.id}=...|n for players."
+            f"|c+mystery/start {m.id}=...|n for players.{tail}"
         )
 
     def _staff_set_public(self):
@@ -1038,7 +1473,13 @@ class CmdMystery(MuxCommand):
             return
         mystery.mission = mission
         mystery.save()
-        self.caller.msg(f"Linked mystery to Mission #{mission.id}: {mission.name}")
+        sync_followers_when_mystery_linked_to_mission(mystery)
+        extra = ""
+        if mission.job_id:
+            extra = f" Job #{mission.job_id} will receive updates when this mystery is solved."
+        self.caller.msg(
+            f"Linked mystery to Mission #{mission.id}: {mission.name}.{extra}"
+        )
 
     def _staff_unlink(self):
         if not self._check_builder():

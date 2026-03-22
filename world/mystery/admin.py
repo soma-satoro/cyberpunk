@@ -10,6 +10,7 @@ from .models import (
     ClueLocation,
     ObstacleAttempt,
     ClueExposure,
+    MysteryFollower,
 )
 
 
@@ -78,3 +79,8 @@ class ObstacleAttemptAdmin(admin.ModelAdmin):
 @admin.register(ClueExposure)
 class ClueExposureAdmin(admin.ModelAdmin):
     list_display = ("character", "clue", "created_at")
+
+
+@admin.register(MysteryFollower)
+class MysteryFollowerAdmin(admin.ModelAdmin):
+    list_display = ("character", "mystery", "created_at")

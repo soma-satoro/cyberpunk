@@ -240,7 +240,12 @@ class CmdStat(AdminCommand):
             return
 
         # Resolve stat name (abbreviations, spaces, ROLE_SKILL_NAME_MAP, etc.)
-        from world.utils.character_utils import get_full_attribute_name, MEDICINE_SPECIALTY_ATTRIBUTES, MAKER_SPECIALTY_ATTRIBUTES
+        from world.utils.character_utils import (
+            get_full_attribute_name,
+            get_technique_value,
+            MEDICINE_SPECIALTY_ATTRIBUTES,
+            MAKER_SPECIALTY_ATTRIBUTES,
+        )
         from world.cyberpunk_constants import ROLE_SKILL_NAME_MAP
         from world.improvement_points import IP_ATTRIBUTES, set_character_stat_value
 
@@ -353,11 +358,31 @@ class CmdStat(AdminCommand):
         if sheet and hasattr(sheet, 'recalculate_derived_stats'):
             # Sync character.db stats to sheet first so recalc has correct base
             for attr in IP_ATTRIBUTES:
-                if hasattr(char.db, attr) and hasattr(sheet, attr):
-                    setattr(sheet, attr, getattr(char.db, attr))
+                if not hasattr(sheet, attr):
+                    continue
+                if attr == "technique":
+                    val = get_technique_value(char)
+                    if val is None or val == "":
+                        val = getattr(sheet, attr, 1) or 1
+                    else:
+                        val = int(val)
+                    setattr(sheet, attr, val)
+                    continue
+                if not hasattr(char.db, attr):
+                    continue
+                val = getattr(char.db, attr)
+                if val is None or val == "":
+                    val = getattr(sheet, attr, 1) or 1
+                else:
+                    val = int(val)
+                setattr(sheet, attr, val)
             # Sync all skills from character.db.skills to sheet columns
+            # Skip IP_ATTRIBUTES: those live on char.db only; a stray skills["technique"]
+            # (or other attr key) would overwrite sheet columns and can set NOT NULL fields to NULL.
             if hasattr(char.db, 'skills') and char.db.skills:
                 for skill_key, skill_val in char.db.skills.items():
+                    if skill_key in IP_ATTRIBUTES or skill_val is None:
+                        continue
                     if hasattr(sheet, skill_key):
                         setattr(sheet, skill_key, skill_val)
             # Sync current/max HP from character to sheet

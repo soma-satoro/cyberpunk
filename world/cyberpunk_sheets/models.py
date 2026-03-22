@@ -733,8 +733,26 @@ class CharacterSheet(SharedMemoryModel):
         """
         super().refresh_from_db(using=using, fields=fields)
 
+    def _ensure_non_null_core_attributes(self):
+        """Legacy/Evennia db can leave core stats unset (None); DB columns are NOT NULL."""
+        for name, default in (
+            ("intelligence", 1),
+            ("reflexes", 1),
+            ("dexterity", 1),
+            ("technique", 1),
+            ("cool", 1),
+            ("willpower", 1),
+            ("luck", 1),
+            ("move", 1),
+            ("body", 1),
+            ("empathy", 1),
+        ):
+            if getattr(self, name, None) is None:
+                setattr(self, name, default)
+
     def save(self, *args, **kwargs):
         skip_recalculation = kwargs.pop('skip_recalculation', False)
+        self._ensure_non_null_core_attributes()
         if not skip_recalculation:
             self.recalculate_derived_stats()
         if self.character:

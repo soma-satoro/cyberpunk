@@ -82,6 +82,17 @@ class Room(DefaultRoom):
             
             string += '\n'.join(formatted_paragraphs) + "\n\n"
 
+        # Investigation: show deciphered leads tied to this room (before characters / exits)
+        if looker and getattr(looker, "has_account", False):
+            from world.mystery.services import get_deciphered_clue_display_lines
+
+            clue_lines = get_deciphered_clue_display_lines(looker, self)
+            if clue_lines:
+                string += divider("Investigation notes", width=78, fillchar=ANSIString("|m-|n")) + "\n"
+                for line in clue_lines:
+                    string += line + "\n"
+                string += "\n"
+
         # List all characters in the room
         characters = [obj for obj in self.contents if obj.has_account]
         if characters:

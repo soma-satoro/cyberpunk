@@ -1051,7 +1051,7 @@ The |wInvestigation System|n (Interface RED Vol 5) uses |wFocus|n to |wscan|n fo
 You do |wnot|n see staff clues until you |wnotice|n them.
 
 |w+investigate/scan [here|<name>]|n
-  |wPerception + INT|n vs the mystery's scan DV. Costs 1d6 Focus. On success, exposes new leads in scope (room, element, object, or exit) that you are allowed to know about. Lower-|wpriority|n clues tend to surface first. Linked clues stay hidden until prerequisites are met and any |wgating obstacle|n is overcome.
+  |wPerception + INT|n vs the mystery's scan DV. If you have |walready noticed|n every lead that can appear in this scope, |wno roll and no Focus cost|n -- try another spot, decipher a prerequisite, or clear a gate. Otherwise costs 1d6 Focus. On success, exposes new leads in scope (room, element, object, or exit) that you are allowed to know about. Lower-|wpriority|n clues tend to surface first. Linked clues stay hidden until prerequisites are met and any |wgating obstacle|n is overcome.
 
 |w+investigate <id>|n or |w+investigate <spot>|n
   |wEvidence check|n on a lead you |walready noticed|n (after scan). Uses the clue's skill vs its DV.
@@ -1063,7 +1063,7 @@ You do |wnot|n see staff clues until you |wnotice|n them.
   DV15 Deduction; 1d6 Focus either way -- GM may give a nudge.
 
 |w+investigate/overcome <obstacle id>|n
-  Push past a mystery obstacle (DV on the obstacle). Focus cost on success or failure.
+  Push past a mystery obstacle (DV on the obstacle). Focus cost on success or failure. If a lead is |wgated|n, |w+investigate/scan|n and |w+mystery|n will point you at the obstacle id and |c+investigate/overcome|n; |w+mystery/info|n lists obstacles for that case.
 
 |w+rest|n / |w+rest/concentrate|n
   Recover extra Focus (see help +rest).

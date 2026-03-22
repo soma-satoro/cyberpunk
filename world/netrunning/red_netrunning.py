@@ -72,7 +72,7 @@ DEFENDER_PROGRAMS = {
         "def": 1,
         "rez": 7,
         "cost": 50,
-        "effect": "Reduce first Non-Black ICE attacker damage by 1 while Rezzed.",
+        "effect": "Reduce ATK of all Non-Black ICE attacker Programs run against you to 0 while Rezzed.",
     },
     "shield": {
         "name": "Shield",
@@ -93,7 +93,7 @@ ATTACKER_PROGRAMS = {
         "def": 0,
         "rez": 0,
         "cost": 50,
-        "effect": "Deal 3d6 REZ to Black ICE or 2d6 REZ to non-Black ICE Program.",
+        "effect": "Deal 3d6 REZ to non-Black ICE Program or 2d6 REZ to Black ICE.",
     },
     "sword": {
         "name": "Sword",
@@ -164,14 +164,14 @@ BLACK_ICE = {
     "asp": {"name": "Asp", "class": "Anti-Personnel Black ICE", "per": 4, "spd": 6, "atk": 2, "def": 2, "rez": 15, "cost": 100, "effect": "Destroy one single Program installed on target's Cyberdeck."},
     "giant": {"name": "Giant", "class": "Anti-Personnel Black ICE", "per": 2, "spd": 2, "atk": 8, "def": 4, "rez": 25, "cost": 1000, "effect": "Deal 3d6 brain damage and force immediate unsafe Jack Out."},
     "hellhound": {"name": "Hellhound", "class": "Anti-Personnel Black ICE", "per": 6, "spd": 6, "atk": 6, "def": 2, "rez": 20, "cost": 500, "effect": "Deal 2d6 brain damage and set target on fire until dealt with."},
-    "kraken": {"name": "Kraken", "class": "Anti-Personnel Black ICE", "per": 6, "spd": 2, "atk": 8, "def": 4, "rez": 30, "cost": 1000, "effect": "Deal 3d6 brain damage and force immediate unsafe Jack Out."},
+    "kraken": {"name": "Kraken", "class": "Anti-Personnel Black ICE", "per": 6, "spd": 2, "atk": 8, "def": 4, "rez": 30, "cost": 1000, "effect": "Deal 3d6 brain damage and lock deeper movement/safe Jack Out until end of target's next turn."},
     "liche": {"name": "Liche", "class": "Anti-Personnel Black ICE", "per": 8, "spd": 2, "atk": 6, "def": 2, "rez": 25, "cost": 500, "effect": "Lower INT/REF/DEX each by 1d6 for next hour (minimum 1)."},
     "raven": {"name": "Raven", "class": "Anti-Personnel Black ICE", "per": 6, "spd": 4, "atk": 4, "def": 2, "rez": 15, "cost": 50, "effect": "Derezzes one single Defender Program and deals 1d6 brain damage."},
     "scorpion": {"name": "Scorpion", "class": "Anti-Personnel Black ICE", "per": 2, "spd": 6, "atk": 2, "def": 2, "rez": 15, "cost": 100, "effect": "Lower MOVE by 1d6 for next hour (minimum 1)."},
-    "skunk": {"name": "Skunk", "class": "Anti-Personnel Black ICE", "per": 2, "spd": 4, "atk": 2, "def": 4, "rez": 10, "cost": 500, "effect": "Until next turn's beginning, all slide checks at -2."},
+    "skunk": {"name": "Skunk", "class": "Anti-Personnel Black ICE", "per": 2, "spd": 4, "atk": 4, "def": 2, "rez": 10, "cost": 500, "effect": "Until Derezzed, target Netrunner takes -2 on Slide checks."},
     "wisp": {"name": "Wisp", "class": "Anti-Personnel Black ICE", "per": 4, "spd": 4, "atk": 4, "def": 2, "rez": 15, "cost": 50, "effect": "Deal 1d6 brain damage and lower one NET action next turn."},
     "dragon": {"name": "Dragon", "class": "Anti-Program Black ICE", "per": 6, "spd": 4, "atk": 6, "def": 6, "rez": 30, "cost": 1000, "effect": "Deal 6d6 damage to a Program. Excess destroys instead of derezzing."},
-    "killer": {"name": "Killer", "class": "Anti-Program Black ICE", "per": 4, "spd": 8, "atk": 6, "def": 2, "rez": 20, "cost": 500, "effect": "Deal 6d6 damage to a Program. Excess destroys instead of derezzing."},
+    "killer": {"name": "Killer", "class": "Anti-Program Black ICE", "per": 4, "spd": 8, "atk": 6, "def": 2, "rez": 20, "cost": 500, "effect": "Deal 4d6 damage to a Program. Excess destroys instead of derezzing."},
     "sabertooth": {"name": "Sabertooth", "class": "Anti-Program Black ICE", "per": 8, "spd": 6, "atk": 6, "def": 2, "rez": 25, "cost": 1000, "effect": "Deal 6d6 damage to a Program. Excess destroys instead of derezzing."},
 }
 

@@ -12,6 +12,7 @@ from django.db.models import Max
 
 from world.mission_board.models import Mission, MissionTeamMember, StorySeed
 from world.mission_board import services
+from world.mystery.services import follow_mysteries_for_mission_character
 from world.mission_board.services import (
     _get_character_display_name,
     is_faction_member,
@@ -323,6 +324,7 @@ class CmdMission(MuxCommand):
         MissionTeamMember.objects.create(mission=mission, character=self.caller, order=max_order + 1)
         mission.status = 'active'
         mission.save()
+        follow_mysteries_for_mission_character(self.caller, mission)
 
         # Create job if not exists
         poster_account = getattr(mission.posted_by, 'account', None) if mission.posted_by else None
@@ -362,6 +364,7 @@ class CmdMission(MuxCommand):
             return
         max_order = MissionTeamMember.objects.filter(mission=mission).aggregate(m=Max('order'))['m'] or -1
         MissionTeamMember.objects.create(mission=mission, character=char, order=max_order + 1)
+        follow_mysteries_for_mission_character(char, mission)
         services.sync_mission_to_job(mission)
         services.mission_add_comment_and_mail(mission, self.caller.key, f"{self.caller.key} added {char.key} to the mission.")
         self.caller.msg(f"Added {char.key} to mission #{mission.id}.")

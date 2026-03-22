@@ -2,6 +2,7 @@
 
 from django.db import models
 from evennia.utils.idmapper.models import SharedMemoryModel
+from evennia.objects.models import ObjectDB
 from world.cyberpunk_sheets.models import CharacterSheet
 from world.inventory.models import CyberwareInstance, Cyberdeck
 
@@ -119,3 +120,96 @@ class BlackICE(ICE):
     def react(self, netrunner):
         # Implement more aggressive behavior for Black ICE
         pass
+
+
+# --- NET architecture floor leads (Evennia access-point objects; not the legacy NetArchitecture model above) ---
+
+
+class NetFloorLead(SharedMemoryModel):
+    """
+    Staff-placed discoverable content on a specific floor of an in-world NET access object
+    (typeclasses.netrunning.NetArchitecture). Separate from CPR procedural file/paydata floors.
+    """
+
+    LEAD_PAYDATA = "paydata"
+    LEAD_PROGRAM = "program"
+    LEAD_NARRATIVE = "narrative"
+    LEAD_FLAVOR = "flavor"
+
+    LEAD_TYPES = (
+        (LEAD_PAYDATA, "Paydata"),
+        (LEAD_PROGRAM, "Program"),
+        (LEAD_NARRATIVE, "Narrative"),
+        (LEAD_FLAVOR, "Flavor"),
+    )
+
+    architecture_object = models.ForeignKey(
+        ObjectDB,
+        on_delete=models.CASCADE,
+        related_name="net_floor_leads",
+    )
+    floor_number = models.PositiveIntegerField()
+    slug = models.SlugField(max_length=80)
+    label = models.CharField(max_length=200)
+    teaser = models.TextField(blank=True, default="")
+    scan_dv = models.PositiveSmallIntegerField(default=13)
+    investigate_dv = models.PositiveSmallIntegerField(default=13)
+    discovery_priority = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Lower = surfaced first when delving.",
+    )
+    lead_type = models.CharField(max_length=20, choices=LEAD_TYPES, default=LEAD_NARRATIVE)
+    paydata_label = models.CharField(max_length=200, blank=True, default="")
+    paydata_value = models.PositiveIntegerField(default=0)
+    program_name = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        help_text="Canonical program name from deckoptions (e.g. Eraser).",
+    )
+    success_text = models.TextField(blank=True, default="")
+    prerequisite_leads = models.ManyToManyField(
+        "self",
+        symmetrical=False,
+        blank=True,
+        related_name="unlocks",
+    )
+    linked_leads = models.ManyToManyField(
+        "self",
+        symmetrical=True,
+        blank=True,
+        related_name="linked_net_leads",
+    )
+    staff_notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [["architecture_object", "slug"]]
+        indexes = [
+            models.Index(fields=["architecture_object", "floor_number"]),
+        ]
+
+    def __str__(self):
+        return f"{self.architecture_object_id} F{self.floor_number} {self.slug}"
+
+
+class NetLeadExposure(SharedMemoryModel):
+    """Character has noticed this lead on +net/delve (Interface vs scan_dv)."""
+
+    lead = models.ForeignKey(NetFloorLead, on_delete=models.CASCADE, related_name="exposures")
+    character = models.ForeignKey(ObjectDB, on_delete=models.CASCADE, related_name="net_lead_exposures")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [["lead", "character"]]
+
+
+class NetLeadResolution(SharedMemoryModel):
+    """Character completed +net/trace (Interface vs investigate_dv) or auto for flavor leads."""
+
+    lead = models.ForeignKey(NetFloorLead, on_delete=models.CASCADE, related_name="resolutions")
+    character = models.ForeignKey(ObjectDB, on_delete=models.CASCADE, related_name="net_lead_resolutions")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [["lead", "character"]]

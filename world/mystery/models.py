@@ -111,6 +111,28 @@ class Mystery(SharedMemoryModel):
             update_mission_on_mystery_solve(self)
 
 
+class MysteryFollower(SharedMemoryModel):
+    """Character is following a mystery (manual +auto from mission link)."""
+
+    character = models.ForeignKey(
+        ObjectDB,
+        on_delete=models.CASCADE,
+        related_name="mystery_follows",
+    )
+    mystery = models.ForeignKey(
+        Mystery,
+        on_delete=models.CASCADE,
+        related_name="followers",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [["character", "mystery"]]
+
+    def __str__(self):
+        return f"{self.character_id} -> Mystery #{self.mystery_id}"
+
+
 class MysteryClue(SharedMemoryModel):
     """A clue linked to a Mystery."""
     mystery = models.ForeignKey(
