@@ -112,7 +112,7 @@ def menunode_start(caller, raw_string, **kwargs):
         f"- |g{SELL_YOUR_SOUL_EBOOST} eurodollars|n\n"
         f"{cyber_bullet}"
         "\nIn exchange, you pledge service to an employer who may hold one of several 'catches' over you.\n\n"
-        "|y1|n - Choose Employer Type (Military / Crime / Corporation)\n"
+        "|y1|n - Choose Employer Type (Military / Crime / Corporation / Gang)\n"
         "|y2|n - Cancel"
     )
     options = [

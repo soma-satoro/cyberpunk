@@ -141,9 +141,11 @@ class CharacterSheet(SharedMemoryModel):
 
     # Sell Your Soul: 1500 eb + Neural Link or Neuroport (as chosen), in exchange for employer control
     sell_your_soul = models.BooleanField(default=False)
-    sell_your_soul_employer_type = models.CharField(max_length=50, blank=True)  # military, crime, corporation
+    sell_your_soul_employer_type = models.CharField(max_length=50, blank=True)  # military, crime, corporation, gang
     sell_your_soul_employer = models.CharField(max_length=100, blank=True)  # e.g. "NUSA Mechanised Combat Force"
     sell_your_soul_catch = models.CharField(max_length=100, blank=True)  # Hostages, Blackmail, etc.
+    sell_your_soul_consequences = models.CharField(max_length=255, blank=True)  # Fallout caused by the deal
+    sell_your_soul_service = models.CharField(max_length=255, blank=True)  # What the character did for employer
 
     medical_debt_entries = models.JSONField(
         default=list,

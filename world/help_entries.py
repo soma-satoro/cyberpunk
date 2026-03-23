@@ -1452,4 +1452,177 @@ another players trust or damage their story. This applies to staff plots and
 staff files as well.
         """,
     },
+    {
+        "key": "vehicle combat",
+        "aliases": ["vehicles", "driving", "ramming", "vehicle rules"],
+        "category": "Combat",
+        "text": """
+Vehicle combat quick reference (Cyberpunk RED core style):
+
+# Vehicle stats
+
+|wSDP|n (Structural Damage Points) is a vehicle's HP.
+- If SDP is at least 1, the vehicle can still move.
+- At 0 SDP, the vehicle is destroyed, no longer cover, and cannot move until repaired.
+
+|wSeats|n is comfortable passenger capacity.
+|wSpeed (Combat)|n is the vehicle's MOVE in combat time.
+|wSpeed (Narrative)|n is top speed for non-combat travel.
+
+# Targeting and weak points
+
+- Vehicles cannot dodge attacks.
+- Occupants can still dodge attacks targeted at them if they could normally dodge those attacks on foot.
+- Vehicle glass has no HP and provides no cover (unless upgraded).
+- You can use an aimed shot vs weak points at -8.
+  If you hit, damage that gets through vehicle SP is doubled.
+- Against a moving vehicle with melee, weak-point hit requires DV13 and still takes the -8.
+
+# Entering, starting, and driving
+
+- Getting into a vehicle is an Action.
+- Getting out is movement (no Action).
+- Starting or stopping a vehicle is an Action.
+- Starting a vehicle immediately:
+  1) Puts driver at top of Initiative
+  2) Uses vehicle MOVE instead of driver's MOVE
+  3) Driver cannot use Run Action
+
+|wInterface Plugs|n:
+- With plugs, you can drive hands-free.
+- Without plugs, one hand must remain on controls.
+- If you remove that hand, at start of your next Turn you Lose Control.
+
+# Basic driving and maneuvers
+
+Basic driving needs no Check if |wREF + control skill > 9|n.
+Otherwise, each Turn requires an Action and DV10 check:
+|wREF + relevant control skill + 1d10|n.
+Failure = Lose Control.
+
+Maneuvers require both Action and Move Action.
+Failure = Lose Control.
+
+Common maneuver DVs:
+- Swerve: 13
+- Sharp Turn: 13
+- Emergency Stop: 13
+- Bootleg Turn: 17
+- Jump: 17
+- Landing (air vehicle): 13
+- Aerobatic Maneuver (air vehicle): 17
+
+# Losing control and ramming
+
+If you lose control, GM determines your movement for that Turn.
+If you impact something, resolve as a ram.
+
+Ramming deals |w6d6|n to:
+- your vehicle, and
+- the impacted pedestrian/cover/vehicle.
+
+Everyone involved suffers |wWhiplash|n Critical Injury.
+
+If impacted cover/vehicle is reduced to 0 HP, movement can continue.
+Otherwise movement stops.
+
+Pedestrians can attempt to dodge a ramming vehicle at:
+|wDV13 (DEX + Evasion + 1d10)|n.
+        """,
+    },
 ]
+
+
+def _build_unified_voucher_help_entry():
+    """Single authoritative voucher help entry (replaces voucher2-5 pages)."""
+    return {
+        "key": "voucher",
+        "aliases": ["vouchers", "vinfo", "voucher2", "voucher3", "voucher4", "voucher5"],
+        "category": "Inventory",
+        "text": """
+Vouchers are physical IC objects that store one or more item entries. You can carry, drop,
+lock, conceal, rename, split, merge, and transfer ownership just like before.
+
+Typed voucher items now integrate with standard inventory:
+* weapon, armor, gear, cyberware, ammunition, vehicle
+* claimed items become normal inventory objects and work with existing systems
+
+# Core usage
+
+|w+voucher|n
+  List vouchers you are carrying.
+
+|w+voucher/info <voucher>|n
+|w+voucher/info <voucher>/<item#>|n
+  View voucher contents or item details.
+
+|w+voucher/use <voucher>/<item#>[:<qty>]|n
+  For typed items: claim into normal inventory.
+  For untyped items: consume/remove quantity from voucher.
+
+|w+voucher/withdraw <voucher>/<item#>[:<qty>]|n
+  Explicitly claim typed voucher items into inventory models.
+
+# Item and voucher management
+
+|w+voucher/alias <voucher>=<alias>|n
+|w+voucher/lock <voucher>|n / |w+voucher/unlock <voucher>|n
+|w+voucher/loc <voucher>/<item#>=<ic location>|n
+|w+voucher/chown <voucher>=<player>|n
+|w+voucher/rename <voucher>=<new name>|n
+|w+voucher/nuke <voucher>|n
+|w+voucher/move <voucher>/<item#>[:<qty>]=<newvoucher>|n
+|w+voucher/join <voucher1>=<voucher2>|n
+|w+voucher/split <voucher>/<item#>[:<qty>]|n
+|w+voucher/cloneitem <voucher>/<item#>[:<qty>]|n
+
+# Creating and editing vouchers
+
+|w+voucher/create [name]|n
+  Create an empty voucher.
+
+|w+voucher/add <voucher>=<item name>|n
+  Add an item from your inventory to a voucher.
+
+|w+voucher/add <voucher>=<type>/<name>|n  (staff)
+  Create a typed custom voucher item.
+
+|w+voucher/setstat <voucher>/<item#>=<field>=<value>|n  (staff)
+  Set type-specific stats/fields.
+
+# Integration notes
+
+* Claimed weapons/armor can be equipped and used by attack commands.
+* Claimed equipment appears in HUD and standard inventory views.
+* Claimed cyberware is installable via |wcyberware/install|n.
+* |wattack/reload|n can consume matching ammo from vouchers when inventory ammo is low.
+* Deck/program/deck-option voucher items work through normal inventory/netrunning paths once claimed.
+
+See also:
+|w+help owner|n, |w+help equip|n, |w+help cyberware|n, |w+help deck|n
+        """,
+    }
+
+
+def _consolidate_voucher_help_entries(entries):
+    """
+    Consolidate legacy paginated voucher entries into one authoritative entry.
+    Keeps non-voucher entries in original order.
+    """
+    voucher_keys = {"voucher", "voucher2", "voucher3", "voucher4", "voucher5"}
+    first_idx = None
+    filtered = []
+    for idx, entry in enumerate(entries):
+        key = (entry.get("key") or "").strip().lower()
+        if key in voucher_keys:
+            if first_idx is None:
+                first_idx = len(filtered)
+            continue
+        filtered.append(entry)
+
+    insert_at = first_idx if first_idx is not None else len(filtered)
+    filtered.insert(insert_at, _build_unified_voucher_help_entry())
+    return filtered
+
+
+HELP_ENTRY_DICTS = _consolidate_voucher_help_entries(HELP_ENTRY_DICTS)

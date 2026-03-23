@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Voucher item serialization and display utilities.
+Voucher item serialization, validation, and inventory integration utilities.
 Formats voucher items to match +inventory, +cyberware, and +equipdb displays.
 """
 from world.utils.formatting import sheet_header, sheet_section, footer
@@ -13,14 +13,25 @@ ITEM_TYPES = ("weapon", "armor", "gear", "cyberware", "ammunition", "vehicle")
 # Gear includes optional armor-like fields (sp, ev, locations) for armor items added as gear
 ITEM_TYPE_FIELDS = {
     "weapon": ["name", "description", "weight", "value", "damage", "rof", "hands", "concealable",
-               "category", "ammo_type", "current_ammo", "max_ammo", "clip"],
+               "category", "weapon_type", "quality", "ammo_type", "current_ammo", "max_ammo", "clip", "jammed", "range_dvs"],
     "armor": ["name", "description", "weight", "value", "sp", "ev", "locations"],
     "gear": ["name", "description", "weight", "value", "category", "sp", "ev", "locations"],
     "cyberware": ["name", "description", "cost", "humanity_loss", "type", "slots", "is_weapon",
-                  "damage_dice", "damage_die_type", "rate_of_fire"],
+                  "damage_dice", "damage_die_type", "rate_of_fire", "skill_chip_target"],
     "ammunition": ["name", "ammo_type", "quantity", "cost", "weapon_type", "damage_modifier",
                    "armor_piercing", "description"],
     "vehicle": ["name", "description", "category", "sdp", "seats", "speed_combat", "speed_narrative", "value"],
+}
+
+INT_FIELDS = {
+    "quantity", "weight", "value", "sp", "ev", "cost", "humanity_loss", "slots", "hands",
+    "current_ammo", "max_ammo", "clip", "damage_dice", "damage_die_type", "rate_of_fire",
+    "damage_modifier", "armor_piercing", "sdp", "seats", "speed_combat",
+}
+BOOL_FIELDS = {"concealable", "is_weapon", "jammed"}
+STRING_FIELDS = {
+    "name", "description", "category", "weapon_type", "quality", "ammo_type", "locations",
+    "type", "speed_narrative", "skill_chip_target",
 }
 
 
@@ -28,8 +39,8 @@ def _blank_item_data_for_type(item_type, name):
     """Return default/empty item_data dict for staff-created custom items."""
     if item_type == "weapon":
         return {"name": name, "description": "", "weight": 0, "value": 0, "damage": "", "rof": "",
-                "hands": 1, "concealable": False, "category": "", "ammo_type": "", "current_ammo": 0,
-                "max_ammo": 0, "clip": 0, "range_dvs": {}}
+                "hands": 1, "concealable": False, "category": "", "weapon_type": "", "quality": "standard",
+                "ammo_type": "", "current_ammo": 0, "max_ammo": 0, "clip": 0, "jammed": False, "range_dvs": {}}
     if item_type == "armor":
         return {"name": name, "description": "", "weight": 0, "value": 0, "sp": 0, "ev": 0, "locations": ""}
     if item_type == "gear":
@@ -37,7 +48,7 @@ def _blank_item_data_for_type(item_type, name):
                 "sp": 0, "ev": 0, "locations": ""}
     if item_type == "cyberware":
         return {"name": name, "description": "", "cost": 0, "humanity_loss": 0, "type": "", "slots": 1,
-                "is_weapon": False, "damage_dice": 0, "damage_die_type": 6, "rate_of_fire": 1}
+                "is_weapon": False, "damage_dice": 0, "damage_die_type": 6, "rate_of_fire": 1, "skill_chip_target": ""}
     if item_type == "ammunition":
         return {"name": name, "ammo_type": "", "quantity": 1, "cost": 0, "weapon_type": "",
                 "damage_modifier": 0, "armor_piercing": 0, "description": ""}
@@ -59,10 +70,13 @@ def serialize_weapon(weapon):
         "hands": weapon.hands,
         "concealable": weapon.concealable,
         "category": weapon.category or "",
+        "weapon_type": getattr(weapon, "weapon_type", "") or "",
+        "quality": getattr(weapon, "quality", "standard") or "standard",
         "ammo_type": weapon.ammo_type or "",
         "current_ammo": weapon.current_ammo,
         "max_ammo": weapon.max_ammo,
         "clip": weapon.clip,
+        "jammed": getattr(weapon, "jammed", False),
         "range_dvs": getattr(weapon, "range_dvs", None) or {},
     }
 
@@ -104,7 +118,92 @@ def serialize_cyberware(cyberware):
         "damage_dice": getattr(cyberware, "damage_dice", 0) or 0,
         "damage_die_type": getattr(cyberware, "damage_die_type", 6) or 6,
         "rate_of_fire": getattr(cyberware, "rate_of_fire", 1) or 1,
+        "skill_chip_target": getattr(cyberware, "skill_chip_target", "") or "",
     }
+
+
+def _coerce_field(field, value):
+    """Coerce voucher field values to stable scalar types."""
+    if value is None:
+        if field in INT_FIELDS:
+            return 0
+        if field in BOOL_FIELDS:
+            return False
+        return ""
+    if field in BOOL_FIELDS:
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in ("1", "true", "yes", "y", "on")
+    if field in INT_FIELDS:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+    if field in STRING_FIELDS:
+        return str(value)
+    return value
+
+
+def normalize_voucher_item(item):
+    """
+    Normalize a voucher item dict to the canonical voucher schema.
+    Returns a new dict safe to persist.
+    """
+    item = dict(item or {})
+    item_type = (item.get("item_type") or "").strip().lower()
+    if item_type not in ITEM_TYPES:
+        item_type = ""
+    name = (item.get("name") or "").strip() or "item"
+    desc = item.get("description", "")
+    item_data = dict(item.get("item_data") or {})
+    quantity = _coerce_field("quantity", item.get("quantity", 1))
+    if quantity < 1:
+        quantity = 1
+
+    if item_type:
+        defaults = _blank_item_data_for_type(item_type, name)
+        allowed = ITEM_TYPE_FIELDS.get(item_type, [])
+        normalized_data = {}
+        for field in allowed:
+            raw = item_data.get(field, defaults.get(field))
+            normalized_data[field] = _coerce_field(field, raw)
+        normalized_data["name"] = normalized_data.get("name") or name
+        if "description" in defaults:
+            normalized_data["description"] = normalized_data.get("description", desc or "")
+        # Keep quantity mirrored in ammo payload for compatibility with old views/consumers
+        if item_type == "ammunition":
+            normalized_data["quantity"] = max(1, _coerce_field("quantity", normalized_data.get("quantity", quantity)))
+            quantity = normalized_data["quantity"]
+        if item_type == "weapon":
+            # Keep clip/max/current coherent
+            clip = max(0, normalized_data.get("clip", 0))
+            max_ammo = max(clip, normalized_data.get("max_ammo", 0))
+            current = max(0, normalized_data.get("current_ammo", 0))
+            normalized_data["clip"] = clip
+            normalized_data["max_ammo"] = max_ammo
+            normalized_data["current_ammo"] = min(current, max_ammo) if max_ammo else current
+            quality = (normalized_data.get("quality") or "standard").strip().lower()
+            if quality not in ("poor", "standard", "excellent"):
+                quality = "standard"
+            normalized_data["quality"] = quality
+        item_data = normalized_data
+        name = item_data.get("name", name)
+        desc = item_data.get("description", desc)
+
+    return {
+        "name": name,
+        "description": desc or "",
+        "quantity": quantity,
+        "ic_location": (item.get("ic_location") or "")[:20],
+        "cloneable": bool(item.get("cloneable", False)),
+        "item_type": item_type,
+        "item_data": item_data,
+    }
+
+
+def normalize_voucher_items(items):
+    """Normalize a list of voucher item dicts."""
+    return [normalize_voucher_item(it) for it in (items or []) if isinstance(it, dict)]
 
 
 def serialize_ammunition(ammo):
@@ -351,3 +450,265 @@ def remove_voucher_duplicates_from_inventory(character, voucher):
         character.msg(
             f"Removed from your inventory (now in voucher): {', '.join(set(removed))}"
         )
+
+
+def _get_inventory_for_character(character):
+    """Return (sheet, inventory) or (None, None)."""
+    from world.utils.character_utils import get_character_sheet
+    from world.inventory.models import Inventory
+
+    sheet = get_character_sheet(character)
+    if not sheet:
+        return None, None
+    try:
+        inventory, _ = Inventory.get_or_create_for_character(character)
+    except (ValueError, AttributeError):
+        return None, None
+    return sheet, inventory
+
+
+def _withdraw_one_typed_item(character, voucher_item):
+    """
+    Create one concrete inventory item from a voucher entry.
+    Returns (ok: bool, message: str).
+    """
+    from world.inventory.models import Weapon, Armor, Gear, Ammunition, Vehicle, CyberwareInstance
+    from world.cyberware.models import Cyberware
+
+    voucher_item = normalize_voucher_item(voucher_item)
+    item_type = (voucher_item.get("item_type") or "").lower()
+    data = voucher_item.get("item_data") or {}
+    name = voucher_item.get("name", "item")
+
+    if not item_type:
+        return False, "That item is not typed and cannot be claimed into inventory."
+
+    sheet, inv = _get_inventory_for_character(character)
+    if not sheet or not inv:
+        return False, "You do not have a valid character inventory."
+
+    if item_type == "weapon":
+        weapon = Weapon.objects.create(
+            name=data.get("name") or name,
+            description=data.get("description", ""),
+            weight=data.get("weight", 0),
+            value=data.get("value", 0),
+            damage=data.get("damage", ""),
+            rof=data.get("rof", ""),
+            hands=max(1, data.get("hands", 1)),
+            concealable=bool(data.get("concealable", False)),
+            category=(data.get("category") or "handgun"),
+            weapon_type=data.get("weapon_type", "") or "",
+            quality=(data.get("quality") or "standard"),
+            ammo_type=(data.get("ammo_type") or "Basic"),
+            current_ammo=max(0, data.get("current_ammo", 0)),
+            max_ammo=max(0, data.get("max_ammo", 0)),
+            clip=max(0, data.get("clip", 0)),
+            range_dvs=data.get("range_dvs") or {},
+            jammed=bool(data.get("jammed", False)),
+        )
+        inv.weapons.add(weapon)
+        return True, f"Claimed weapon: {weapon.name}."
+
+    if item_type == "armor":
+        armor = Armor.objects.create(
+            name=data.get("name") or name,
+            description=data.get("description", ""),
+            weight=data.get("weight", 0),
+            value=data.get("value", 0),
+            sp=data.get("sp", 0),
+            ev=data.get("ev", 0),
+            locations=data.get("locations", ""),
+        )
+        inv.armor.add(armor)
+        return True, f"Claimed armor: {armor.name}."
+
+    if item_type == "gear":
+        gear = Gear.objects.create(
+            name=data.get("name") or name,
+            description=data.get("description", ""),
+            weight=data.get("weight", 0),
+            value=data.get("value", 0),
+            category=data.get("category", "") or "Misc",
+        )
+        inv.add_gear(gear)
+        return True, f"Claimed gear: {gear.name}."
+
+    if item_type == "ammunition":
+        ammo_name = data.get("name") or name
+        ammo_type = data.get("ammo_type") or "Basic"
+        weapon_type = data.get("weapon_type") or "Generic"
+        ammo = inv.ammunition.filter(
+            name__iexact=ammo_name,
+            ammo_type=ammo_type,
+            weapon_type=weapon_type,
+            damage_modifier=data.get("damage_modifier", 0),
+            armor_piercing=data.get("armor_piercing", 0),
+        ).first()
+        if ammo:
+            ammo.quantity += 1
+            ammo.save()
+        else:
+            ammo = Ammunition.objects.create(
+                name=ammo_name,
+                ammo_type=ammo_type,
+                quantity=1,
+                cost=data.get("cost", 0),
+                weapon_type=weapon_type,
+                damage_modifier=data.get("damage_modifier", 0),
+                armor_piercing=data.get("armor_piercing", 0),
+                description=data.get("description", "") or "Standard ammunition",
+            )
+            inv.ammunition.add(ammo)
+        return True, f"Claimed ammunition: {ammo.name} ({ammo.ammo_type})."
+
+    if item_type == "vehicle":
+        vehicle = Vehicle.objects.create(
+            name=data.get("name") or name,
+            description=data.get("description", ""),
+            category=(data.get("category") or "land"),
+            sdp=max(0, data.get("sdp", 35)),
+            seats=max(1, data.get("seats", 1)),
+            speed_combat=max(0, data.get("speed_combat", 0)),
+            speed_narrative=data.get("speed_narrative", ""),
+            value=data.get("value", 0),
+        )
+        inv.vehicles.add(vehicle)
+        return True, f"Claimed vehicle: {vehicle.name}."
+
+    if item_type == "cyberware":
+        cyberware_name = data.get("name") or name
+        cyberware, _ = Cyberware.objects.get_or_create(
+            name=cyberware_name,
+            defaults={
+                "description": data.get("description", "") or "",
+                "cost": data.get("cost", 0),
+                "humanity_loss": data.get("humanity_loss", 0),
+                "type": data.get("type", "") or "Neuralware",
+                "slots": max(1, data.get("slots", 1)),
+                "is_weapon": bool(data.get("is_weapon", False)),
+                "damage_dice": max(0, data.get("damage_dice", 0)),
+                "damage_die_type": max(1, data.get("damage_die_type", 6)),
+                "rate_of_fire": max(1, data.get("rate_of_fire", 1)),
+                "skill_chip_target": data.get("skill_chip_target", "") or "",
+            },
+        )
+        char_obj_id = getattr(character, "id", None) or getattr(character, "pk", None)
+        instance = CyberwareInstance.objects.create(
+            cyberware=cyberware,
+            character_sheet=sheet,
+            character_object_id=char_obj_id,
+            installed=False,
+            active=False,
+        )
+        inv.cyberware.add(instance)
+        return True, f"Claimed cyberware: {cyberware.name} (uninstalled)."
+
+    return False, f"Unsupported voucher item type: {item_type}."
+
+
+def claim_voucher_item_to_inventory(character, voucher, item_number, quantity=1):
+    """
+    Claim voucher item(s) into character inventory as concrete models.
+    Returns (ok: bool, message: str).
+    """
+    if not voucher or not hasattr(voucher, "get_item_by_num"):
+        return False, "Invalid voucher."
+    item, idx = voucher.get_item_by_num(item_number)
+    if not item:
+        return False, f"No such item #{item_number}."
+
+    item = normalize_voucher_item(item)
+    item_type = (item.get("item_type") or "").lower()
+    if not item_type:
+        return False, "That item is not typed and cannot be claimed into inventory."
+
+    have = max(1, int(item.get("quantity", 1)))
+    take = max(1, int(quantity or 1))
+    take = min(take, have)
+
+    claimed = 0
+    last_msg = ""
+    for _ in range(take):
+        ok, msg = _withdraw_one_typed_item(character, item)
+        if not ok:
+            if claimed == 0:
+                return False, msg
+            break
+        claimed += 1
+        last_msg = msg
+
+    if claimed == 0:
+        return False, "Could not claim that voucher item."
+
+    items = voucher.get_items()
+    if claimed >= have:
+        items.pop(idx - 1)
+    else:
+        updated = dict(item)
+        updated["quantity"] = have - claimed
+        if item_type == "ammunition":
+            data = dict(updated.get("item_data") or {})
+            data["quantity"] = updated["quantity"]
+            updated["item_data"] = data
+        items[idx - 1] = updated
+    voucher.set_items(normalize_voucher_items(items))
+
+    base = item.get("name", "?")
+    if claimed == 1:
+        return True, last_msg or f"Claimed {base}."
+    return True, f"Claimed {claimed} x {base} into your inventory."
+
+
+def consume_ammo_from_vouchers(character, ammo_type, amount):
+    """
+    Consume matching ammunition directly from carried vouchers.
+    Returns integer rounds consumed.
+    """
+    if not character or amount <= 0:
+        return 0
+    ammo_type = (ammo_type or "Basic").strip().lower()
+    remaining = amount
+    consumed = 0
+
+    for obj in list(getattr(character, "contents", []) or []):
+        if remaining <= 0:
+            break
+        if not obj.is_typeclass("typeclasses.vouchers.Voucher"):
+            continue
+        if not hasattr(obj, "get_items"):
+            continue
+        changed = False
+        items = normalize_voucher_items(obj.get_items())
+        i = 0
+        while i < len(items):
+            if remaining <= 0:
+                break
+            it = items[i]
+            if (it.get("item_type") or "").lower() != "ammunition":
+                i += 1
+                continue
+            data = it.get("item_data") or {}
+            it_ammo_type = (data.get("ammo_type") or "").strip().lower()
+            if it_ammo_type != ammo_type:
+                i += 1
+                continue
+            qty = max(1, int(it.get("quantity", 1)))
+            take = min(qty, remaining)
+            remaining -= take
+            consumed += take
+            changed = True
+            if take >= qty:
+                items.pop(i)
+            else:
+                it["quantity"] = qty - take
+                data = dict(data)
+                data["quantity"] = it["quantity"]
+                it["item_data"] = data
+                items[i] = it
+                i += 1
+        if changed:
+            obj.set_items(normalize_voucher_items(items))
+            if hasattr(obj, "is_empty") and obj.is_empty():
+                obj.delete()
+    return consumed

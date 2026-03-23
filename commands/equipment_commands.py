@@ -12,6 +12,7 @@ from world.utils.ansi_utils import wrap_ansi
 from world.utils.formatting import header, footer, divider, section_header
 from .list_commands import _find_item_info, format_item_info, try_resolve_equipdb_catalog_name
 from world.cyberware.utils import populate_cyberware
+from world.netrunning.deckoptions import programs as NETRUN_PROGRAMS
 from evennia.utils.ansi import ANSIString
 from evennia.utils import evtable
 from math import ceil
@@ -404,12 +405,19 @@ def _match_subcategory(user_input, valid_subcategories):
     return None
 
 
+def _is_exotic_weapon(weapon_obj):
+    """Best-effort exotic classifier from weapon description text."""
+    desc = (getattr(weapon_obj, "description", "") or "").lower()
+    return "exotic" in desc
+
+
 def _get_equipdb_subcategories():
     """Return dict of main_category -> sorted list of subcategories from DB."""
     result = {
         "weapons": [],
         "armor": [],
         "gear": [],
+        "programs": [],
         "ammo": [],
         "cyberdecks": [],
         "cyberware": [],
@@ -422,6 +430,8 @@ def _get_equipdb_subcategories():
     for wt in Weapon.objects.exclude(weapon_type="").values_list("weapon_type", flat=True).distinct():
         if wt and wt not in result["weapons"]:
             result["weapons"].append(wt)
+    if Weapon.objects.filter(description__icontains="exotic").exists():
+        result["weapons"].append("exotic")
     for loc_str in Armor.objects.values_list("locations", flat=True):
         for loc in (loc_str or "").split(","):
             loc = loc.strip()
@@ -430,9 +440,14 @@ def _get_equipdb_subcategories():
     for cat in Gear.objects.values_list("category", flat=True).distinct():
         if cat and cat != "Cyberware":
             result["gear"].append(cat)
+    for prog in NETRUN_PROGRAMS:
+        prog_type = (prog.get("type") or "").strip()
+        if prog_type:
+            result["programs"].append(prog_type)
     if Cyberdeck.objects.exists():
         result["gear"].append("Cyberdeck")
     result["gear"] = sorted(set(result["gear"]))
+    result["programs"] = sorted(set(result["programs"]))
     for at in Ammunition.objects.values_list("ammo_type", flat=True).distinct():
         if at:
             result["ammo"].append(at)
@@ -458,14 +473,16 @@ class CmdViewEquipment(MuxCommand):
       equipdb                    - Show category menu (like list chargen)
       equipdb [type [category]]
       equipdb weapons [handgun|shoulder_arms|archery|heavy_weapons|melee|brawling]
+      equipdb weapons exotic      - Show all exotic weapons
       equipdb gear [Electronics|Tools|Medical|Drugs|Clothing|...]
+      equipdb programs [booster|defender|attacker]
       equipdb vehicles [land|sea|air]
       equipdb medical            - Gear in Medical category (subcategory shorthand)
       equipdb list [type [category]]  - Same as above (list/list gear/list gear medical)
       equipdb/search <string>    - Search all equipment by name, category, or description
       equipdb/info <item>       - Detailed info on a specific item (like +lookup/info)
 
-    Types: weapons, armor, gear, ammo, cyberdecks, cyberware, vehicles, attachments
+    Types: weapons, armor, gear, programs, ammo, cyberdecks, cyberware, vehicles, attachments
     Use |wequipdb|n alone to see available categories and subcategories.
     Subcategories with underscores (e.g. heavy_weapons) accept spaces or first word: heavy weapons, heavy
     """
@@ -476,7 +493,7 @@ class CmdViewEquipment(MuxCommand):
     help_category = "Inventory"
 
     def func(self):
-        valid_types = ['weapons', 'armor', 'gear', 'cyberware', 'ammo', 'cyberdecks', 'vehicles', 'attachments']
+        valid_types = ['weapons', 'armor', 'gear', 'programs', 'cyberware', 'ammo', 'cyberdecks', 'vehicles', 'attachments']
         subcats = _get_equipdb_subcategories()
 
         # equipdb/search <string> - search across all equipment
@@ -514,6 +531,11 @@ class CmdViewEquipment(MuxCommand):
                 subcategory = sub_parts[1] if len(sub_parts) > 1 else None
             else:
                 equip_type = None
+
+        # Shorthand: equipdb/list exotic -> equipdb weapons exotic
+        if equip_type == "exotic" and not subcategory:
+            equip_type = "weapons"
+            subcategory = "exotic"
 
         # Resolve subcategory-only: "equipdb medical" -> gear medical
         if equip_type and equip_type not in valid_types and not subcategory:
@@ -600,17 +622,20 @@ class CmdViewEquipment(MuxCommand):
             else:
                 output.append(f"  |y{t.title()}|n: |w{t}|n")
         output.append("")
-        output.append("Examples: |wequipdb gear|n  |wequipdb cyberware|n  |wequipdb/search pistol|n  |wequipdb/info Medium Pistol|n")
+        output.append("Examples: |wequipdb gear|n  |wequipdb programs booster|n  |wequipdb/search pistol|n  |wequipdb/info Medium Pistol|n")
         output.append(footer())
         self.caller.msg("\n".join(output))
 
     def display_weapons(self, subcategory=None):
         qs = Weapon.objects.all().order_by('category', 'name')
         if subcategory:
-            qs = qs.filter(
-                models.Q(category__iexact=subcategory) |
-                models.Q(weapon_type__iexact=subcategory)
-            )
+            if str(subcategory).lower() == "exotic":
+                qs = qs.filter(description__icontains="exotic")
+            else:
+                qs = qs.filter(
+                    models.Q(category__iexact=subcategory) |
+                    models.Q(weapon_type__iexact=subcategory)
+                )
         weapons = list(qs)
         if not weapons:
             return section_header("Weapons", width=78) + "\nNo weapons found.\n"
@@ -619,7 +644,8 @@ class CmdViewEquipment(MuxCommand):
             nm = crop(w.name, width=28, suffix="...")
             wt = getattr(w, 'weapon_type', '') or ''
             qual = getattr(w, 'quality', 'standard') or 'standard'
-            out.append(f"|c{nm:<28}|n |gDamage:|n {w.damage:<8} |gROF:|n {w.rof:<4} |gHands:|n {w.hands} |gValue:|n |y{w.value} eb|n")
+            exotic_tag = " |m[EXOTIC]|n" if _is_exotic_weapon(w) else ""
+            out.append(f"|c{nm:<28}|n{exotic_tag} |gDamage:|n {w.damage:<8} |gROF:|n {w.rof:<4} |gHands:|n {w.hands} |gValue:|n |y{w.value} eb|n")
             out.append(f"  |gType:|n {(wt or w.category):<16} |gQuality:|n {qual:<10} |gConceal:|n {'Yes' if w.concealable else 'No'} |gWeight:|n {w.weight}")
         out.append(divider("", width=78))
         return "\n".join(out) + "\n"
@@ -651,6 +677,29 @@ class CmdViewEquipment(MuxCommand):
             out.append(f"|c{nm:<28}|n |gCategory:|n {g.category:<14} |gValue:|n |y{g.value} eb|n")
             desc = wrap_ansi(g.description, 74) if g.description else "-"
             out.append(f"  {desc}")
+        out.append(divider("", width=78))
+        return "\n".join(out) + "\n"
+
+    def display_programs(self, subcategory=None):
+        rows = list(NETRUN_PROGRAMS)
+        if subcategory:
+            sub_lower = subcategory.lower()
+            rows = [p for p in rows if (p.get("type") or "").lower() == sub_lower]
+        rows.sort(key=lambda p: ((p.get("type") or "").lower(), (p.get("name") or "").lower()))
+        if not rows:
+            return section_header("Netrunning Programs", width=78) + "\nNo programs found.\n"
+        out = [section_header("Netrunning Programs", width=78)]
+        for p in rows:
+            nm = crop(p.get("name", "?"), width=28, suffix="...")
+            ptype = p.get("type", "-")
+            atk = int(p.get("atk", 0) or 0)
+            dfv = int(p.get("dfv", 0) or 0)
+            rez = int(p.get("rez", 0) or 0)
+            cost = int(p.get("cost", 0) or 0)
+            out.append(f"|c{nm:<28}|n |gType:|n {ptype:<24} |gATK/DFV/REZ:|n {atk}/{dfv}/{rez} |gCost:|n |y{cost} eb|n")
+            effect = p.get("effect")
+            if effect:
+                out.append(f"  {wrap_ansi(effect, 74)}")
         out.append(divider("", width=78))
         return "\n".join(out) + "\n"
 
@@ -785,6 +834,26 @@ def format_search_equipment(search_str, chargen_only=False):
         for g in gears:
             nm = crop(g.name, width=28, suffix="...")
             output.append(f"|c{nm:<28}|n |gCategory:|n {g.category:<14} |gValue:|n |y{g.value} eb|n")
+        output.append("")
+
+    # Netrunning programs
+    program_matches = []
+    for prog in NETRUN_PROGRAMS:
+        name = prog.get("name", "")
+        ptype = prog.get("type", "")
+        effect = prog.get("effect", "")
+        if q in str(name).lower() or q in str(ptype).lower() or q in str(effect).lower():
+            if not chargen_only or int(prog.get("cost", 0) or 0) <= CHARGEN_MAX:
+                program_matches.append(prog)
+    if program_matches:
+        output.append(section_header("Netrunning Programs", width=78))
+        for p in sorted(program_matches, key=lambda row: ((row.get("type") or "").lower(), (row.get("name") or "").lower()))[:50]:
+            nm = crop(p.get("name", "?"), width=28, suffix="...")
+            output.append(
+                f"|c{nm:<28}|n |gType:|n {str(p.get('type', '-')):<24} "
+                f"|gATK/DFV/REZ:|n {int(p.get('atk', 0) or 0)}/{int(p.get('dfv', 0) or 0)}/{int(p.get('rez', 0) or 0)} "
+                f"|gCost:|n |y{int(p.get('cost', 0) or 0)} eb|n"
+            )
         output.append("")
 
     # Cyberware

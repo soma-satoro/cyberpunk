@@ -437,6 +437,7 @@ class CmdBuy(MuxCommand):
                 self.caller.msg(
                     "Usage: buy <item name> - Purchase equipment (weapons, armor, gear, cyberdecks). "
                     "Use buy/cyberware <name> for body cyberware. "
+                    "Use +net/buy <program or Black ICE> (buy/program) for net programs. "
                     "Use buy/cyberware pair=Cybereye Cybereye for paired limbs. "
                     "Use buy/cyberware parent=<option>/<parent> to attach options to a limb. "
                     "Use 'list chargen/weapons', 'list chargen/armor', 'list chargen/gear', "
@@ -446,6 +447,7 @@ class CmdBuy(MuxCommand):
                 self.caller.msg(
                     "Usage: buy <item name> - Purchase from this vendor. "
                     "Use buy/cyberware <name> for cyberware. "
+                    "Use +net/buy <program or Black ICE> (buy/program) for net programs. "
                     "Use buy/cyberware pair=Cybereye Cybereye for paired limbs. "
                     "Use buy/cyberware parent=<option>/<parent> to attach options to a limb. "
                     "Use 'list' to see available items."
@@ -2516,13 +2518,24 @@ class CmdHaggle(Command):
             self.caller.msg(f"You don't have an item named '{item_name}' in your inventory.")
             return
 
-        # Get character's cool and trading skill values
+        # Get character's COOL and Trading values
         cool = merchant.get_character_cool(self.caller)
         trading = merchant.get_character_trading_skill(self.caller)
+        try:
+            from world.improvement_points import get_character_stat_value
+            operator_rank = int(get_character_stat_value(self.caller, "operator") or 0)
+        except Exception:
+            operator_rank = 0
 
-        from world.utils.roll_utils import roll_skill_check, check_success
+        # Merchant-side opposed values (defaults to fixed baseline if merchant has no explicit sheet stats)
+        merchant_cool = int(getattr(merchant.db, "cool", 6) or 6)
+        merchant_trading = int(getattr(merchant.db, "trading", 6) or 6)
+        merchant_operator = int(getattr(merchant.db, "operator", 0) or 0)
 
-        total, details = roll_skill_check(cool, trading)
+        from world.utils.roll_utils import roll_skill_check
+
+        total, details = roll_skill_check(cool, trading + operator_rank)
+        merchant_total, _ = roll_skill_check(merchant_cool, merchant_trading + merchant_operator)
         first_roll = details.get("first_roll", 0)
 
         # Determine the result (DV 14 for success = total > 13)
@@ -2534,8 +2547,10 @@ class CmdHaggle(Command):
         elif first_roll == 10:  # Critical success (natural 10)
             price_multiplier = 1.75
             self.caller.msg("Critical success! The merchant is impressed by your negotiation skills.")
-        elif check_success(total, 13):  # Success = total exceeds 13 (i.e. total >= 14)
-            price_multiplier = 1.25
+        elif total > merchant_total:
+            # Operator can improve this result slightly when selling.
+            operator_bump = min(0.20, operator_rank * 0.01)
+            price_multiplier = 1.25 + operator_bump
             self.caller.msg("Success! You've negotiated a better price.")
         else:  # Failure
             price_multiplier = 1.0

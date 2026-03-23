@@ -17,8 +17,8 @@ own cmdsets by inheriting from them or directly from `evennia.CmdSet`.
 """
 
 from evennia import default_cmds, CmdSet
-from .character_commands import CmdSheet, CmdRoll, CmdLuck, CmdShortDesc, CmdPlusOoc, CmdPlusIc, CmdMeet
-from .chargen import CmdChargen, CmdListCharacterSheets, CmdLifepath, CmdSelfStat, CmdSetLanguage, CmdSellYourSoul
+from .character_commands import CmdSheet, CmdRoll, CmdAwareness, CmdLuck, CmdShortDesc, CmdPlusOoc, CmdPlusIc, CmdMeet
+from .chargen import CmdChargen, CmdListCharacterSheets, CmdLifepath, CmdSelfStat, CmdSetLanguage, CmdSellYourSoul, CmdSetSellYourSoul
 from .admin_commands import CmdStat, CmdHeal, CmdHarm, CmdApprove, CmdUnapprove, CmdSetStoryteller, CmdSpawnRipperdoc, CmdGradientName, CmdClearAllStates, CmdClearRental, CmdCleanupDuplicates, CmdExamine, CmdAssociateAllCharacterSheets, CmdViewCharacterSheetID, CmdSetCharacterSheetID, CmdAllSheets, CmdViewSheetAttributes, CmdSyncLanguages, CmdJoin, CmdSummon, CmdClearDb
 from .inventory_commands import CmdInventory, CmdWear, CmdEquipWeapon
 from .voucher_commands import CmdVoucher, CmdConceal, CmdOwner
@@ -53,7 +53,7 @@ from .deck_commands import CmdDeck
 from .netrun_admin_commands import CmdArchitecture
 from .combat_system import CmdCombat
 from .initiative_commands import CmdInitiative
-from .attack_commands import CmdAttack, CmdDodge, CmdDeathSave, CmdCover, CmdHud
+from .attack_commands import CmdAttack, CmdDodge, CmdDeathSave, CmdCover, CmdHud, CmdShield, CmdGrab, CmdMartial, CmdFacedown, CmdGetUp
 from .repair_commands import CmdRepair, CmdJuryrig, CmdArmorStaff
 from .treat_commands import CmdTreat
 from .health_commands import CmdHealth
@@ -85,6 +85,7 @@ from .dice_commands import CmdDice
 from .npc_commands import CmdNpc
 from .elflines_commands import CmdElo, CmdElfline, CmdEloSetup
 from .help_commands import CmdHelpSearch
+from .role_ability_commands import CmdBackup, CmdImpact, CmdScoop
 
 from commands.bbs.bbs_admin_commands import CmdResetBBS
 
@@ -117,6 +118,10 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdSheet())
         self.add(CmdSelfStat())
         self.add(CmdRoll())
+        self.add(CmdAwareness())
+        self.add(CmdBackup())
+        self.add(CmdImpact())
+        self.add(CmdScoop())
         self.add(CmdLifepath())
         self.add(CmdLuck())
         self.add(CmdInventory())
@@ -147,6 +152,11 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdDeathSave())
         self.add(CmdCover())
         self.add(CmdHud())
+        self.add(CmdShield())
+        self.add(CmdGrab())
+        self.add(CmdMartial())
+        self.add(CmdFacedown())
+        self.add(CmdGetUp())
         self.add(CmdEquipWeapon())
         self.add(CmdAlts())
         self.add(CmdEmit())
@@ -281,6 +291,7 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdGradientName())
         self.add(CmdClearAllStates())
         self.add(CmdListCharacterSheets())
+        self.add(CmdSetSellYourSoul())
         self.add(CmdHeal())
         self.add(CmdHarm())
         self.add(CmdClearRental())

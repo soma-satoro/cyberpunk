@@ -463,10 +463,16 @@ class CmdSheet(MuxCommand):
         sheet = target.character_sheet if hasattr(target, 'character_sheet') and target.character_sheet else None
         if sheet and getattr(sheet, 'sell_your_soul', False):
             output += sheet_section("Sell Your Soul", width=W)
+            employer_type = getattr(sheet, 'sell_your_soul_employer_type', '') or "Unknown"
             employer = getattr(sheet, 'sell_your_soul_employer', '') or "Unknown"
             catch = getattr(sheet, 'sell_your_soul_catch', '') or "Unknown"
+            consequences = getattr(sheet, 'sell_your_soul_consequences', '') or "Unknown"
+            service = getattr(sheet, 'sell_your_soul_service', '') or "Unknown"
+            output += f"|yType:|n {employer_type.title()}\n"
             output += f"|yEmployer:|n {employer}\n"
-            output += f"|yCatch:|n {catch}\n"
+            output += f"|yLeverage:|n {catch}\n"
+            output += f"|yConsequences:|n {consequences}\n"
+            output += f"|yService Rendered:|n {service}\n"
 
         # Medical Debt (from treat/hospital)
         if sheet:
@@ -927,6 +933,22 @@ class CmdRoll(MuxCommand):
             skill_value = self._get_stat_value(char, full_second, is_stat=False)
             attr_display = get_stat_display_name(full_first) or full_first.replace('_', ' ').title()
             skill_display = get_stat_display_name(full_second) or full_second.replace('_', ' ').title()
+            try:
+                from world.improvement_points import parse_skill_instance
+                from world.role_abilities import get_solo_threat_detection_bonus, get_moto_skill_bonus
+
+                role_mod = 0
+                perception_in_roll = False
+                for field_name in (full_first, full_second):
+                    base, _ = parse_skill_instance(field_name)
+                    if base == "perception":
+                        perception_in_roll = True
+                    role_mod += int(get_moto_skill_bonus(char, field_name) or 0)
+                if perception_in_roll:
+                    role_mod += int(get_solo_threat_detection_bonus(char) or 0)
+                modifier += role_mod
+            except Exception:
+                pass
 
         # Luck check
         if luck_spend > 0:
@@ -1045,6 +1067,22 @@ class CmdRoll(MuxCommand):
         skill_value = self._get_stat_value(char, full_second, is_stat=False)
         attr_display = get_stat_display_name(full_first) or full_first.replace("_", " ").title()
         skill_display = get_stat_display_name(full_second) or full_second.replace("_", " ").title()
+        try:
+            from world.improvement_points import parse_skill_instance
+            from world.role_abilities import get_solo_threat_detection_bonus, get_moto_skill_bonus
+
+            role_mod = 0
+            perception_in_roll = False
+            for field_name in (full_first, full_second):
+                base, _ = parse_skill_instance(field_name)
+                if base == "perception":
+                    perception_in_roll = True
+                role_mod += int(get_moto_skill_bonus(char, field_name) or 0)
+            if perception_in_roll:
+                role_mod += int(get_solo_threat_detection_bonus(char) or 0)
+            modifier += role_mod
+        except Exception:
+            pass
 
         from world.utils.roll_utils import roll_skill_check, check_success, format_roll_details
         from world.wound_utils import get_action_penalty
@@ -1082,6 +1120,134 @@ class CmdRoll(MuxCommand):
 
         self.caller.msg(f"|gRoll posted to Job #{job_id}:|n {out}")
         self.caller.msg("Staff will review and process the repair.")
+
+
+class CmdAwareness(MuxCommand):
+    """
+    Manage Solo Combat Awareness loadout allocation.
+
+    Usage:
+      awareness
+      awareness/reset
+      awareness/set <ability>=<points>[, <ability>=<points>...]
+
+    Abilities:
+      damage, fumble, init, precision, spot, threat
+    """
+
+    key = "awareness"
+    aliases = ["ca"]
+    locks = "cmd:all()"
+    help_category = "Combat"
+
+    _ALIASES = {
+        "damage": "damage_deflection",
+        "deflection": "damage_deflection",
+        "damage_deflection": "damage_deflection",
+        "fumble": "fumble_recovery",
+        "fumble_recovery": "fumble_recovery",
+        "init": "initiative_reaction",
+        "initiative": "initiative_reaction",
+        "initiative_reaction": "initiative_reaction",
+        "precision": "precision_attack",
+        "precision_attack": "precision_attack",
+        "spot": "spot_weakness",
+        "spot_weakness": "spot_weakness",
+        "threat": "threat_detection",
+        "threat_detection": "threat_detection",
+    }
+
+    _LABELS = {
+        "damage_deflection": "Damage Deflection",
+        "fumble_recovery": "Fumble Recovery",
+        "initiative_reaction": "Initiative Reaction",
+        "precision_attack": "Precision Attack",
+        "spot_weakness": "Spot Weakness",
+        "threat_detection": "Threat Detection",
+    }
+
+    def _render(self, rank, loadout):
+        from world.role_abilities import get_combat_awareness_spent
+
+        spent = get_combat_awareness_spent(loadout)
+        lines = [
+            f"|wCombat Awareness Rank:|n {rank}",
+            f"|wAllocated:|n {spent}/{rank}",
+            "",
+        ]
+        for key in (
+            "damage_deflection",
+            "fumble_recovery",
+            "initiative_reaction",
+            "precision_attack",
+            "spot_weakness",
+            "threat_detection",
+        ):
+            lines.append(f"  {self._LABELS[key]}: {int(loadout.get(key, 0) or 0)}")
+        lines.extend(
+            [
+                "",
+                "|wSet:|n awareness/set init=2, precision=3, spot=1",
+                "|wReset:|n awareness/reset",
+            ]
+        )
+        return "\n".join(lines)
+
+    def func(self):
+        from world.role_abilities import (
+            get_role_ability_rank,
+            get_combat_awareness_loadout,
+            set_combat_awareness_loadout,
+            get_default_combat_awareness_loadout,
+        )
+
+        rank = int(get_role_ability_rank(self.caller, "combat_awareness") or 0)
+        if rank <= 0:
+            self.caller.msg("You do not have Combat Awareness.")
+            return
+
+        if "reset" in (self.switches or []):
+            default = get_default_combat_awareness_loadout(rank)
+            ok, err, _ = set_combat_awareness_loadout(self.caller, default)
+            if not ok:
+                self.caller.msg(f"Unable to reset loadout: {err}")
+                return
+            self.caller.msg("Combat Awareness loadout reset.")
+            self.caller.msg(self._render(rank, default))
+            return
+
+        if "set" in (self.switches or []):
+            raw = (self.args or "").strip()
+            if not raw:
+                self.caller.msg("Usage: awareness/set <ability>=<points>[, <ability>=<points>...]")
+                return
+            loadout = dict(get_combat_awareness_loadout(self.caller))
+            parts = [p.strip() for p in raw.split(",") if p.strip()]
+            for part in parts:
+                if "=" not in part:
+                    self.caller.msg(f"Invalid entry '{part}'. Use <ability>=<points>.")
+                    return
+                key_raw, val_raw = [x.strip().lower() for x in part.split("=", 1)]
+                key = self._ALIASES.get(key_raw)
+                if not key:
+                    self.caller.msg(f"Unknown ability '{key_raw}'.")
+                    return
+                try:
+                    val = int(val_raw)
+                except ValueError:
+                    self.caller.msg(f"Invalid points '{val_raw}' for {key_raw}.")
+                    return
+                loadout[key] = val
+            ok, err, normalized = set_combat_awareness_loadout(self.caller, loadout)
+            if not ok:
+                self.caller.msg(f"Invalid allocation: {err}")
+                return
+            self.caller.msg("Combat Awareness loadout updated.")
+            self.caller.msg(self._render(rank, normalized))
+            return
+
+        loadout = get_combat_awareness_loadout(self.caller)
+        self.caller.msg(self._render(rank, loadout))
 
 
 class CmdLuck(MuxCommand):

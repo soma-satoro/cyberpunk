@@ -30,7 +30,12 @@ class Voucher(Object):
         return self.db.voucher_items or []
 
     def set_items(self, items):
-        self.db.voucher_items = items
+        try:
+            from world.voucher.utils import normalize_voucher_items
+            self.db.voucher_items = normalize_voucher_items(items)
+        except Exception:
+            # Fallback to raw assignment if utility import fails during startup/migration contexts.
+            self.db.voucher_items = items
 
     def get_item_by_num(self, num):
         items = self.get_items()

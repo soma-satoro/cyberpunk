@@ -225,6 +225,224 @@ BODY_TABLES = {
     },
 }
 
+CONTROL_NODE_DEFENSES = [
+    "Observation Cameras",
+    "Automated Turret",
+    "Automated Melee Weapon",
+    "Electrical Flooring",
+    "Laser Grid",
+    "Tanglefoot Flooring",
+    "Ground Drone",
+    "Large Air Drone",
+    "Spider Walking Drone",
+]
+
+ACTIVE_DEFENSE_TEMPLATES = {
+    "observation_cameras": {
+        "name": "Observation Cameras",
+        "profile": "hacker",
+        "level": "mook",
+        "weapon_name": "Sensor Feed",
+        "weapon_damage": "0d6",
+        "hp": 5,
+        "trigger": "Detects intruders and calls response teams.",
+        "counter_dv": 9,
+        "counter_time_min": 1,
+    },
+    "tanglefoot_flooring": {
+        "name": "Tanglefoot Flooring",
+        "profile": "security guard",
+        "level": "mook",
+        "weapon_name": "Nanowire Snare",
+        "weapon_damage": "0d6",
+        "hp": 20,
+        "trigger": "Reduces MOVE by 1d6 on trigger.",
+        "counter_dv": 13,
+        "counter_time_min": 1,
+    },
+    "electrical_flooring": {
+        "name": "Electrical Flooring",
+        "profile": "security guard",
+        "level": "lieutenant",
+        "weapon_name": "Grid Shock",
+        "weapon_damage": "6d6",
+        "hp": 20,
+        "trigger": "Body damage (armor reduces, no ablation), repeats while standing on grid.",
+        "counter_dv": 13,
+        "counter_time_min": 1,
+    },
+    "laser_grid": {
+        "name": "Laser Grid",
+        "profile": "security guard",
+        "level": "lieutenant",
+        "weapon_name": "Laser Lattice",
+        "weapon_damage": "4d6",
+        "hp": 0,
+        "trigger": "Strikes when crossing grid lanes.",
+        "counter_dv": 17,
+        "counter_time_min": 5,
+    },
+    "tip_floor": {
+        "name": "Tip-Floor",
+        "profile": "security guard",
+        "level": "mook",
+        "weapon_name": "Drop Trap",
+        "weapon_damage": "6d6",
+        "hp": 0,
+        "trigger": "Drops targets into pit traps; DV15 Athletics to avoid.",
+        "counter_dv": 13,
+        "counter_time_min": 1,
+    },
+    "goop": {
+        "name": "Goop",
+        "profile": "security guard",
+        "level": "mook",
+        "weapon_name": "Polymer Foam",
+        "weapon_damage": "0d6",
+        "hp": 10,
+        "trigger": "Reduces MOVE by 2d6 until escaped or disabled.",
+        "counter_dv": 13,
+        "counter_time_min": 1,
+    },
+    "ceiling_wall_punchers": {
+        "name": "Ceiling/Wall Punchers",
+        "profile": "combat gunner",
+        "level": "lieutenant",
+        "weapon_name": "Hydraulic Strike Grid",
+        "weapon_damage": "6d6",
+        "hp": 20,
+        "trigger": "Crushes occupants in defended grid.",
+        "counter_dv": 13,
+        "counter_time_min": 5,
+    },
+    "slip_floor": {
+        "name": "Slip-Floor",
+        "profile": "security guard",
+        "level": "mook",
+        "weapon_name": "Slick Sprayer",
+        "weapon_damage": "0d6",
+        "hp": 10,
+        "trigger": "Forces DV15 Athletics check to avoid going prone on movement.",
+        "counter_dv": 13,
+        "counter_time_min": 1,
+    },
+    "stun_panels": {
+        "name": "Stun Panels",
+        "profile": "hacker",
+        "level": "lieutenant",
+        "weapon_name": "Flash/Stun Burst",
+        "weapon_damage": "0d6",
+        "hp": 5,
+        "trigger": "DV15 Resist Torture/Drugs or temporary eye/ear critical injuries.",
+        "counter_dv": 13,
+        "counter_time_min": 1,
+    },
+    "sleep_gas_elevator": {
+        "name": "Sleep Gas Elevator",
+        "profile": "hacker",
+        "level": "mini-boss",
+        "weapon_name": "Sleep Gas Dispersion",
+        "weapon_damage": "0d6",
+        "hp": 60,
+        "trigger": "DV13 Resist Torture/Drugs each round until disabled.",
+        "counter_dv": 17,
+        "counter_time_min": 5,
+    },
+    "air_swarm_drone_cloud": {
+        "name": "Air Swarm Drone Cloud",
+        "profile": "combat gunner",
+        "level": "lieutenant",
+        "weapon_name": "Drone Swarm Blades",
+        "weapon_damage": "4d6",
+        "hp": 15,
+        "move": 8,
+        "trigger": "Damages targets when entering or sharing area.",
+        "counter_dv": 17,
+        "counter_time_min": 5,
+    },
+    "ground_drone": {
+        "name": "Ground Drone",
+        "profile": "combat gunner",
+        "level": "mook",
+        "weapon_name": "Mounted Weapon",
+        "weapon_damage": "4d6",
+        "hp": 15,
+        "move": 8,
+        "trigger": "Mobile ground security platform.",
+        "counter_dv": 17,
+        "counter_time_min": 5,
+    },
+    "large_air_drone": {
+        "name": "Large Air Drone",
+        "profile": "combat gunner",
+        "level": "lieutenant",
+        "weapon_name": "Aerial Payload",
+        "weapon_damage": "4d6",
+        "hp": 15,
+        "move": 8,
+        "trigger": "Patrol drone with ranged payloads.",
+        "counter_dv": 17,
+        "counter_time_min": 5,
+    },
+    "mini_air_drone": {
+        "name": "Mini Air Drone",
+        "profile": "combat gunner",
+        "level": "lieutenant",
+        "weapon_name": "Mini Drone Payload",
+        "weapon_damage": "4d6",
+        "hp": 20,
+        "move": 6,
+        "trigger": "Compact strike drone.",
+        "counter_dv": 21,
+        "counter_time_min": 5,
+    },
+    "spider_walking_drone": {
+        "name": "Spider Walking Drone",
+        "profile": "combat gunner",
+        "level": "lieutenant",
+        "weapon_name": "Spider Drone Armament",
+        "weapon_damage": "5d6",
+        "hp": 15,
+        "move": 6,
+        "trigger": "Tracked assault drone; can carry launchers or melee tools.",
+        "counter_dv": 17,
+        "counter_time_min": 5,
+    },
+    "automated_blood_swarm": {
+        "name": "Automated Blood Swarm",
+        "profile": "hacker",
+        "level": "mini-boss",
+        "weapon_name": "Nanite Blood Swarm",
+        "weapon_damage": "3d6",
+        "hp": 0,
+        "trigger": "Auto-hit cloud, DV15 Resist Torture/Drugs or direct 3d6 HP.",
+        "counter_dv": 21,
+        "counter_time_min": 5,
+    },
+    "automated_melee_weapon": {
+        "name": "Automated Melee Weapon",
+        "profile": "martial artist",
+        "level": "lieutenant",
+        "weapon_name": "Automated Melee Tool",
+        "weapon_damage": "4d6",
+        "hp": 25,
+        "trigger": "Fixed heavy melee device in defended area.",
+        "counter_dv": 17,
+        "counter_time_min": 5,
+    },
+    "automated_turret": {
+        "name": "Automated Turret",
+        "profile": "combat gunner",
+        "level": "lieutenant",
+        "weapon_name": "Automated Turret",
+        "weapon_damage": "5d6",
+        "hp": 25,
+        "trigger": "Autonomous ranged weapon emplacement.",
+        "counter_dv": 17,
+        "counter_time_min": 5,
+    },
+}
+
 
 def normalize_name(value: str) -> str:
     return value.strip().lower().replace(" ", "_")
@@ -240,6 +458,10 @@ def get_black_ice(name: str) -> Optional[dict]:
 
 def get_demon(name: str) -> Optional[dict]:
     return DEMONS.get(normalize_name(name))
+
+
+def get_active_defense_template(name: str) -> Optional[dict]:
+    return ACTIVE_DEFENSE_TEMPLATES.get(normalize_name(name))
 
 
 def get_interface_rank(character) -> int:
@@ -319,14 +541,81 @@ def _floor_from_token(token: str, floor_num: int, default_dv: int) -> dict:
     if "_x" in token or "_" in token:
         parts = token.split("_")
         names = []
-        for part in parts:
-            if part in ("x2", "x3"):
-                continue
+        idx = 0
+        while idx < len(parts):
+            part = parts[idx]
             if part in BLACK_ICE:
-                names.append(BLACK_ICE[part]["name"])
+                count = 1
+                if idx + 1 < len(parts):
+                    nxt = parts[idx + 1]
+                    if nxt.startswith("x") and nxt[1:].isdigit():
+                        count = max(1, int(nxt[1:]))
+                        idx += 1
+                names.extend([BLACK_ICE[part]["name"]] * count)
+            idx += 1
+        if len(names) == 1:
+            return {"floor": floor_num, "type": "black_ice", "name": names[0], "dv": None}
         if names:
             return {"floor": floor_num, "type": "black_ice_group", "name": ", ".join(names), "dv": None}
     return {"floor": floor_num, "type": "misc", "name": token.replace("_", " ").title(), "dv": None}
+
+
+def _split_branch_lengths(total_floors: int, branch_count: int) -> Tuple[int, List[int]]:
+    """
+    Split total node count into one guaranteed-longest main branch + side branches.
+    """
+    main_len = 3
+    branch_lengths = [2 for _ in range(branch_count)]
+    remaining = total_floors - main_len - sum(branch_lengths)
+    buckets = ["main"] + [f"b{i+1}" for i in range(branch_count)]
+    while remaining > 0:
+        pick = random.choice(buckets)
+        if pick == "main":
+            main_len += 1
+        else:
+            idx = int(pick[1:]) - 1
+            branch_lengths[idx] += 1
+        remaining -= 1
+    if branch_lengths:
+        # Ensure main is strictly longest.
+        while main_len <= max(branch_lengths):
+            src_idx = max(range(len(branch_lengths)), key=lambda i: branch_lengths[i])
+            if branch_lengths[src_idx] <= 2:
+                main_len += 1
+                break
+            branch_lengths[src_idx] -= 1
+            main_len += 1
+    return main_len, branch_lengths
+
+
+def _pick_token_for_depth(depth: int, difficulty: str) -> str:
+    if depth <= 2:
+        roll = random.randint(1, 6)
+        return LOBBY_TABLE[roll]
+    roll = sum(random.randint(1, 6) for _ in range(3))
+    return BODY_TABLES[difficulty].get(roll, "file")
+
+
+def generate_demon_for_architecture(difficulty: str, floor_count: int) -> Optional[dict]:
+    """
+    Lightweight demon generator:
+      - none on tiny architectures
+      - one demon on 6+ floors, scaling by difficulty
+    """
+    if int(floor_count or 0) < 6:
+        return None
+    d = normalize_name(difficulty or "standard")
+    if d == "basic":
+        choice = "imp"
+    elif d == "standard":
+        choice = "efreet" if random.randint(1, 10) >= 7 else "imp"
+    elif d == "uncommon":
+        choice = random.choice(["imp", "efreet", "efreet", "balron"])
+    else:
+        choice = random.choice(["efreet", "balron", "balron"])
+    demon = dict(DEMONS[choice])
+    demon["name"] = demon.get("name", choice.title())
+    return demon
 
 
 def generate_architecture(difficulty: str = "standard", floor_count: Optional[int] = None) -> List[dict]:
@@ -338,15 +627,74 @@ def generate_architecture(difficulty: str = "standard", floor_count: Optional[in
         floor_count = sum(random.randint(1, 6) for _ in range(3))
     floor_count = max(3, min(18, int(floor_count)))
 
-    floors = []
-    for floor in range(1, floor_count + 1):
-        if floor <= 2:
-            roll = random.randint(1, 6)
-            token = LOBBY_TABLE[roll]
-        else:
-            roll = sum(random.randint(1, 6) for _ in range(3))
-            token = BODY_TABLES[difficulty].get(roll, "file")
-        floors.append(_floor_from_token(token, floor, dv))
+    # Determine branch count: roll d10; 7+ adds a branch; repeat until fail.
+    branch_count = 0
+    while branch_count < 4 and random.randint(1, 10) >= 7:
+        branch_count += 1
+    max_branches_for_size = max(0, (floor_count - 3) // 2)
+    branch_count = min(branch_count, max_branches_for_size)
+    main_len, branch_lengths = _split_branch_lengths(floor_count, branch_count)
+
+    nodes = []
+    children_map: Dict[int, List[int]] = {}
+
+    # Build main chain.
+    node_id = 1
+    prev = None
+    for depth in range(1, main_len + 1):
+        nodes.append(
+            {
+                "floor": node_id,
+                "parent": prev,
+                "children": [],
+                "depth": depth,
+                "branch": "main",
+            }
+        )
+        if prev is not None:
+            children_map.setdefault(prev, []).append(node_id)
+        prev = node_id
+        node_id += 1
+
+    # Build side branches attached after floor 2 on main.
+    attach_candidates = list(range(3, max(4, main_len)))
+    for bidx, blen in enumerate(branch_lengths, start=1):
+        attach = random.choice(attach_candidates) if attach_candidates else 2
+        parent = attach
+        attach_depth = next(n["depth"] for n in nodes if n["floor"] == attach)
+        for hop in range(1, blen + 1):
+            nodes.append(
+                {
+                    "floor": node_id,
+                    "parent": parent,
+                    "children": [],
+                    "depth": attach_depth + hop,
+                    "branch": f"branch_{bidx}",
+                }
+            )
+            children_map.setdefault(parent, []).append(node_id)
+            parent = node_id
+            node_id += 1
+
+    node_lookup = {n["floor"]: n for n in nodes}
+    for parent, kids in children_map.items():
+        node_lookup[parent]["children"] = list(kids)
+
+    # Choose a single, deterministic bottom node (deepest; tiebreak by highest floor id).
+    bottom_node = sorted(nodes, key=lambda n: (int(n["depth"]), int(n["floor"])))[-1]["floor"]
+
+    floors: List[dict] = []
+    for node in sorted(nodes, key=lambda n: n["floor"]):
+        token = _pick_token_for_depth(int(node["depth"]), difficulty)
+        floor = _floor_from_token(token, int(node["floor"]), dv)
+        floor["parent"] = node.get("parent")
+        floor["children"] = list(node.get("children") or [])
+        floor["depth"] = int(node.get("depth", 1))
+        floor["branch"] = node.get("branch", "main")
+        floor["is_bottom"] = int(node["floor"]) == int(bottom_node)
+        if floor.get("type") == "control":
+            floor["defense"] = random.choice(CONTROL_NODE_DEFENSES)
+        floors.append(floor)
     return floors
 
 

@@ -12,6 +12,7 @@ With Evennia test runner (if project config allows):
 """
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 try:
@@ -22,7 +23,9 @@ except Exception:
     CMD_NET_AVAILABLE = False
 
 from world.netrunning.red_netrunning import (
+    get_active_defense_template,
     generate_architecture,
+    generate_demon_for_architecture,
     generate_paydata_entry,
     get_black_ice,
     get_interface_rank,
@@ -46,6 +49,10 @@ class TestRedNetrunningHelpers(unittest.TestCase):
             self.assertIn("type", floor)
             self.assertIn("name", floor)
             self.assertEqual(floor["floor"], i + 1)
+            self.assertIn("children", floor)
+            self.assertIn("depth", floor)
+            self.assertIn("branch", floor)
+            self.assertIn("is_bottom", floor)
 
     def test_generate_architecture_valid_types(self):
         """Floor types match CPR rules."""
@@ -53,6 +60,27 @@ class TestRedNetrunningHelpers(unittest.TestCase):
         valid_types = {"password", "file", "control", "black_ice", "black_ice_group", "misc"}
         for floor in floors:
             self.assertIn(floor["type"], valid_types)
+
+    def test_generate_architecture_has_single_bottom(self):
+        floors = generate_architecture("advanced", floor_count=12)
+        bottoms = [f for f in floors if f.get("is_bottom")]
+        self.assertEqual(len(bottoms), 1)
+        bottom = bottoms[0]
+        self.assertGreaterEqual(int(bottom.get("depth", 0) or 0), 1)
+
+    def test_generate_demon_for_architecture(self):
+        self.assertIsNone(generate_demon_for_architecture("standard", 5))
+        demon = generate_demon_for_architecture("standard", 10)
+        self.assertIsNotNone(demon)
+        self.assertIn("name", demon)
+        self.assertIn("interface", demon)
+        self.assertIn("net_actions", demon)
+
+    def test_active_defense_template_lookup(self):
+        turret = get_active_defense_template("Automated Turret")
+        self.assertIsNotNone(turret)
+        self.assertEqual(turret["name"], "Automated Turret")
+        self.assertIn("counter_dv", turret)
 
     def test_get_program(self):
         """get_program finds programs by name."""
@@ -217,3 +245,122 @@ class TestNetrunningJackInJackOut(unittest.TestCase):
 
         self.caller.move_to.assert_called_once_with(self.room, quiet=True)
         body.delete.assert_called_once()
+
+
+@unittest.skipUnless(CMD_NET_AVAILABLE, "CmdNet import failed (project env)")
+class TestNetrunningCommandFlows(unittest.TestCase):
+    """
+    Integration-style command flow tests with lightweight mocks.
+    Focuses on multi-system state transitions in CmdNet.
+    """
+
+    def setUp(self):
+        self.room = Mock()
+        self.room.id = 5001
+        self.room.key = "Ops Room"
+        self.room.msg_contents = Mock()
+        self.room.db = SimpleNamespace(tags=[])
+        self.room.tags = Mock()
+        self.room.tags.get.return_value = []
+
+        floors = [
+            {"floor": 1, "type": "file", "name": "Entry", "parent": None, "children": [2], "branch": "main", "depth": 1, "is_bottom": False},
+            {"floor": 2, "type": "control", "name": "Control Node 2", "dv": 8, "defense": "Automated Turret", "parent": 1, "children": [3, 4], "branch": "main", "depth": 2, "is_bottom": False},
+            {"floor": 3, "type": "password", "name": "Password", "dv": 8, "parent": 2, "children": [], "branch": "branch_1", "depth": 3, "is_bottom": True},
+            {"floor": 4, "type": "file", "name": "Branch File", "parent": 2, "children": [], "branch": "branch_2", "depth": 3, "is_bottom": False},
+        ]
+        self.arch = Mock()
+        self.arch.id = 6001
+        self.arch.key = "BranchArch"
+        self.arch.location = self.room
+        self.arch.db = SimpleNamespace(floors=floors, difficulty="standard", demon={"name": "Imp", "interface": 3, "net_actions": 2})
+
+        self.caller = Mock()
+        self.caller.id = 7001
+        self.caller.key = "Runner"
+        self.caller.location = self.room
+        self.caller.account = Mock()
+        self.caller.account.username = "RunnerAcc"
+        self.caller.take_damage = Mock()
+        self.caller.msg = Mock()
+        self.caller.move_to = Mock()
+        self.caller.character_sheet = SimpleNamespace(interface=6)
+        self.caller.db = SimpleNamespace(
+            netrun_state={
+                "active": True,
+                "architecture_id": self.arch.id,
+                "entry_location_id": self.room.id,
+                "floor": 2,
+                "active_programs": {},
+                "cleared_passwords": [1],
+                "controlled_nodes": [2],
+                "disabled_defenses": [],
+                "ice_state": {},
+                "enemy_runners": {},
+                "enemy_runner_counter": 0,
+                "alarm_level": 0,
+                "net_actions_used": 0,
+                "action_penalty": 0,
+                "action_penalty_next": 0,
+                "installed_programs": {"vrizzbolt": "Vrizzbolt", "sword": "Sword"},
+                "destroyed_programs": [],
+                "slide_penalty": 0,
+                "attack_program_used": False,
+                "slide_used_turn": False,
+            }
+        )
+
+    def _make_cmd(self):
+        cmd = CmdNet()
+        cmd.caller = self.caller
+        return cmd
+
+    def test_branch_move_selector_down_by_branch_name(self):
+        cmd = self._make_cmd()
+        cmd.args = "down=branch_1"
+        with patch.object(cmd, "_current_architecture", return_value=self.arch):
+            with patch.object(cmd, "_encounter_ice", return_value=None):
+                with patch.object(cmd, "_show_current_floor", return_value=None):
+                    with patch.object(cmd, "_consume_net_action", return_value=None):
+                        cmd.cmd_move()
+        state = self.caller.db.netrun_state
+        self.assertEqual(state.get("floor"), 3, "Expected branch selector to move into branch_1 child floor")
+
+    def test_backdoor_failure_raises_alarm_and_spawns_runner(self):
+        # Move to password branch floor first.
+        self.caller.db.netrun_state["floor"] = 3
+        self.caller.db.netrun_state["cleared_passwords"] = []
+        cmd = self._make_cmd()
+        with patch.object(cmd, "_current_architecture", return_value=self.arch):
+            with patch("commands.netrun_commands.interface_check", return_value=(5, 6, 1, {"first_roll": 1, "extra_rolls": []})):
+                with patch.object(cmd, "_consume_net_action", return_value=None):
+                    cmd.cmd_backdoor()
+        state = self.caller.db.netrun_state
+        self.assertGreaterEqual(int(state.get("alarm_level", 0) or 0), 1)
+        # Force threshold and verify spawn.
+        with patch.object(cmd, "_current_architecture", return_value=self.arch):
+            cmd._register_alarm(state, reason="test spike", amount=3)
+        runners = state.get("enemy_runners", {}).get("3", [])
+        self.assertTrue(len(runners) >= 1, "Expected enemy runner spawn at alarm threshold")
+
+    def test_zap_can_target_enemy_runner(self):
+        cmd = self._make_cmd()
+        self.caller.db.netrun_state["floor"] = 2
+        self.caller.db.netrun_state["enemy_runners"] = {
+            "2": [{"id": 1, "name": "Enemy Netrunner 1", "interface": 4, "brain_hp": 18, "active": True, "programs": []}]
+        }
+        cmd.args = "Enemy Netrunner 1"
+        with patch.object(cmd, "_current_architecture", return_value=self.arch):
+            with patch.object(cmd, "_ensure_floor_ice_state", return_value=[]):
+                with patch("commands.netrun_commands.interface_check", return_value=(20, 6, 10, {"first_roll": 10, "extra_rolls": []})):
+                    with patch.object(cmd, "_consume_net_action", return_value=None):
+                        cmd.cmd_zap()
+        runner = self.caller.db.netrun_state["enemy_runners"]["2"][0]
+        self.assertLess(int(runner.get("brain_hp", 99)), 18, "Expected Zap to damage enemy netrunner target")
+
+    def test_demon_turn_triggers_control_node_defense(self):
+        cmd = self._make_cmd()
+        state = self.caller.db.netrun_state
+        with patch.object(cmd, "_spawn_defense_mook", return_value=None) as spawn_mock:
+            cmd._run_demon_turn(state, self.arch)
+        self.assertTrue(spawn_mock.called, "Expected demon to trigger linked control-node defense")

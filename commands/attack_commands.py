@@ -86,6 +86,28 @@ def _has_cyberarm_installed(char):
     return False
 
 
+def _has_reflex_coprocessor_installed(char):
+    """True if character has installed Reflex Co-Processor cyberware."""
+    from django.db.models import Q
+    from world.inventory.models import CyberwareInstance
+
+    name_filter = Q(cyberware__name__iexact="Reflex Co-Processor") | Q(
+        cyberware__name__iexact="Reflex Co Processor"
+    )
+    sheet = _get_sheet(char)
+    if sheet and getattr(sheet, "pk", None):
+        if CyberwareInstance.objects.filter(
+            character_sheet_id=sheet.pk, installed=True
+        ).filter(name_filter).exists():
+            return True
+    if hasattr(char, "pk") and char.pk:
+        if CyberwareInstance.objects.filter(
+            character_object_id=char.pk, installed=True
+        ).filter(name_filter).exists():
+            return True
+    return False
+
+
 def _get_active_cyberware_weapon(char):
     """
     Get active cyberware weapon instance if any.
@@ -321,7 +343,9 @@ def _get_dodge_dv(target, modifier=0):
     d10 = random.randint(1, 10)
     ev_penalty = _get_armor_ev_penalty(target)
     action_penalty = get_action_penalty(target)
-    total = d10 + dex + evasion - ev_penalty + modifier + action_penalty
+    grapple_penalty = _get_grapple_action_penalty(target)
+    prone_penalty = _get_prone_action_penalty(target)
+    total = d10 + dex + evasion - ev_penalty + modifier + action_penalty + grapple_penalty + prone_penalty
     total = max(0, total)  # Dodge DV cannot go below 0
     return d10, dex, evasion, total
 
@@ -531,7 +555,436 @@ def _get_reflexes(target):
     return getattr(target.db, "reflexes", 0) or 0
 
 
-def _apply_attack_damage(target, total_damage, aim_location, location, msg_lines):
+def _can_dodge_ranged_attacks(target):
+    """
+    True if target can dodge ranged attacks:
+    - REF 8+, or
+    - Reflex Co-Processor installed.
+    """
+    return _get_reflexes(target) >= 8 or _has_reflex_coprocessor_installed(target)
+
+
+def _is_ranged_attack_for_attacker(attacker, force_melee=False):
+    """True if attack mode for attacker is ranged (weapon/cyberware based)."""
+    if force_melee:
+        return False
+    weapon = _get_equipped_weapon(attacker)
+    if weapon:
+        return (weapon.category or "").strip().lower() != "melee"
+    cw_attack = _get_active_cyberware_weapon(attacker)
+    if cw_attack:
+        skill_field = (cw_attack[3] or "").strip().lower()
+        return skill_field in ("handgun", "shoulder_arms", "heavy_weapons", "archery")
+    return False
+
+
+def _get_point_blank_range_dv_for_attacker(attacker):
+    """Get range-table DV at point-blank (0m) for attacker's current ranged setup."""
+    weapon = _get_equipped_weapon(attacker)
+    if weapon:
+        dv, _ = get_dv_for_range(_combat_weapon_name(weapon), weapon.category, 0, autofire=False)
+        if dv is not None:
+            return dv
+    cw_attack = _get_active_cyberware_weapon(attacker)
+    if cw_attack:
+        w_name = cw_attack[1] or ""
+        skill_field = (cw_attack[3] or "").strip().lower()
+        if skill_field in ("handgun", "shoulder_arms", "heavy_weapons", "archery"):
+            w_cat = skill_field
+            dv, _ = get_dv_for_range(w_name, w_cat, 0, autofire=False)
+            if dv is not None:
+                return dv
+    return 13
+
+
+def _get_cool_and_rep(target):
+    """
+    Return (cool, effective_rep) for facedown.
+    effective_rep = rep - notoriety (minimum 0).
+    """
+    sheet = _get_sheet(target)
+    if sheet:
+        cool = getattr(sheet, "cool", 0) or 0
+        rep = getattr(sheet, "rep", 0) or 0
+        notoriety = getattr(sheet, "notoriety", 0) or 0
+    else:
+        cool = getattr(target.db, "cool", 0) or 0
+        rep = getattr(target.db, "rep", 0) or 0
+        notoriety = getattr(target.db, "notoriety", 0) or 0
+    return int(cool), max(0, int(rep) - int(notoriety))
+
+
+def _get_dex_and_brawling(target):
+    """Return (dexterity, brawling) for grapple checks."""
+    sheet = _get_sheet(target)
+    if sheet:
+        dex = _get_stat(sheet, "dexterity")
+        brawling = _get_skill(sheet, "brawling")
+        return dex, brawling
+    dex = getattr(target.db, "dexterity", 0) or 0
+    skills = target.db.skills or {}
+    brawling = skills.get("brawling", 0) or 0
+    return int(dex), int(brawling)
+
+
+def _get_dex_and_martial(target):
+    """Return (dexterity, martial_arts) for martial checks."""
+    sheet = _get_sheet(target)
+    if sheet:
+        dex = _get_stat(sheet, "dexterity")
+        martial = _get_skill(sheet, "martial_arts")
+        return int(dex), int(martial)
+    dex = getattr(target.db, "dexterity", 0) or 0
+    skills = target.db.skills or {}
+    martial = skills.get("martial_arts", 0) or 0
+    return int(dex), int(martial)
+
+
+def _martial_damage_dice_for_body(target):
+    """CPR martial arts damage by BODY: <=4:1d6, 5-6:2d6, 7-10:3d6, >=11:4d6."""
+    sheet = _get_sheet(target)
+    body = _get_stat(sheet, "body") if sheet else (getattr(target.db, "body", 0) or 0)
+    body = int(body or 0)
+    if body <= 4:
+        return 1
+    if body <= 6:
+        return 2
+    if body <= 10:
+        return 3
+    return 4
+
+
+def _get_willpower(target):
+    """Get willpower for requirements."""
+    sheet = _get_sheet(target)
+    if sheet:
+        return int(_get_stat(sheet, "willpower") or 0)
+    return int(getattr(target.db, "willpower", 0) or 0)
+
+
+MARTIAL_STYLE_ALIASES = {
+    "aikido": "Aikido",
+    "arnis": "Arnis",
+    "boxing": "Boxing",
+    "capoeira": "Capoeira",
+    "choy li fut": "Choy Li Fut",
+    "choy_li_fut": "Choy Li Fut",
+    "drunken fist": "Drunken Fist",
+    "drunken_fist": "Drunken Fist",
+    "krav maga": "Krav Maga",
+    "krav_maga": "Krav Maga",
+    "kendo": "Kendo",
+    "jujutsu": "Jujutsu",
+    "kung fu": "Kung Fu",
+    "kung_fu": "Kung Fu",
+    "thrash sambo": "Thrash Sambo",
+    "thrash_sambo": "Thrash Sambo",
+    "sov-system": "Sov-System",
+    "sov system": "Sov-System",
+    "sov_system": "Sov-System",
+    "gun fu": "Gun Fu",
+    "gun_fu": "Gun Fu",
+    "militech commando training": "Militech Commando Training",
+    "militech_commando_training": "Militech Commando Training",
+    "sumo": "Sumo",
+    "kyudo": "Kyudo",
+    "panzerfaust": "PanzerFaust",
+    "multiarm melee": "Multiarm Melee",
+    "multiarm_melee": "Multiarm Melee",
+    "muay thai": "Muay Thai",
+    "muay_thai": "Muay Thai",
+    "silat": "Silat",
+    "tai chi": "Tai Chi",
+    "tai_chi": "Tai Chi",
+    "thamoc": "Thamoc",
+    "karate": "Karate",
+    "judo": "Judo",
+    "taekwondo": "Taekwondo",
+    "tae_kwon_do": "Taekwondo",
+    "tae kwon do": "Taekwondo",
+    "wrestling": "Wrestling",
+    "arasaka-te": "Arasaka-te",
+    "arasakate": "Arasaka-te",
+    "arasaka te": "Arasaka-te",
+}
+
+
+def _get_martial_style_rank(target, style_name):
+    """Return rank in a specific martial arts form/style."""
+    style = MARTIAL_STYLE_ALIASES.get((style_name or "").strip().lower(), (style_name or "").strip())
+    if not style:
+        return 0
+    if hasattr(target, "get_skill_instance") and callable(getattr(target, "get_skill_instance")):
+        try:
+            return int(target.get_skill_instance("martial_arts", style) or 0)
+        except Exception:
+            return 0
+    skill_instances = getattr(target.db, "skill_instances", {}) or {}
+    lookup_key = f"martial_arts({style})".lower()
+    for key, value in skill_instances.items():
+        if str(key).lower() == lookup_key:
+            return int(value or 0)
+    return 0
+
+
+def _get_all_martial_style_ranks(target):
+    """Return {style_name: rank} from known aliases."""
+    out = {}
+    for canonical in set(MARTIAL_STYLE_ALIASES.values()):
+        rank = _get_martial_style_rank(target, canonical)
+        if rank > 0:
+            out[canonical] = rank
+    return out
+
+
+def _check_martial_once_per_turn(caller, move_key):
+    """
+    Enforce once-per-turn for martial moves.
+    In scene combat, this is keyed to scene round + turn index; outside scenes it is not enforced.
+    """
+    room = getattr(caller, "location", None)
+    if not room:
+        return True
+    try:
+        from commands.combat_system import get_active_scene
+
+        scene = get_active_scene(room)
+    except Exception:
+        scene = None
+    if not scene:
+        return True
+    token = f"{int(scene.get('round', 0) or 0)}:{int(scene.get('turn_index', 0) or 0)}"
+    used = dict(getattr(caller.db, "martial_moves_used", {}) or {})
+    if used.get(move_key) == token:
+        caller.msg("You can only use that special move once this turn.")
+        return False
+    used[move_key] = token
+    caller.db.martial_moves_used = used
+    return True
+
+
+def _martial_turn_token(character):
+    """Best-effort turn token for requirement windows."""
+    room = getattr(character, "location", None)
+    if not room:
+        return "no-room"
+    try:
+        from commands.combat_system import get_active_scene
+
+        scene = get_active_scene(room)
+    except Exception:
+        scene = None
+    if not scene:
+        return "no-scene"
+    return f"{int(scene.get('round', 0) or 0)}:{int(scene.get('turn_index', 0) or 0)}"
+
+
+def _mark_martial_event(character, event_key):
+    """Timestamp and tag an event as happening on current turn token."""
+    now = time.time()
+    token = _martial_turn_token(character)
+    marks = dict(getattr(character.db, "martial_event_marks", {}) or {})
+    marks[event_key] = {"ts": now, "token": token}
+    character.db.martial_event_marks = marks
+
+
+def _has_recent_martial_event(character, event_key, seconds=30):
+    """Check event happened recently; used for 'since last turn' approximations."""
+    marks = dict(getattr(character.db, "martial_event_marks", {}) or {})
+    item = marks.get(event_key, {})
+    ts = float(item.get("ts", 0) or 0)
+    return (time.time() - ts) <= float(seconds)
+
+
+def _inc_martial_hit_count(attacker, target):
+    """Increment per-turn hit count against a specific target."""
+    token = _martial_turn_token(attacker)
+    data = dict(getattr(attacker.db, "martial_hit_counts", {}) or {})
+    bucket = dict(data.get(token, {}) or {})
+    tid = str(getattr(target, "id", 0) or 0)
+    bucket[tid] = int(bucket.get(tid, 0) or 0) + 1
+    data[token] = bucket
+    # keep only latest few tokens
+    if len(data) > 6:
+        keys = list(data.keys())
+        for k in keys[:-6]:
+            data.pop(k, None)
+    attacker.db.martial_hit_counts = data
+
+
+def _get_martial_hit_count(attacker, target):
+    token = _martial_turn_token(attacker)
+    data = dict(getattr(attacker.db, "martial_hit_counts", {}) or {})
+    bucket = dict(data.get(token, {}) or {})
+    tid = str(getattr(target, "id", 0) or 0)
+    return int(bucket.get(tid, 0) or 0)
+
+
+def _consume_deashi_reaction(target):
+    """
+    Consume active Deashi reaction if present.
+    Returns True if grapple/throw should be negated.
+    """
+    try:
+        until = float(getattr(target.db, "deashi_until", 0) or 0)
+    except Exception:
+        until = 0
+    if until > time.time():
+        target.db.deashi_until = 0
+        target.db.deashi_mover_name = None
+        return True
+    return False
+
+
+def _force_drop_equipped_weapon(target):
+    """Force target to drop currently equipped weapon if possible."""
+    try:
+        if (getattr(target.db, "weapon_retention_until", 0) or 0) > time.time():
+            return None
+    except Exception:
+        pass
+    sheet = _get_sheet(target)
+    if sheet and getattr(sheet, "eqweapon", None):
+        dropped = sheet.eqweapon
+        sheet.eqweapon = None
+        sheet.save()
+        return dropped
+    w = getattr(target.db, "eqweapon", None)
+    if w:
+        target.db.eqweapon = None
+        return w
+    return None
+
+
+def _set_grapple_state(attacker, target):
+    """Set simple 1:1 grapple state."""
+    attacker.db.grappling_target_id = target.id
+    target.db.grappled_by_id = attacker.id
+
+
+def _clear_grapple_state(attacker=None, target=None):
+    """Clear grapple state for either side."""
+    if attacker and hasattr(attacker, "db"):
+        attacker.db.grappling_target_id = None
+    if target and hasattr(target, "db"):
+        target.db.grappled_by_id = None
+        target.db.iron_grip_by_id = None
+
+
+def _get_grapple_target(attacker):
+    """Resolve current grapple target object for attacker, if any."""
+    tid = getattr(attacker.db, "grappling_target_id", None)
+    if not tid:
+        return None
+    from evennia.utils.search import search_object
+
+    found = search_object(f"#{tid}")
+    if found:
+        return found[0]
+    attacker.db.grappling_target_id = None
+    return None
+
+
+def _is_grappled(target):
+    return bool(getattr(target.db, "grappled_by_id", None))
+
+
+def _get_active_shield(target):
+    """Return active shield dict or None."""
+    sh = getattr(target.db, "active_shield", None)
+    if not isinstance(sh, dict):
+        return None
+    hp = int(sh.get("current_hp", 0) or 0)
+    if hp <= 0:
+        return None
+    return sh
+
+
+def _set_active_shield(target, name, hp, source="gear", interpose=True, human_target_id=None):
+    target.db.active_shield = {
+        "name": str(name),
+        "max_hp": int(hp),
+        "current_hp": int(hp),
+        "source": source,  # gear|human|corpse
+        "interpose": bool(interpose),
+        "human_target_id": human_target_id,
+    }
+
+
+def _drop_active_shield(target):
+    target.db.active_shield = None
+
+
+def _shield_interposing(target):
+    sh = _get_active_shield(target)
+    if not sh:
+        return False
+    return bool(sh.get("interpose", True))
+
+
+def _set_prone(target, prone=True):
+    target.db.prone = bool(prone)
+
+
+def _is_prone(target):
+    return bool(getattr(target.db, "prone", False))
+
+
+def _get_prone_action_penalty(character):
+    """-2 to attacks/dodge while prone."""
+    if _is_prone(character):
+        return -2
+    return 0
+
+
+def _get_grapple_action_penalty(character):
+    """-2 while grappling or grappled."""
+    if not character or not hasattr(character, "db"):
+        return 0
+    if getattr(character.db, "grappling_target_id", None) or getattr(character.db, "grappled_by_id", None):
+        return -2
+    return 0
+
+
+def _get_facedown_fear_penalty(attacker, target):
+    """Return -2 if attacker is currently intimidated by this target."""
+    if not attacker or not target:
+        return 0
+    fear_target_id = getattr(attacker.db, "fear_target_id", None)
+    fear_until = getattr(attacker.db, "fear_until", 0) or 0
+    if fear_target_id == target.id and time.time() < fear_until:
+        return -2
+    return 0
+
+
+def _has_backed_down_from(attacker, target):
+    """True if attacker has an active back-down state against target."""
+    if not attacker or not target:
+        return False
+    bid = getattr(attacker.db, "backed_down_target_id", None)
+    until = getattr(attacker.db, "backed_down_until", 0) or 0
+    return bid == target.id and time.time() < until
+
+
+def _consume_scene_action(caller, label):
+    """Consume action in active scene combat (if caller is on roster)."""
+    room = getattr(caller, "location", None)
+    if not room:
+        return True
+    try:
+        from commands.combat_system import consume_action_for_character
+
+        ok, msg = consume_action_for_character(room, caller, label=label)
+        if not ok:
+            caller.msg(msg)
+            return False
+    except Exception:
+        # If combat tracker unavailable, don't block command execution.
+        return True
+    return True
+
+
+def _apply_attack_damage(target, total_damage, aim_location, location, msg_lines, allow_shield=True):
     """
     Apply attack damage to target: armor SP, cover, then HP.
     Armor that stops damage loses 1 SP (ablation). Critical injuries deal 5 bonus damage (no armor ablation).
@@ -546,6 +999,62 @@ def _apply_attack_damage(target, total_damage, aim_location, location, msg_lines
         get_current_hp,
     )
     from world.wound_data import WOUND_MORTALLY
+
+    # Shield interpose: if active, shield absorbs the full incoming hit.
+    sh = _get_active_shield(target)
+    if allow_shield and sh and _shield_interposing(target):
+        cur = int(sh.get("current_hp", 0) or 0)
+        max_hp = int(sh.get("max_hp", cur) or cur)
+        src = sh.get("source")
+        human_id = sh.get("human_target_id")
+        if src == "human" and human_id:
+            from evennia.utils.search import search_object
+
+            found = search_object(f"#{human_id}")
+            if found:
+                hs = found[0]
+                # Human shield takes attack as if targeted; holder takes none.
+                _apply_attack_damage(hs, total_damage, aim_location, location, msg_lines, allow_shield=False)
+                new_hs_hp = get_current_hp(hs)
+                sh["max_hp"] = int(get_max_hp(hs) or max_hp)
+                sh["current_hp"] = int(new_hs_hp)
+                target.db.active_shield = sh
+                msg_lines.append(
+                    f"  |w{target.key}|n interposes |c{hs.key}|n as a human shield "
+                    f"({sh['current_hp']}/{sh['max_hp']} HP)."
+                )
+                if is_dead(hs) or new_hs_hp <= 0:
+                    hs.db.used_as_human_shield_by_id = None
+                    corpse_hp = max(1, getattr(hs.db, "body", 0) or 0)
+                    hs_sheet = _get_sheet(hs)
+                    if hs_sheet:
+                        corpse_hp = max(1, _get_stat(hs_sheet, "body"))
+                    sh["source"] = "corpse"
+                    sh["name"] = f"{hs.key} (corpse shield)"
+                    sh["max_hp"] = corpse_hp
+                    sh["current_hp"] = corpse_hp
+                    sh["human_target_id"] = None
+                    target.db.active_shield = sh
+                    msg_lines.append(
+                        f"  |rHuman shield collapses!|n {target.key} now has a corpse shield ({corpse_hp} HP)."
+                    )
+                return
+            # If human target vanished, just clear human link and continue as normal shield.
+            sh["source"] = "gear"
+            sh["name"] = "Shield"
+            sh["human_target_id"] = None
+
+        absorb = min(cur, total_damage)
+        new_hp = max(0, cur - total_damage)
+        sh["current_hp"] = new_hp
+        target.db.active_shield = sh
+        msg_lines.append(
+            f"  |w{target.key}|n blocks with |c{sh.get('name', 'shield')}|n: "
+            f"|r{absorb}|n absorbed ({new_hp}/{max_hp} HP)."
+        )
+        if new_hp <= 0:
+            msg_lines.append("  |rShield destroyed!|n")
+        return
 
     # Aimed shot to head: damage that gets through SP is multiplied by 2
     head_mult = 2 if aim_location == "head" else 1
@@ -586,6 +1095,27 @@ def _apply_attack_damage(target, total_damage, aim_location, location, msg_lines
             msg_lines.append(f"  |rCover destroyed!|n")
 
     old_hp = get_current_hp(target)
+
+    # Solo Combat Awareness: Damage Deflection reduces first damage taken each Round.
+    try:
+        from world.role_abilities import (
+            get_solo_damage_deflection_value,
+            solo_damage_deflection_available,
+            consume_solo_damage_deflection,
+        )
+
+        if damage_to_char > 0 and solo_damage_deflection_available(target):
+            dd = int(get_solo_damage_deflection_value(target) or 0)
+            if dd > 0:
+                reduced = min(dd, damage_to_char)
+                damage_to_char = max(0, damage_to_char - reduced)
+                consume_solo_damage_deflection(target)
+                msg_lines.append(
+                    f"  |w{target.key}|n deflects |c{reduced}|n damage with Combat Awareness."
+                )
+    except Exception:
+        pass
+
     if damage_to_char > 0:
         apply_damage_to_character(target, damage_to_char)
         msg_lines.append(f"  |w{target.key}|n takes |r{damage_to_char}|n damage. HP: {old_hp} -> {get_current_hp(target)}")
@@ -632,6 +1162,27 @@ def execute_attack_roll(attacker, target, dv, dv_name, location, aim_location=No
 
     weapon = _get_equipped_weapon(attacker)
     cw_attack = _get_active_cyberware_weapon(attacker)
+
+    # Backed down in facedown: cannot attack that opponent during active window.
+    if target and _has_backed_down_from(attacker, target):
+        if location:
+            location.msg_contents(
+                f"|w{attacker.key}|n backs down and does not attack |w{target.key}|n."
+            )
+        return
+
+    # Grapple restriction: no two-handed weapons while grappling/grappled.
+    if weapon and (getattr(attacker.db, "grappling_target_id", None) or getattr(attacker.db, "grappled_by_id", None)):
+        try:
+            hands_required = int(getattr(weapon, "hands", 1) or 1)
+        except Exception:
+            hands_required = 1
+        if hands_required >= 2:
+            if location:
+                location.msg_contents(
+                    f"|w{attacker.key}|n cannot use |y{weapon.name}|n while in a grapple (two-handed)."
+                )
+            return
 
     # Check jammed (poor quality weapon)
     if weapon and _is_weapon_jammed(weapon):
@@ -698,10 +1249,32 @@ def execute_attack_roll(attacker, target, dv, dv_name, location, aim_location=No
 
     # Wound penalty to actions (-2 seriously, -4 mortally)
     action_penalty = get_action_penalty(attacker) if attacker else 0
-    total = d10 + stat_val + skill_val + quality_bonus + actual_luck + modifier + action_penalty
+    grapple_penalty = _get_grapple_action_penalty(attacker) if attacker else 0
+    fear_penalty = _get_facedown_fear_penalty(attacker, target)
+    prone_penalty = _get_prone_action_penalty(attacker) if attacker else 0
+    total = (
+        d10
+        + stat_val
+        + skill_val
+        + quality_bonus
+        + actual_luck
+        + modifier
+        + action_penalty
+        + grapple_penalty
+        + prone_penalty
+        + fear_penalty
+    )
 
-    # Poor quality: natural 1 causes jam
-    if weapon and _is_weapon_poor_quality(weapon) and d10 == 1:
+    # Solo Combat Awareness: Fumble Recovery (ignore natural-1 malfunction while attacking)
+    ignore_fumble = False
+    try:
+        from world.role_abilities import has_solo_fumble_recovery
+        ignore_fumble = bool(has_solo_fumble_recovery(attacker))
+    except Exception:
+        ignore_fumble = False
+
+    # Poor quality: natural 1 causes jam (unless Solo Fumble Recovery active)
+    if weapon and _is_weapon_poor_quality(weapon) and d10 == 1 and not ignore_fumble:
         weapon.jammed = True
         weapon.save()
         if location:
@@ -712,6 +1285,27 @@ def execute_attack_roll(attacker, target, dv, dv_name, location, aim_location=No
         return
 
     success = total > dv
+    # Kendo (lightweight): Cut the Bullet can negate next incoming ranged single-shot.
+    try:
+        is_ranged_attack = False
+        if weapon and (weapon.category or "").strip().lower() not in ("melee",):
+            is_ranged_attack = True
+        if cw_attack and (cw_attack[3] or "").strip().lower() in ("handgun", "shoulder_arms", "heavy_weapons", "archery"):
+            is_ranged_attack = True
+        if (
+            target
+            and success
+            and is_ranged_attack
+            and (getattr(target.db, "cut_the_bullet_until", 0) or 0) > time.time()
+        ):
+            success = False
+            target.db.cut_the_bullet_until = 0
+            if location:
+                location.msg_contents(
+                    f"|w{target.key}|n cuts/deflects the incoming shot with impossible precision!"
+                )
+    except Exception:
+        pass
 
     char_name = attacker.key
     dv_desc = f" ({dv_name})" if dv_name else ""
@@ -719,12 +1313,18 @@ def execute_attack_roll(attacker, target, dv, dv_name, location, aim_location=No
     roll_parts = [f"1d10 [{d10}]", stat_name, skill_display]
     if action_penalty:
         roll_parts.append(f"{action_penalty} (wound)")
+    if grapple_penalty:
+        roll_parts.append(f"{grapple_penalty} (grapple)")
+    if prone_penalty:
+        roll_parts.append(f"{prone_penalty} (prone)")
     if quality_bonus:
         roll_parts.append(f"+{quality_bonus} (quality)")
     if actual_luck:
         roll_parts.append(f"+{actual_luck} (luck)")
     if modifier:
         roll_parts.append(f"{modifier:+d}")
+    if fear_penalty:
+        roll_parts.append(f"{fear_penalty} (facedown)")
     roll_result = " + ".join(roll_parts) + f" = {total} vs DV {dv}{dv_desc}"
 
     at_target = f" at |w{target.key}|n" if target else ""
@@ -752,15 +1352,85 @@ def execute_attack_roll(attacker, target, dv, dv_name, location, aim_location=No
 
     if success:
         damage_rolls = [random.randint(1, 6) for _ in range(num_dice)]
+        # Kyudo: while stance is active, first ROF1 archery hit gains +2d6.
+        try:
+            if (
+                weapon
+                and (getattr(weapon, "category", "") or "").strip().lower() == "archery"
+                and int(getattr(weapon, "rof", 1) or 1) == 1
+                and (getattr(attacker.db, "kyudo_stance_until", 0) or 0) > time.time()
+                and bool(getattr(attacker.db, "kyudo_stance_active", False))
+            ):
+                extra = [random.randint(1, 6) for _ in range(2)]
+                damage_rolls.extend(extra)
+                attacker.db.kyudo_stance_active = False
+        except Exception:
+            pass
         total_damage = sum(damage_rolls)
         rolls_str = ", ".join(str(r) for r in damage_rolls)
+
+        # Solo Combat Awareness: Precision Attack applies to all attacks.
+        try:
+            from world.role_abilities import get_solo_precision_attack_bonus
+            precision = int(get_solo_precision_attack_bonus(attacker) or 0)
+            if precision > 0:
+                total_damage += precision
+                rolls_str += f" + {precision} (Precision Attack)"
+        except Exception:
+            pass
+
+        # Solo Combat Awareness: Spot Weakness applies to first successful attack each Round.
+        try:
+            from world.role_abilities import (
+                get_solo_spot_weakness_bonus,
+                solo_spot_weakness_available,
+                consume_solo_spot_weakness,
+            )
+
+            if solo_spot_weakness_available(attacker):
+                sw = int(get_solo_spot_weakness_bonus(attacker) or 0)
+                if sw > 0:
+                    total_damage += sw
+                    rolls_str += f" + {sw} (Spot Weakness)"
+                    consume_solo_spot_weakness(attacker)
+        except Exception:
+            pass
+
         msg_lines.append(f"  |gHit!|n Damage: |r{total_damage}|n ({num_dice}d6: {rolls_str})")
 
         # Apply damage to target if present and not already dead
         if target and not is_dead(target):
             _apply_attack_damage(target, total_damage, aim_location, location, msg_lines)
+            # Requirement history tracking for special moves.
+            try:
+                is_melee_like = bool(
+                    force_melee
+                    or attack_type in ("unarmed",)
+                    or (weapon and (weapon.category or "").strip().lower() == "melee")
+                )
+                if is_melee_like:
+                    _mark_martial_event(target, "took_melee_damage")
+                    _mark_martial_event(attacker, "landed_melee_hit")
+                    _inc_martial_hit_count(attacker, target)
+            except Exception:
+                pass
+            # Beating your feared opponent clears facedown fear.
+            if getattr(attacker.db, "fear_target_id", None) == target.id:
+                attacker.db.fear_target_id = None
+                attacker.db.fear_until = 0
+                msg_lines.append("  |gFacedown fear broken.|n")
     else:
         msg_lines.append(f"  |rMISS!|n (need to exceed {dv})")
+        try:
+            is_melee_like = bool(
+                force_melee
+                or attack_type in ("unarmed",)
+                or (weapon and (weapon.category or "").strip().lower() == "melee")
+            )
+            if target and is_melee_like:
+                _mark_martial_event(target, "dodged_melee_attack")
+        except Exception:
+            pass
 
     output = "\n".join(msg_lines)
     if location:
@@ -777,6 +1447,7 @@ class CmdDodge(MuxCommand):
       dodge as <name> [modifier] - Roll dodge for another (yourself, or an NPC you own)
 
     Modifiers: +1, -2, +3-1-4 (arithmetic sum). Armor EV penalty applies in addition.
+    Ranged attacks can be dodged if defender has REF 8+ or Reflex Co-Processor installed.
     When someone attacks you, they'll use your last dodge result as the DV.
     """
 
@@ -819,6 +1490,16 @@ class CmdDodge(MuxCommand):
             self.caller.msg(f"{target.key} is dead and cannot dodge.")
             return
 
+        if _shield_interposing(target):
+            sh = _get_active_shield(target) or {}
+            self.caller.msg(
+                f"{target.key} is interposing {sh.get('name', 'a shield')} and cannot dodge until shield is lowered."
+            )
+            return
+        if getattr(target.db, "used_as_human_shield_by_id", None):
+            self.caller.msg(f"{target.key} is being used as a human shield and cannot dodge right now.")
+            return
+
         # NPCs and characters without sheet use db
         d10, dex, evasion, total = _get_dodge_dv(target, modifier=modifier)
         _set_last_dodge_dv(target, total)
@@ -826,11 +1507,17 @@ class CmdDodge(MuxCommand):
         char_name = target.key
         ev_penalty = _get_armor_ev_penalty(target)
         action_penalty = get_action_penalty(target)
+        grapple_penalty = _get_grapple_action_penalty(target)
+        prone_penalty = _get_prone_action_penalty(target)
         roll_str = f"1d10 [{d10}] + Dexterity + Evasion"
         if ev_penalty:
             roll_str += f" - {ev_penalty} (armor EV)"
         if action_penalty:
             roll_str += f" {action_penalty} (wound)"
+        if grapple_penalty:
+            roll_str += f" {grapple_penalty} (grapple)"
+        if prone_penalty:
+            roll_str += f" {prone_penalty} (prone)"
         if modifier:
             roll_str += f" {modifier:+d}"
         roll_str += f" = {total}"
@@ -881,7 +1568,7 @@ class CmdAttack(MuxCommand):
       attack <target1,target2,...>   - Splash/shotgun zone (with grenade, rocket, flamethrower, or shotgun)
       attack/distance <meters> [target] [=modifier] - Ranged attack at distance
       attack/luck <N>=<dv or target> - Spend N luck (+1 per point) on attack
-      attack/aim <target>=<head|body|arms|legs> - Aimed shot at body part
+      attack/aim <target>=<head|body|arms|legs> - Aimed shot at body part (-8 baseline)
       attack/melee <target>          - Melee attack (medium melee or unarmed, whichever greater)
       attack/autofire <target1>, <target2>, ... - Autofire (10 bullets, REF 8+ can dodge)
       attack/suppressive <target1>, ... - Suppressive fire (10 bullets, WILL+Concentration vs REF+Autofire)
@@ -899,7 +1586,8 @@ class CmdAttack(MuxCommand):
       attack/staff/aim <weapon>/[stat]+[skill]=<target or dv>=<location>
       attack/staff/distance <weapon>/[stat]+[skill]=<distance> <target>
 
-    At point blank (0-6m), targets must dodge. Beyond that, use range chart DV.
+    At point blank (0-6m), eligible targets (REF 8+ or Reflex Co-Processor) can dodge.
+    Otherwise ranged attacks use range-chart DV.
     """
 
     key = "attack"
@@ -952,6 +1640,9 @@ class CmdAttack(MuxCommand):
         char = self.caller
         if not hasattr(char, "character_sheet") or not char.character_sheet:
             self.caller.msg("You don't have a character sheet.")
+            return
+
+        if not _consume_scene_action(self.caller, "attack"):
             return
 
         sheet = char.character_sheet
@@ -1032,30 +1723,64 @@ class CmdAttack(MuxCommand):
                 self.caller.msg("You can't attack yourself.")
                 return
 
-            dodge_dv, _ = _get_last_dodge_dv(target)
-            if dodge_dv is None:
-                target_name = target.key
-                _add_pending_attack(target, char, modifier=modifier, luck_spend=luck_spend)
-                self.caller.location.msg_contents(
-                    f"|w{char.key}|n attacks |w{target_name}|n! |y{target_name} must dodge first.|n "
-                    f"Use the |w'dodge'|n command (or |w+npc/dodge {target_name}|n for NPCs)."
-                )
-                target.msg(f"|yYou are being attacked by {char.key}!|n Use the |w'dodge'|n command to roll your evasion.")
-                if is_npc(target):
-                    owner_id = getattr(target.db, "owner_account_id", None)
-                    if owner_id:
-                        from evennia.accounts.models import AccountDB
-                        try:
-                            owner = AccountDB.objects.get(id=owner_id)
-                            owner.msg(f"|yYour NPC {target_name} is being attacked by {char.key}!|n "
-                                      f"Use |w+npc/dodge {target_name}|n to roll.")
-                        except AccountDB.DoesNotExist:
-                            pass
-                return
+            if _is_ranged_attack_for_attacker(char):
+                if _can_dodge_ranged_attacks(target):
+                    dodge_dv, _ = _get_last_dodge_dv(target)
+                    if dodge_dv is None:
+                        target_name = target.key
+                        _add_pending_attack(target, char, modifier=modifier, luck_spend=luck_spend)
+                        self.caller.location.msg_contents(
+                            f"|w{char.key}|n attacks |w{target_name}|n! |y{target_name} can dodge this ranged attack.|n "
+                            f"Use the |w'dodge'|n command (or |w+npc/dodge {target_name}|n for NPCs)."
+                        )
+                        target.msg(
+                            f"|yYou are being attacked by {char.key}!|n "
+                            f"You may use |w'dodge'|n to defend against this ranged attack."
+                        )
+                        if is_npc(target):
+                            owner_id = getattr(target.db, "owner_account_id", None)
+                            if owner_id:
+                                from evennia.accounts.models import AccountDB
+                                try:
+                                    owner = AccountDB.objects.get(id=owner_id)
+                                    owner.msg(
+                                        f"|yYour NPC {target_name} is being attacked by {char.key}!|n "
+                                        f"Use |w+npc/dodge {target_name}|n to roll if desired."
+                                    )
+                                except AccountDB.DoesNotExist:
+                                    pass
+                        return
+                    dv = dodge_dv
+                    dv_name = f"{target.key}'s dodge"
+                    _clear_last_dodge_dv(target)  # Consume dodge for this attack
+                else:
+                    dv = _get_point_blank_range_dv_for_attacker(char)
+                    dv_name = f"DV {dv} (point blank; {target.key} cannot dodge ranged)"
+            else:
+                dodge_dv, _ = _get_last_dodge_dv(target)
+                if dodge_dv is None:
+                    target_name = target.key
+                    _add_pending_attack(target, char, modifier=modifier, luck_spend=luck_spend)
+                    self.caller.location.msg_contents(
+                        f"|w{char.key}|n attacks |w{target_name}|n! |y{target_name} must dodge first.|n "
+                        f"Use the |w'dodge'|n command (or |w+npc/dodge {target_name}|n for NPCs)."
+                    )
+                    target.msg(f"|yYou are being attacked by {char.key}!|n Use the |w'dodge'|n command to roll your evasion.")
+                    if is_npc(target):
+                        owner_id = getattr(target.db, "owner_account_id", None)
+                        if owner_id:
+                            from evennia.accounts.models import AccountDB
+                            try:
+                                owner = AccountDB.objects.get(id=owner_id)
+                                owner.msg(f"|yYour NPC {target_name} is being attacked by {char.key}!|n "
+                                          f"Use |w+npc/dodge {target_name}|n to roll.")
+                            except AccountDB.DoesNotExist:
+                                pass
+                    return
 
-            dv = dodge_dv
-            dv_name = f"{target.key}'s dodge"
-            _clear_last_dodge_dv(target)  # Consume dodge for this attack
+                dv = dodge_dv
+                dv_name = f"{target.key}'s dodge"
+                _clear_last_dodge_dv(target)  # Consume dodge for this attack
 
         execute_attack_roll(char, target, dv, dv_name, self.caller.location,
                            luck_spend=luck_spend, modifier=modifier)
@@ -1120,26 +1845,56 @@ class CmdAttack(MuxCommand):
                 ammo_type_val = choice
                 break
 
-        ammo_candidates = list(inventory.ammunition.filter(ammo_type=ammo_type_val, quantity__gt=0).order_by("-quantity"))
-        if not ammo_candidates:
-            self.caller.msg(f"You have no {target_ammo_type or 'matching'} ammunition in your inventory.")
+        ammo_candidates = list(
+            inventory.ammunition.filter(ammo_type=ammo_type_val, quantity__gt=0).order_by("-quantity")
+        )
+        ammo = ammo_candidates[0] if ammo_candidates else None
+        to_load = 0
+        loaded_from_inventory = 0
+        loaded_from_voucher = 0
+
+        if ammo:
+            loaded_from_inventory = min(room, ammo.quantity)
+            to_load += loaded_from_inventory
+            ammo.quantity -= loaded_from_inventory
+            if ammo.quantity <= 0:
+                ammo.delete()
+            else:
+                ammo.save()
+
+        remaining_room = room - to_load
+        if remaining_room > 0:
+            try:
+                from world.voucher.utils import consume_ammo_from_vouchers
+
+                loaded_from_voucher = consume_ammo_from_vouchers(char, ammo_type_val, remaining_room)
+                to_load += loaded_from_voucher
+            except Exception:
+                loaded_from_voucher = 0
+
+        if to_load <= 0:
+            self.caller.msg(
+                f"You have no {target_ammo_type or 'matching'} ammunition in your inventory or vouchers."
+            )
             return
 
-        ammo = ammo_candidates[0]
-        to_load = min(room, ammo.quantity)
         weapon.current_ammo = (weapon.current_ammo or 0) + to_load
-        ammo.quantity -= to_load
-        if ammo.quantity <= 0:
-            ammo.delete()
-        else:
-            ammo.save()
         weapon.save()
         if hasattr(weapon, "db"):
             weapon.db.loaded_ammo_type = ammo_type_val
         loc = self.caller.location
         if loc:
             loc.msg_contents(f"|w{char.key}|n reloads their |y{weapon.name}|n.")
-        self.caller.msg(f"You reload your {weapon.name}. Loaded {to_load} rounds ({weapon.current_ammo}/{effective_clip} {ammo_type_val}).")
+        src_parts = []
+        if loaded_from_inventory:
+            src_parts.append(f"{loaded_from_inventory} from inventory")
+        if loaded_from_voucher:
+            src_parts.append(f"{loaded_from_voucher} from vouchers")
+        src_str = ", ".join(src_parts) if src_parts else "unknown source"
+        self.caller.msg(
+            f"You reload your {weapon.name}. Loaded {to_load} rounds "
+            f"({weapon.current_ammo}/{effective_clip} {ammo_type_val}; {src_str})."
+        )
 
     def _attack_distance(self, sheet, char, args, luck_spend=0, modifier=0):
         """attack/distance <meters> [target] - Use range chart for DV. Target optional (e.g. suppressive fire)."""
@@ -1170,18 +1925,24 @@ class CmdAttack(MuxCommand):
             self.caller.msg(f"Your weapon is out of range at {distance}m.")
             return
         if target and distance <= POINT_BLANK_RANGE:
-            dodge_dv, _ = _get_last_dodge_dv(target)
-            if dodge_dv is None:
-                _add_pending_attack(target, char, modifier=modifier, luck_spend=luck_spend)
-                self.caller.location.msg_contents(
-                    f"|w{char.key}|n attacks |w{target.key}|n at point blank ({distance}m)! "
-                    f"|y{target.key} must dodge first.|n Use the |w'dodge'|n command."
-                )
-                target.msg(f"|yYou are being attacked by {char.key} at point blank!|n Use the |w'dodge'|n command.")
-                return
-            dv = dodge_dv
-            dv_name = f"{target.key}'s dodge"
-            _clear_last_dodge_dv(target)
+            if _can_dodge_ranged_attacks(target):
+                dodge_dv, _ = _get_last_dodge_dv(target)
+                if dodge_dv is None:
+                    _add_pending_attack(target, char, modifier=modifier, luck_spend=luck_spend)
+                    self.caller.location.msg_contents(
+                        f"|w{char.key}|n attacks |w{target.key}|n at point blank ({distance}m)! "
+                        f"|y{target.key} can dodge this ranged attack.|n Use the |w'dodge'|n command."
+                    )
+                    target.msg(
+                        f"|yYou are being attacked by {char.key} at point blank!|n "
+                        f"You may use |w'dodge'|n to defend against this ranged attack."
+                    )
+                    return
+                dv = dodge_dv
+                dv_name = f"{target.key}'s dodge"
+                _clear_last_dodge_dv(target)
+            else:
+                dv_name = f"DV {dv} ({distance}m; {target.key} cannot dodge ranged)"
         else:
             dv_name = f"DV {dv} ({distance}m)"
         execute_attack_roll(char, target, dv, dv_name, self.caller.location,
@@ -1199,23 +1960,41 @@ class CmdAttack(MuxCommand):
         if len(parts) >= 3 and parts[-1] and (parts[-1][0] in "+-" or parts[-1][0].isdigit()):
             modifier = parse_modifier_string(parts[-1])
             loc = parts[1].strip().lower() if len(parts) > 2 else loc
+        # CPR aimed shots take -8 baseline.
+        modifier -= 8
+        try:
+            if (getattr(char.db, "martial_aim_bonus_until", 0) or 0) > time.time():
+                bonus = int(getattr(char.db, "martial_aim_bonus_value", 0) or 0)
+                modifier += bonus
+                # Consume one-shot benefit.
+                char.db.martial_aim_bonus_until = 0
+                char.db.martial_aim_bonus_value = 0
+        except Exception:
+            pass
         if loc not in ARMOR_LOCATIONS:
             self.caller.msg(f"Aim location must be one of: {', '.join(ARMOR_LOCATIONS)}")
             return
         target = self.caller.search(target_name)
         if not target or target == char:
             return
-        dodge_dv, _ = _get_last_dodge_dv(target)
-        if dodge_dv is None:
-            _add_pending_attack(target, char, modifier=modifier, luck_spend=luck_spend, aim_location=loc)
-            self.caller.location.msg_contents(
-                f"|w{char.key}|n aims at |w{target.key}|n's {loc}! |y{target.key} must dodge first.|n"
-            )
-            target.msg(f"|yYou are being targeted by {char.key}!|n Use the |w'dodge'|n command.")
-            return
-        dv = dodge_dv
-        dv_name = f"{target.key}'s dodge"
-        _clear_last_dodge_dv(target)
+        if _can_dodge_ranged_attacks(target):
+            dodge_dv, _ = _get_last_dodge_dv(target)
+            if dodge_dv is None:
+                _add_pending_attack(target, char, modifier=modifier, luck_spend=luck_spend, aim_location=loc)
+                self.caller.location.msg_contents(
+                    f"|w{char.key}|n aims at |w{target.key}|n's {loc}! |y{target.key} can dodge this ranged attack.|n"
+                )
+                target.msg(
+                    f"|yYou are being targeted by {char.key}!|n "
+                    f"You may use the |w'dodge'|n command against this ranged attack."
+                )
+                return
+            dv = dodge_dv
+            dv_name = f"{target.key}'s dodge"
+            _clear_last_dodge_dv(target)
+        else:
+            dv = _get_point_blank_range_dv_for_attacker(char)
+            dv_name = f"DV {dv} (point blank; {target.key} cannot dodge ranged)"
         execute_attack_roll(char, target, dv, dv_name, self.caller.location, aim_location=loc,
                            luck_spend=luck_spend, modifier=modifier)
 
@@ -1508,6 +2287,7 @@ class CmdAttack(MuxCommand):
 
     def _attack_staff_aim(self, stat_val, skill_val, weapon_display, num_dice, stat_field, rhs):
         """attack/staff/aim weapon/stat+skill=target=location or =dv"""
+        aim_modifier = -8
         if "=" in rhs:
             parts = rhs.split("=", 1)
             target_name = parts[0].strip()
@@ -1545,7 +2325,8 @@ class CmdAttack(MuxCommand):
         execute_attack_roll(
             self.caller, target, dv, dv_name, self.caller.location, aim_location=loc,
             staff_stat=stat_val, staff_skill=skill_val, staff_skill_display=weapon_display.split("(")[-1].rstrip(")"),
-            staff_weapon_name=weapon_display, staff_num_dice=num_dice, staff_stat_field=stat_field
+            staff_weapon_name=weapon_display, staff_num_dice=num_dice, staff_stat_field=stat_field,
+            modifier=aim_modifier
         )
 
     def _attack_staff_distance(self, stat_val, skill_val, weapon_display, num_dice, stat_field, w_name, w_cat, rhs):
@@ -1948,3 +2729,2173 @@ class CmdHud(MuxCommand):
             self.caller.msg("Heads Up Display: " + hud)
         else:
             self.caller.msg("You don't have a character sheet.")
+
+
+class CmdShield(MuxCommand):
+    """
+    Manage active shields (gear or human shield).
+
+    Usage:
+      shield                     - Show current shield
+      shield/up [hp]             - Equip a personal shield (default 10 HP)
+      shield/down                - Lower shield interpose (allows dodge)
+      shield/raise               - Raise shield interpose (blocks instead of dodge)
+      shield/drop                - Drop active shield
+      shield/human <target>      - Equip grappled target as human shield
+    """
+
+    key = "shield"
+    aliases = ["+shield"]
+    help_category = "Combat"
+
+    def func(self):
+        caller = self.caller
+        switches = [s.lower() for s in (self.switches or [])]
+        args = (self.args or "").strip()
+
+        sh = _get_active_shield(caller)
+        if not switches and not args:
+            if not sh:
+                caller.msg("No active shield. Use shield/up [hp] or shield/human <target>.")
+                return
+            mode = "interposing" if sh.get("interpose", True) else "lowered"
+            caller.msg(
+                f"Active shield: {sh.get('name')} ({sh.get('current_hp')}/{sh.get('max_hp')} HP), {mode}."
+            )
+            return
+
+        if "up" in switches:
+            if not _consume_scene_action(caller, "shield_up"):
+                return
+            hp = 10
+            if args:
+                try:
+                    hp = max(1, int(args))
+                except ValueError:
+                    caller.msg("Usage: shield/up [hp]")
+                    return
+            _set_active_shield(caller, "Bulletproof Shield", hp, source="gear", interpose=True)
+            caller.msg(f"You equip a Bulletproof Shield ({hp} HP) and raise it.")
+            if caller.location:
+                caller.location.msg_contents(f"|w{caller.key}|n raises a shield.", exclude=caller)
+            return
+
+        if "human" in switches:
+            if not _consume_scene_action(caller, "human_shield"):
+                return
+            if not args:
+                caller.msg("Usage: shield/human <target>")
+                return
+            target = caller.search(args)
+            if not target:
+                return
+            grappling = _get_grapple_target(caller)
+            if not grappling or grappling != target:
+                caller.msg("You can only use a target you are currently grappling as a human shield.")
+                return
+            hp = max(1, int(get_current_hp(target) or 1))
+            _set_active_shield(
+                caller,
+                f"{target.key} (human shield)",
+                hp,
+                source="human",
+                interpose=True,
+                human_target_id=target.id,
+            )
+            target.db.used_as_human_shield_by_id = caller.id
+            caller.msg(f"You pull {target.key} in front of you as a human shield ({hp} HP).")
+            if caller.location:
+                caller.location.msg_contents(
+                    f"|w{caller.key}|n uses |w{target.key}|n as a human shield.",
+                    exclude=caller,
+                )
+            return
+
+        if "down" in switches:
+            if not sh:
+                caller.msg("No active shield.")
+                return
+            sh["interpose"] = False
+            caller.db.active_shield = sh
+            caller.msg("You lower your shield and can dodge again.")
+            return
+
+        if "raise" in switches:
+            if not sh:
+                caller.msg("No active shield.")
+                return
+            sh["interpose"] = True
+            caller.db.active_shield = sh
+            caller.msg("You raise your shield to interpose incoming attacks.")
+            return
+
+        if "drop" in switches:
+            if not _consume_scene_action(caller, "shield_drop"):
+                return
+            if not sh:
+                caller.msg("No active shield to drop.")
+                return
+            hid = sh.get("human_target_id")
+            if hid:
+                from evennia.utils.search import search_object
+
+                found = search_object(f"#{hid}")
+                if found:
+                    found[0].db.used_as_human_shield_by_id = None
+            _drop_active_shield(caller)
+            caller.msg("You drop your shield.")
+            if caller.location:
+                caller.location.msg_contents(f"|w{caller.key}|n drops their shield.", exclude=caller)
+            return
+
+        caller.msg("Usage: shield, shield/up [hp], shield/down, shield/raise, shield/drop, shield/human <target>")
+
+
+class CmdGrab(MuxCommand):
+    """
+    Grapple combat actions: grab, choke, throw, escape.
+
+    Usage:
+      grab <target>          - Attempt grapple (DEX+Brawling+1d10 opposed)
+      grab/choke             - Choke current grappled target (BODY direct HP)
+      grab/throw             - Throw current grappled target (BODY direct HP, prone)
+      grab/release           - Release grapple
+      grab/escape            - Escape if grappled
+      grab/status            - Show grapple state
+    """
+
+    key = "grab"
+    aliases = ["grapple", "choke", "throw"]
+    help_category = "Combat"
+
+    def func(self):
+        caller = self.caller
+        switches = [s.lower() for s in (self.switches or [])]
+        args = (self.args or "").strip()
+        cmd = (self.cmdstring or "").lower()
+
+        # Alias behaviors: "choke" and "throw"
+        if cmd == "choke" and "choke" not in switches:
+            switches.append("choke")
+        if cmd == "throw" and "throw" not in switches:
+            switches.append("throw")
+
+        if "status" in switches:
+            tgt = _get_grapple_target(caller)
+            if tgt:
+                caller.msg(f"You are grappling {tgt.key}.")
+            elif _is_grappled(caller):
+                caller.msg("You are currently grappled by someone.")
+            else:
+                caller.msg("You are not currently in a grapple.")
+            return
+
+        if "escape" in switches:
+            if not _consume_scene_action(caller, "grapple_escape"):
+                return
+            gid = getattr(caller.db, "grappled_by_id", None)
+            if not gid:
+                caller.msg("You are not grappled.")
+                return
+            from evennia.utils.search import search_object
+
+            found = search_object(f"#{gid}")
+            if not found:
+                caller.db.grappled_by_id = None
+                caller.msg("Your grappler is no longer present. You break free.")
+                return
+            attacker = found[0]
+            dex_a, brawl_a = _get_dex_and_brawling(caller)
+            dex_d, brawl_d = _get_dex_and_brawling(attacker)
+            ra = random.randint(1, 10)
+            rd = random.randint(1, 10)
+            iron_grip_pen = -2 if getattr(caller.db, "iron_grip_by_id", None) == attacker.id else 0
+            ta = dex_a + brawl_a + ra + iron_grip_pen
+            td = dex_d + brawl_d + rd
+            if ta > td:
+                _clear_grapple_state(attacker=attacker, target=caller)
+                caller.db.iron_grip_by_id = None
+                # If attacker was using this target as human shield, end that state.
+                ash = _get_active_shield(attacker)
+                if ash and ash.get("source") == "human" and ash.get("human_target_id") == caller.id:
+                    _drop_active_shield(attacker)
+                caller.db.used_as_human_shield_by_id = None
+                caller.msg(f"You escape {attacker.key}'s grapple! ({ta} vs {td})")
+                if caller.location:
+                    caller.location.msg_contents(f"|w{caller.key}|n breaks free of |w{attacker.key}|n.")
+            else:
+                caller.msg(f"You fail to escape ({ta} vs {td}).")
+            return
+
+        if "release" in switches:
+            tgt = _get_grapple_target(caller)
+            if not tgt:
+                caller.msg("You are not grappling anyone.")
+                return
+            _clear_grapple_state(attacker=caller, target=tgt)
+            sh = _get_active_shield(caller)
+            if sh and sh.get("source") == "human" and sh.get("human_target_id") == tgt.id:
+                _drop_active_shield(caller)
+                tgt.db.used_as_human_shield_by_id = None
+            caller.msg(f"You release {tgt.key}.")
+            if caller.location:
+                caller.location.msg_contents(f"|w{caller.key}|n releases |w{tgt.key}|n.", exclude=caller)
+            return
+
+        if "choke" in switches:
+            if not _consume_scene_action(caller, "choke"):
+                return
+            tgt = _get_grapple_target(caller)
+            if not tgt:
+                caller.msg("You must be grappling a target to choke.")
+                return
+            if getattr(caller.db, "used_as_human_shield_by_id", None):
+                caller.msg("You cannot choke while being used as a human shield.")
+                return
+            body = 0
+            sheet = _get_sheet(caller)
+            if sheet:
+                body = _get_stat(sheet, "body")
+            else:
+                body = getattr(caller.db, "body", 0) or 0
+            body = max(1, int(body))
+            old_hp = get_current_hp(tgt)
+            if old_hp > 1 and old_hp - body < 0:
+                dmg = max(0, old_hp - 1)
+                apply_damage_to_character(tgt, dmg)
+                tgt.db.unconscious_until = time.time() + 60
+            else:
+                apply_damage_to_character(tgt, body)
+                dmg = body
+            caller.msg(f"You choke {tgt.key} for {dmg} direct damage.")
+            if caller.location:
+                caller.location.msg_contents(
+                    f"|w{caller.key}|n chokes |w{tgt.key}|n for |r{dmg}|n damage.",
+                    exclude=caller,
+                )
+            return
+
+        if "throw" in switches:
+            if not _consume_scene_action(caller, "throw"):
+                return
+            tgt = _get_grapple_target(caller)
+            if not tgt:
+                caller.msg("You must be grappling a target to throw.")
+                return
+            if _consume_deashi_reaction(tgt):
+                caller.msg(f"{tgt.key} braces and slips your throw attempt (Deashi).")
+                tgt.msg("You deflect the throw attempt with Deashi.")
+                if caller.location:
+                    caller.location.msg_contents(
+                        f"|w{tgt.key}|n slips |w{caller.key}|n's throw attempt.",
+                        exclude=(caller, tgt),
+                    )
+                return
+            if getattr(caller.db, "used_as_human_shield_by_id", None):
+                caller.msg("You cannot throw while being used as a human shield.")
+                return
+            body = 0
+            sheet = _get_sheet(caller)
+            if sheet:
+                body = _get_stat(sheet, "body")
+            else:
+                body = getattr(caller.db, "body", 0) or 0
+            body = max(1, int(body))
+            apply_damage_to_character(tgt, body)
+            _set_prone(tgt, True)
+            _clear_grapple_state(attacker=caller, target=tgt)
+            sh = _get_active_shield(caller)
+            if sh and sh.get("source") == "human" and sh.get("human_target_id") == tgt.id:
+                _drop_active_shield(caller)
+                tgt.db.used_as_human_shield_by_id = None
+            caller.msg(f"You throw {tgt.key} for {body} direct damage and knock them prone.")
+            if caller.location:
+                caller.location.msg_contents(
+                    f"|w{caller.key}|n throws |w{tgt.key}|n to the ground (|r{body}|n damage).",
+                    exclude=caller,
+                )
+            return
+
+        # Default: grab <target>
+        if not _consume_scene_action(caller, "grab"):
+            return
+        if not args:
+            caller.msg("Usage: grab <target> (or grab/choke, grab/throw, grab/escape, grab/release, grab/status)")
+            return
+        if getattr(caller.db, "used_as_human_shield_by_id", None):
+            caller.msg("You cannot initiate a grapple while being used as a human shield.")
+            return
+        if _get_grapple_target(caller):
+            caller.msg("You are already grappling someone. Use grab/release first.")
+            return
+        target = caller.search(args)
+        if not target:
+            return
+        if target == caller:
+            caller.msg("You cannot grapple yourself.")
+            return
+        if _is_grappled(target):
+            caller.msg(f"{target.key} is already grappled.")
+            return
+
+        dex_a, brawl_a = _get_dex_and_brawling(caller)
+        dex_d, brawl_d = _get_dex_and_brawling(target)
+        ra = random.randint(1, 10)
+        rd = random.randint(1, 10)
+        ta = dex_a + brawl_a + ra
+        td = dex_d + brawl_d + rd
+        if ta > td:
+            if _consume_deashi_reaction(target):
+                caller.msg(f"{target.key} shifts stance and avoids your grapple (Deashi).")
+                target.msg("You avoid being grappled with Deashi.")
+                if caller.location:
+                    caller.location.msg_contents(
+                        f"|w{target.key}|n slips out of |w{caller.key}|n's grab attempt.",
+                        exclude=(caller, target),
+                    )
+                return
+            _set_grapple_state(caller, target)
+            caller.msg(f"You grab {target.key}! ({ta} vs {td})")
+            if caller.location:
+                caller.location.msg_contents(
+                    f"|w{caller.key}|n grabs |w{target.key}|n in a grapple!",
+                    exclude=caller,
+                )
+        else:
+            caller.msg(f"You fail to grab {target.key}. ({ta} vs {td})")
+            if caller.location:
+                caller.location.msg_contents(
+                    f"|w{caller.key}|n fails to grab |w{target.key}|n.",
+                    exclude=caller,
+                )
+
+
+class CmdMartial(MuxCommand):
+    """
+    Martial arts form/move command layer.
+
+    Usage:
+      martial/status
+      martial/forms
+      martial/recovery
+      martial/strike <target>
+      martial/knockout_punch <target>
+      martial/punch_combination <target>
+      martial/disarm <target>
+      martial/bonebreak <target>
+      martial/pressure_point <target>
+      martial/iron_grip
+      martial/grab_escape
+      martial/counter_throw <target>
+      martial/flying_kick <target>
+      martial/chokehold
+      martial/reversal
+      martial/counter_strike <target>
+      martial/escape_hold
+      martial/punishing_blow <target>
+      martial/contact_combat <target>
+      martial/grit
+      martial/dirty_blow <target>
+      martial/ki_ken_tai_no_ichi
+      martial/woo_technique
+      martial/combat_reload [weapon[=ammo type]]
+      martial/combat_knife_training <target>
+      martial/commando_disarm <target>
+      martial/niramiai
+      martial/deashi
+      martial/hassetsu
+      martial/zaiteki
+      martial/borg_fist <target>
+      martial/inner_chrome
+      martial/armed_dangerous <target>
+      martial/smack_together
+      martial/internal_power <target>
+      martial/violent_leverage <target>
+      martial/coordinated_combination <target>
+      martial/disarming_technique <target>
+      martial/rhythmic_recovery <target>
+      martial/slash_dance <target>
+      martial/shaolin_step
+      martial/sweeping_fist <target>
+      martial/environmental_improvisation
+      martial/lucky_stumble
+      martial/aiki <target>
+      martial/throwing_technique <target>
+      martial/five_forms <target>
+      martial/superior_stance
+      martial/conditioned_ferocity <target>
+      martial/conditioned_power <target>
+      martial/joint_manipulation <target>
+      martial/lu <target>
+      martial/advantaged_position <target>
+      martial/weapon_retention
+      martial/cut_the_bullet
+    """
+
+    key = "martial"
+    aliases = ["ma"]
+    help_category = "Combat"
+
+    def func(self):
+        caller = self.caller
+        switches = [s.lower() for s in (self.switches or [])]
+        args = (self.args or "").strip()
+
+        dex, base_martial = _get_dex_and_martial(caller)
+        forms = _get_all_martial_style_ranks(caller)
+        has_form_training = bool(forms)
+        has_any_training = base_martial > 0 or has_form_training
+
+        if "status" in switches or "forms" in switches:
+            if has_form_training:
+                ranked = ", ".join(f"{k} {v}" for k, v in sorted(forms.items()))
+            else:
+                ranked = "none"
+            caller.msg(
+                f"Martial Arts status: DEX {dex}, generic rank {base_martial}. "
+                f"Form ranks: {ranked}."
+            )
+            return
+
+        if not has_any_training:
+            caller.msg("You need at least 1 rank in Martial Arts to use martial special moves.")
+            return
+
+        if "recovery" in switches:
+            self._recovery(caller, dex, max(base_martial, max(forms.values()) if forms else 0))
+            return
+
+        target_needed_moves = {
+            "strike",
+            "knockout_punch",
+            "punch_combination",
+            "disarm",
+            "bonebreak",
+            "pressure_point",
+            "counter_throw",
+            "flying_kick",
+            "counter_strike",
+            "punishing_blow",
+            "contact_combat",
+            "dirty_blow",
+            "combat_knife_training",
+            "commando_disarm",
+            "borg_fist",
+            "armed_dangerous",
+            "internal_power",
+            "violent_leverage",
+            "coordinated_combination",
+            "disarming_technique",
+            "rhythmic_recovery",
+            "slash_dance",
+            "sweeping_fist",
+            "aiki",
+            "throwing_technique",
+            "five_forms",
+            "conditioned_ferocity",
+            "conditioned_power",
+            "joint_manipulation",
+            "lu",
+            "advantaged_position",
+        }
+        active_move = None
+        ordered_moves = [
+            "knockout_punch",
+            "punch_combination",
+            "bonebreak",
+            "pressure_point",
+            "dirty_blow",
+            "disarm",
+            "iron_grip",
+            "grab_escape",
+            "counter_throw",
+            "flying_kick",
+            "chokehold",
+            "reversal",
+            "counter_strike",
+            "escape_hold",
+            "punishing_blow",
+            "contact_combat",
+            "grit",
+            "ki_ken_tai_no_ichi",
+            "woo_technique",
+            "combat_reload",
+            "combat_knife_training",
+            "commando_disarm",
+            "niramiai",
+            "deashi",
+            "hassetsu",
+            "zaiteki",
+            "borg_fist",
+            "inner_chrome",
+            "armed_dangerous",
+            "smack_together",
+            "internal_power",
+            "violent_leverage",
+            "coordinated_combination",
+            "disarming_technique",
+            "rhythmic_recovery",
+            "slash_dance",
+            "shaolin_step",
+            "sweeping_fist",
+            "environmental_improvisation",
+            "lucky_stumble",
+            "aiki",
+            "throwing_technique",
+            "five_forms",
+            "superior_stance",
+            "conditioned_ferocity",
+            "conditioned_power",
+            "joint_manipulation",
+            "lu",
+            "advantaged_position",
+            "weapon_retention",
+            "cut_the_bullet",
+            "strike",
+        ]
+        for mv in ordered_moves:
+            if mv in switches:
+                active_move = mv
+                break
+        if not active_move:
+            active_move = "strike"
+
+        target = None
+        if active_move in target_needed_moves:
+            if not args:
+                caller.msg(f"Usage: martial/{active_move} <target>")
+                return
+            target = caller.search(args)
+            if not target:
+                return
+            if target == caller:
+                caller.msg("You cannot target yourself.")
+                return
+
+        if active_move == "woo_technique":
+            rank = self._style_rank_for_move(caller, ["Gun Fu"], "woo_technique")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_woo_technique"):
+                return
+            self._woo_technique(caller, dex, rank)
+            return
+
+        if active_move == "combat_reload":
+            rank = self._style_rank_for_move(caller, ["Gun Fu"], "combat_reload")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_combat_reload"):
+                return
+            self._combat_reload(caller, dex, rank, args)
+            return
+
+        if active_move == "combat_knife_training":
+            rank = self._style_rank_for_move(caller, ["Militech Commando Training"], "combat_knife_training")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_combat_knife_training"):
+                return
+            self._combat_knife_training(caller, target, dex, rank)
+            return
+
+        if active_move == "commando_disarm":
+            rank = self._style_rank_for_move(caller, ["Militech Commando Training"], "commando_disarm")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_commando_disarm"):
+                return
+            self._commando_disarm(caller, target, dex, rank)
+            return
+
+        if active_move == "niramiai":
+            rank = self._style_rank_for_move(caller, ["Sumo"], "niramiai")
+            if rank <= 0:
+                return
+            self._niramiai(caller, dex, rank)
+            return
+
+        if active_move == "deashi":
+            rank = self._style_rank_for_move(caller, ["Sumo"], "deashi")
+            if rank <= 0:
+                return
+            self._deashi(caller, dex, rank)
+            return
+
+        if active_move == "hassetsu":
+            rank = self._style_rank_for_move(caller, ["Kyudo"], "hassetsu")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_hassetsu"):
+                return
+            self._hassetsu(caller, dex, rank)
+            return
+
+        if active_move == "zaiteki":
+            rank = self._style_rank_for_move(caller, ["Kyudo"], "zaiteki")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_zaiteki"):
+                return
+            self._zaiteki(caller, target, dex, rank)
+            return
+
+        if active_move == "borg_fist":
+            rank = self._style_rank_for_move(caller, ["PanzerFaust"], "borg_fist")
+            if rank <= 0:
+                return
+            body = _get_stat(_get_sheet(caller), "body") if _get_sheet(caller) else (getattr(caller.db, "body", 0) or 0)
+            if int(body) < 10:
+                caller.msg("Borg Fist requires BODY 10+.")
+                return
+            if not _consume_scene_action(caller, "martial_borg_fist"):
+                return
+            self._borg_fist(caller, target, dex, rank)
+            return
+
+        if active_move == "inner_chrome":
+            rank = self._style_rank_for_move(caller, ["PanzerFaust"], "inner_chrome")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_inner_chrome"):
+                return
+            self._inner_chrome(caller, dex, rank)
+            return
+
+        if active_move == "armed_dangerous":
+            rank = self._style_rank_for_move(caller, ["Multiarm Melee"], "armed_dangerous")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_armed_dangerous"):
+                return
+            self._armed_dangerous(caller, target, dex, rank)
+            return
+
+        if active_move == "smack_together":
+            rank = self._style_rank_for_move(caller, ["Multiarm Melee"], "smack_together")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_smack_together"):
+                return
+            self._smack_together(caller, dex, rank)
+            return
+
+        if active_move == "internal_power":
+            rank = self._style_rank_for_move(caller, ["Silat"], "internal_power")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_internal_power"):
+                return
+            self._internal_power(caller, target, dex, rank)
+            return
+
+        if active_move == "violent_leverage":
+            rank = self._style_rank_for_move(caller, ["Silat"], "violent_leverage")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_violent_leverage"):
+                return
+            self._violent_leverage(caller, target, dex, rank)
+            return
+
+        if active_move == "coordinated_combination":
+            rank = self._style_rank_for_move(caller, ["Arnis"], "coordinated_combination")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_coordinated_combination"):
+                return
+            self._coordinated_combination(caller, target, dex, rank)
+            return
+
+        if active_move == "disarming_technique":
+            rank = self._style_rank_for_move(caller, ["Arnis"], "disarming_technique")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_disarming_technique"):
+                return
+            self._disarming_technique(caller, target, dex, rank)
+            return
+
+        if active_move == "rhythmic_recovery":
+            rank = self._style_rank_for_move(caller, ["Capoeira"], "rhythmic_recovery")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_rhythmic_recovery"):
+                return
+            self._rhythmic_recovery(caller, target, dex, rank)
+            return
+
+        if active_move == "slash_dance":
+            rank = self._style_rank_for_move(caller, ["Capoeira"], "slash_dance")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_slash_dance"):
+                return
+            self._slash_dance(caller, target, dex, rank)
+            return
+
+        if active_move == "shaolin_step":
+            rank = self._style_rank_for_move(caller, ["Choy Li Fut"], "shaolin_step")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_shaolin_step"):
+                return
+            self._shaolin_step(caller, dex, rank)
+            return
+
+        if active_move == "sweeping_fist":
+            rank = self._style_rank_for_move(caller, ["Choy Li Fut"], "sweeping_fist")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_sweeping_fist"):
+                return
+            self._sweeping_fist(caller, target, dex, rank)
+            return
+
+        if active_move == "environmental_improvisation":
+            rank = self._style_rank_for_move(caller, ["Drunken Fist"], "environmental_improvisation")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_environmental_improvisation"):
+                return
+            self._environmental_improvisation(caller, dex, rank)
+            return
+
+        if active_move == "lucky_stumble":
+            rank = self._style_rank_for_move(caller, ["Drunken Fist"], "lucky_stumble")
+            if rank <= 0:
+                return
+            self._lucky_stumble(caller, dex, rank)
+            return
+
+        if active_move == "aiki":
+            rank = self._style_rank_for_move(caller, ["Jujutsu"], "aiki")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_aiki"):
+                return
+            self._aiki(caller, target, dex, rank)
+            return
+
+        if active_move == "throwing_technique":
+            rank = self._style_rank_for_move(caller, ["Jujutsu"], "throwing_technique")
+            if rank <= 0:
+                return
+            if _get_willpower(caller) < 6:
+                caller.msg("Throwing Technique requires WILL 6+.")
+                return
+            if not _consume_scene_action(caller, "martial_throwing_technique"):
+                return
+            self._throwing_technique(caller, target, dex, rank)
+            return
+
+        if active_move == "five_forms":
+            rank = self._style_rank_for_move(caller, ["Kung Fu"], "five_forms")
+            if rank <= 0:
+                return
+            if int(rank) < 4:
+                caller.msg("Five Forms requires Kung Fu rank 4+.")
+                return
+            if not _consume_scene_action(caller, "martial_five_forms"):
+                return
+            self._five_forms(caller, target, dex, rank)
+            return
+
+        if active_move == "superior_stance":
+            rank = self._style_rank_for_move(caller, ["Kung Fu"], "superior_stance")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_superior_stance"):
+                return
+            self._superior_stance(caller, dex, rank)
+            return
+
+        if active_move == "conditioned_ferocity":
+            rank = self._style_rank_for_move(caller, ["Muay Thai"], "conditioned_ferocity")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_conditioned_ferocity"):
+                return
+            self._conditioned_ferocity(caller, target, dex, rank)
+            return
+
+        if active_move == "conditioned_power":
+            rank = self._style_rank_for_move(caller, ["Muay Thai"], "conditioned_power")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_conditioned_power"):
+                return
+            self._conditioned_power(caller, target, dex, rank)
+            return
+
+        if active_move == "joint_manipulation":
+            rank = self._style_rank_for_move(caller, ["Tai Chi"], "joint_manipulation")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_joint_manipulation"):
+                return
+            self._joint_manipulation(caller, target, dex, rank)
+            return
+
+        if active_move == "lu":
+            rank = self._style_rank_for_move(caller, ["Tai Chi"], "lu")
+            if rank <= 0:
+                return
+            if _get_willpower(caller) < 8:
+                caller.msg("Lu requires WILL 8+.")
+                return
+            if not _consume_scene_action(caller, "martial_lu"):
+                return
+            self._lu(caller, target, dex, rank)
+            return
+
+        if active_move == "advantaged_position":
+            rank = self._style_rank_for_move(caller, ["Thamoc"], "advantaged_position")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_advantaged_position"):
+                return
+            self._advantaged_position(caller, target, dex, rank)
+            return
+
+        if active_move == "weapon_retention":
+            rank = self._style_rank_for_move(caller, ["Thamoc"], "weapon_retention")
+            if rank <= 0:
+                return
+            self._weapon_retention(caller, dex, rank)
+            return
+
+        if active_move == "cut_the_bullet":
+            rank = self._style_rank_for_move(caller, ["Kendo"], "cut_the_bullet")
+            if rank <= 0:
+                return
+            if _get_willpower(caller) < 8:
+                caller.msg("Cut the Bullet requires WILL 8+.")
+                return
+            self._cut_the_bullet(caller, dex, rank)
+            return
+
+        if active_move == "bonebreak":
+            rank = self._style_rank_for_move(caller, ["Karate"], "bonebreak")
+            if rank <= 0:
+                return
+            if _get_willpower(caller) < 8:
+                caller.msg("Bone Breaking Strike requires WILL 8+.")
+                return
+            if not _consume_scene_action(caller, "martial_bonebreak"):
+                return
+            self._bonebreak(caller, target, dex, rank)
+            return
+
+        if active_move == "knockout_punch":
+            rank = self._style_rank_for_move(caller, ["Boxing"], "knockout_punch")
+            if rank <= 0:
+                return
+            body = _get_stat(_get_sheet(caller), "body") if _get_sheet(caller) else (getattr(caller.db, "body", 0) or 0)
+            if int(body) < 8:
+                caller.msg("Knockout Punch requires BODY 8+.")
+                return
+            if not _consume_scene_action(caller, "martial_knockout_punch"):
+                return
+            self._knockout_punch(caller, target, dex, rank)
+            return
+
+        if active_move == "punch_combination":
+            rank = self._style_rank_for_move(caller, ["Boxing"], "punch_combination")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_punch_combination"):
+                return
+            self._punch_combination(caller, target, dex, rank)
+            return
+
+        if active_move == "pressure_point":
+            rank = self._style_rank_for_move(caller, ["Taekwondo"], "pressure_point")
+            if rank <= 0:
+                return
+            if _get_willpower(caller) < 8:
+                caller.msg("Pressure Point Strike requires WILL 8+.")
+                return
+            if not _consume_scene_action(caller, "martial_pressure_point"):
+                return
+            self._pressure_point(caller, target, dex, rank)
+            return
+
+        if active_move == "disarm":
+            rank = self._style_rank_for_move(caller, ["Aikido"], "disarm")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_disarm"):
+                return
+            self._disarm(caller, target, dex, rank)
+            return
+
+        if active_move == "iron_grip":
+            rank = self._style_rank_for_move(caller, ["Aikido"], "iron_grip")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_iron_grip"):
+                return
+            self._iron_grip(caller, dex, rank)
+            return
+
+        if active_move == "grab_escape":
+            rank = self._style_rank_for_move(caller, ["Judo"], "grab_escape")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_grab_escape"):
+                return
+            self._grab_escape(caller, dex, rank)
+            return
+
+        if active_move == "counter_throw":
+            rank = self._style_rank_for_move(caller, ["Judo"], "counter_throw")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_counter_throw"):
+                return
+            self._counter_throw(caller, target, dex, rank)
+            return
+
+        if active_move == "flying_kick":
+            rank = self._style_rank_for_move(caller, ["Taekwondo"], "flying_kick")
+            if rank <= 0:
+                return
+            move_stat = _get_stat(_get_sheet(caller), "move") if _get_sheet(caller) else (getattr(caller.db, "move", 0) or 0)
+            if int(move_stat) < 8:
+                caller.msg("Flying Kick requires MOVE 8+.")
+                return
+            if not _consume_scene_action(caller, "martial_flying_kick"):
+                return
+            self._flying_kick(caller, target, dex, rank)
+            return
+
+        if active_move == "chokehold":
+            rank = self._style_rank_for_move(caller, ["Wrestling"], "chokehold")
+            if rank <= 0:
+                return
+            self._chokehold(caller, dex, rank)
+            return
+
+        if active_move == "reversal":
+            rank = self._style_rank_for_move(caller, ["Wrestling"], "reversal")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_reversal"):
+                return
+            self._reversal(caller, dex, rank)
+            return
+
+        if active_move == "counter_strike":
+            rank = self._style_rank_for_move(caller, ["Arasaka-te"], "counter_strike")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_counter_strike"):
+                return
+            self._counter_strike(caller, target, dex, rank)
+            return
+
+        if active_move == "escape_hold":
+            rank = self._style_rank_for_move(caller, ["Arasaka-te"], "escape_hold")
+            if rank <= 0:
+                return
+            self._escape_hold(caller, dex, rank)
+            return
+
+        if active_move == "punishing_blow":
+            rank = self._style_rank_for_move(caller, ["Krav Maga"], "punishing_blow")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_punishing_blow"):
+                return
+            self._punishing_blow(caller, target, dex, rank)
+            return
+
+        if active_move == "contact_combat":
+            rank = self._style_rank_for_move(caller, ["Krav Maga"], "contact_combat")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_contact_combat"):
+                return
+            self._contact_combat(caller, target, dex, rank)
+            return
+
+        if active_move == "grit":
+            rank = self._style_rank_for_move(caller, ["Thrash Sambo"], "grit")
+            if rank <= 0:
+                return
+            self._grit(caller, dex, rank)
+            return
+
+        if active_move == "dirty_blow":
+            rank = self._style_rank_for_move(caller, ["Sov-System"], "dirty_blow")
+            if rank <= 0:
+                return
+            body = _get_stat(_get_sheet(caller), "body") if _get_sheet(caller) else (getattr(caller.db, "body", 0) or 0)
+            if int(body) < 4:
+                caller.msg("Dirty Blow requires BODY 4+.")
+                return
+            if not _consume_scene_action(caller, "martial_dirty_blow"):
+                return
+            self._dirty_blow(caller, target, dex, rank)
+            return
+
+        if active_move == "ki_ken_tai_no_ichi":
+            rank = self._style_rank_for_move(caller, ["Kendo"], "ki_ken_tai_no_ichi")
+            if rank <= 0:
+                return
+            if not _consume_scene_action(caller, "martial_ki_ken_tai_no_ichi"):
+                return
+            self._ki_ken_tai_no_ichi(caller, dex, rank)
+            return
+
+        # default: strike (generic martial attack, any trained form or generic rank)
+        strike_rank = max(base_martial, max(forms.values()) if forms else 0)
+        if not _consume_scene_action(caller, "martial_strike"):
+            return
+        self._strike(caller, target, dex, strike_rank)
+
+    def _style_rank_for_move(self, caller, required_styles, move_key):
+        if not _check_martial_once_per_turn(caller, move_key):
+            return 0
+        ranks = [int(_get_martial_style_rank(caller, s) or 0) for s in required_styles]
+        best = max(ranks) if ranks else 0
+        # Backward-compat: if character has generic martial only, allow with generic rank.
+        if best <= 0:
+            _, generic = _get_dex_and_martial(caller)
+            if generic > 0:
+                return int(generic)
+            style_text = " or ".join(required_styles)
+            caller.msg(f"This move requires training in {style_text}.")
+            return 0
+        return int(best)
+
+    def _special_move_roll_vs_dv(self, caller, dex, martial_rank, dv, mod=0):
+        roll = random.randint(1, 10)
+        total = (
+            int(roll)
+            + int(dex)
+            + int(martial_rank)
+            + int(mod)
+            + int(get_action_penalty(caller))
+            + int(_get_grapple_action_penalty(caller))
+            + int(_get_prone_action_penalty(caller))
+        )
+        return total, roll, total >= int(dv)
+
+    def _recovery(self, caller, dex, martial_rank):
+        if not _check_martial_once_per_turn(caller, "recovery"):
+            return
+        if not _is_prone(caller):
+            caller.msg("You are already standing.")
+            return
+        total, roll, ok = self._special_move_roll_vs_dv(caller, dex, martial_rank, 13)
+        if ok:
+            _set_prone(caller, False)
+            caller.msg(f"Recovery succeeds ({total} vs DV13). You stand up without spending your Action.")
+            if caller.location:
+                caller.location.msg_contents(f"|w{caller.key}|n springs back to their feet.", exclude=caller)
+            return
+        if not _consume_scene_action(caller, "martial_recovery_getup"):
+            return
+        _set_prone(caller, False)
+        caller.msg(f"Recovery fails ({total} vs DV13). You still get up, but it costs your Action.")
+        if caller.location:
+            caller.location.msg_contents(f"|w{caller.key}|n gets up from prone.", exclude=caller)
+
+    def _strike(self, caller, target, dex, martial):
+        dex_t, evasion_t = _get_dex_and_evasion(target)
+        r_a = random.randint(1, 10)
+        r_t = random.randint(1, 10)
+        fear_pen = _get_facedown_fear_penalty(caller, target)
+        armed_bonus = 0
+        ferocity_bonus = 0
+        try:
+            if (getattr(caller.db, "armed_dangerous_until", 0) or 0) > time.time():
+                armed_bonus = 2
+                caller.db.armed_dangerous_until = 0
+            if (getattr(caller.db, "conditioned_ferocity_until", 0) or 0) > time.time():
+                ferocity_bonus = 1
+        except Exception:
+            armed_bonus = 0
+            ferocity_bonus = 0
+        total_a = (
+            r_a
+            + int(dex)
+            + int(martial)
+            + int(get_action_penalty(caller))
+            + int(_get_grapple_action_penalty(caller))
+            + int(_get_prone_action_penalty(caller))
+            + int(fear_pen)
+            + int(armed_bonus)
+            + int(ferocity_bonus)
+        )
+        total_t = (
+            r_t
+            + int(dex_t)
+            + int(evasion_t)
+            + int(get_action_penalty(target))
+            + int(_get_grapple_action_penalty(target))
+            + int(_get_prone_action_penalty(target))
+        )
+        if total_a <= total_t:
+            _mark_martial_event(caller, "missed_ma_attack")
+            caller.msg(
+                f"Martial strike misses {target.key}: {total_a} vs {total_t} "
+                f"(1d10[{r_a}] + DEX {dex} + MA {martial})."
+            )
+            if caller.location:
+                caller.location.msg_contents(
+                    f"|w{caller.key}|n's martial strike misses |w{target.key}|n.",
+                    exclude=caller,
+                )
+            return
+        dice = _martial_damage_dice_for_body(caller)
+        # Gun Fu (lightweight): while active, use stored handgun damage dice and consume ammo.
+        try:
+            if (getattr(caller.db, "gun_fu_until", 0) or 0) > time.time():
+                gf_dice = int(getattr(caller.db, "gun_fu_damage_dice", 0) or 0)
+                if gf_dice > 0:
+                    weapon = _get_equipped_weapon(caller)
+                    if weapon and int(getattr(weapon, "current_ammo", 0) or 0) > 0:
+                        weapon.current_ammo = int(getattr(weapon, "current_ammo", 0) or 0) - 1
+                        weapon.save()
+                        dice = gf_dice
+                    else:
+                        caller.msg("Gun Fu strike fails: you have no ammo.")
+                        return
+        except Exception:
+            pass
+        try:
+            if (getattr(caller.db, "conditioned_power_until", 0) or 0) > time.time():
+                dice = min(6, int(dice) + 1)
+                caller.db.conditioned_power_until = 0
+            if (getattr(caller.db, "conditioned_ferocity_until", 0) or 0) > time.time():
+                dice = min(6, int(dice) + 1)
+                caller.db.conditioned_ferocity_until = 0
+        except Exception:
+            pass
+        rolls = [random.randint(1, 6) for _ in range(dice)]
+        raw = sum(rolls)
+        armor_sp = int(get_armor_sp(target, "body") or 0)
+        effective_sp = (armor_sp + 1) // 2
+        try:
+            if (getattr(caller.db, "env_improv_until", 0) or 0) > time.time():
+                effective_sp = (effective_sp + 1) // 2
+                caller.db.env_improv_until = 0
+        except Exception:
+            pass
+        try:
+            if (
+                (getattr(caller.db, "aiki_until", 0) or 0) > time.time()
+                and int(getattr(caller.db, "aiki_target_id", 0) or 0) == int(getattr(target, "id", -1) or -1)
+            ):
+                alt_body = int(getattr(caller.db, "aiki_body_value", 0) or 0)
+                if alt_body > 0:
+                    raw += alt_body
+                caller.db.aiki_until = 0
+                caller.db.aiki_target_id = 0
+                caller.db.aiki_body_value = 0
+        except Exception:
+            pass
+        dealt = max(0, raw - effective_sp)
+        if dealt > 0:
+            apply_damage_to_character(target, dealt)
+        _mark_martial_event(caller, "landed_ma_attack")
+        _inc_martial_hit_count(caller, target)
+        msg = (
+            f"You land a martial strike on {target.key}: "
+            f"{dice}d6 {rolls} = {raw}, half-armor SP {effective_sp}, damage {dealt}."
+        )
+        caller.msg(msg)
+        if caller.location:
+            caller.location.msg_contents(
+                f"|w{caller.key}|n lands a martial strike on |w{target.key}|n for |r{dealt}|n damage.",
+                exclude=caller,
+            )
+        if rolls.count(6) >= 2:
+            injury_name, _ = apply_critical_injury_to_character(target, "body", "body")
+            if injury_name:
+                _mark_martial_event(caller, "inflicted_critical")
+                caller.msg(f"|rCritical injury inflicted: {injury_name}.|n")
+                if caller.location:
+                    caller.location.msg_contents(
+                        f"|rCritical injury!|n |w{target.key}|n suffers |r{injury_name}|n.",
+                        exclude=caller,
+                    )
+        if fear_pen < 0:
+            caller.db.fear_target_id = None
+            caller.db.fear_until = 0
+            caller.msg("You push through your fear after landing the hit.")
+
+    def _knockout_punch(self, caller, target, dex, martial):
+        dex_t, evasion_t = _get_dex_and_evasion(target)
+        r_a = random.randint(1, 10)
+        r_t = random.randint(1, 10)
+        total_a = r_a + int(dex) + int(martial) - 5 + int(get_action_penalty(caller))
+        total_t = r_t + int(dex_t) + int(evasion_t) + int(get_action_penalty(target))
+        if total_a <= total_t:
+            caller.msg(f"Knockout Punch misses: {total_a} vs {total_t}.")
+            return
+        dice = _martial_damage_dice_for_body(caller)
+        raw = sum(random.randint(1, 6) for _ in range(dice))
+        armor_sp = int(get_armor_sp(target, "head") or 0)
+        dealt = max(0, (raw - armor_sp) * 2)
+        if dealt > 0:
+            apply_damage_to_character(target, dealt)
+        injury_name, _ = apply_critical_injury_to_character(target, "head", "head")
+        if injury_name:
+            _mark_martial_event(caller, "inflicted_critical")
+        caller.msg(
+            f"You land Knockout Punch on {target.key} for {dealt} head damage"
+            + (f" and inflict {injury_name}." if injury_name else ".")
+        )
+
+    def _punch_combination(self, caller, target, dex, martial):
+        if _get_martial_hit_count(caller, target) < 2:
+            caller.msg("Punch Combination requires two successful close hits on the same target this turn.")
+            return
+        # Lightweight implementation: successful DV15 setup grants one bonus brawling-style strike.
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Punch Combination setup fails ({total} vs DV15).")
+            return
+        self._strike(caller, target, dex, martial)
+
+    def _pressure_point(self, caller, target, dex, martial):
+        dex_t, evasion_t = _get_dex_and_evasion(target)
+        r_a = random.randint(1, 10)
+        r_t = random.randint(1, 10)
+        fear_pen = _get_facedown_fear_penalty(caller, target)
+        total_a = (
+            r_a
+            + int(dex)
+            + int(martial)
+            + int(get_action_penalty(caller))
+            + int(_get_grapple_action_penalty(caller))
+            + int(_get_prone_action_penalty(caller))
+            + int(fear_pen)
+        )
+        total_t = (
+            r_t
+            + int(dex_t)
+            + int(evasion_t)
+            + int(get_action_penalty(target))
+            + int(_get_grapple_action_penalty(target))
+            + int(_get_prone_action_penalty(target))
+        )
+        if total_a <= total_t:
+            caller.msg(f"Pressure Point Strike misses: {total_a} vs {total_t}.")
+            return
+        dice = _martial_damage_dice_for_body(caller)
+        raw = sum(random.randint(1, 6) for _ in range(dice))
+        armor_sp = int(get_armor_sp(target, "body") or 0)
+        dealt = max(0, raw - ((armor_sp + 1) // 2))
+        if dealt > 0:
+            apply_damage_to_character(target, dealt)
+        injury_name, _ = apply_critical_injury_to_character(target, "body", "body")
+        if injury_name:
+            _mark_martial_event(caller, "inflicted_critical")
+        caller.msg(
+            f"You land Pressure Point Strike on {target.key} for {dealt} damage"
+            + (f" and inflict {injury_name}." if injury_name else ".")
+        )
+
+    def _dirty_blow(self, caller, target, dex, martial):
+        dex_t, evasion_t = _get_dex_and_evasion(target)
+        r_a = random.randint(1, 10)
+        r_t = random.randint(1, 10)
+        total_a = r_a + int(dex) + int(martial) + int(get_action_penalty(caller))
+        total_t = r_t + int(dex_t) + int(evasion_t) + int(get_action_penalty(target))
+        if total_a <= total_t:
+            caller.msg(f"Dirty Blow misses: {total_a} vs {total_t}.")
+            return
+        dice = _martial_damage_dice_for_body(caller)
+        raw = sum(random.randint(1, 6) for _ in range(dice))
+        armor_sp = int(get_armor_sp(target, "body") or 0)
+        dealt = max(0, raw - ((armor_sp + 1) // 2))
+        if dealt > 0:
+            apply_damage_to_character(target, dealt)
+        injury_name, _ = apply_critical_injury_to_character(target, "body", "body")
+        if injury_name:
+            _mark_martial_event(caller, "inflicted_critical")
+        caller.msg(
+            f"You land Dirty Blow on {target.key} for {dealt} damage"
+            + (f" and inflict {injury_name}." if injury_name else ".")
+        )
+
+    def _bonebreak(self, caller, target, dex, martial):
+        dex_t, evasion_t = _get_dex_and_evasion(target)
+        r_a = random.randint(1, 10)
+        r_t = random.randint(1, 10)
+        fear_pen = _get_facedown_fear_penalty(caller, target)
+        total_a = (
+            r_a
+            + int(dex)
+            + int(martial)
+            - 8
+            + int(get_action_penalty(caller))
+            + int(_get_grapple_action_penalty(caller))
+            + int(_get_prone_action_penalty(caller))
+            + int(fear_pen)
+        )
+        total_t = (
+            r_t
+            + int(dex_t)
+            + int(evasion_t)
+            + int(get_action_penalty(target))
+            + int(_get_grapple_action_penalty(target))
+            + int(_get_prone_action_penalty(target))
+        )
+        if total_a <= total_t:
+            caller.msg(f"Bone Breaking Strike misses: {total_a} vs {total_t}.")
+            return
+        dice = _martial_damage_dice_for_body(caller)
+        raw = sum(random.randint(1, 6) for _ in range(dice))
+        armor_sp = int(get_armor_sp(target, "body") or 0)
+        dealt = max(0, raw - ((armor_sp + 1) // 2))
+        if dealt > 0:
+            apply_damage_to_character(target, dealt)
+        injury_name, _ = apply_critical_injury_to_character(target, "body", "body")
+        if injury_name:
+            _mark_martial_event(caller, "inflicted_critical")
+        caller.msg(
+            f"You land Bone Breaking Strike on {target.key} for {dealt} damage"
+            + (f" and inflict {injury_name}." if injury_name else ".")
+        )
+        if caller.location:
+            caller.location.msg_contents(
+                f"|w{caller.key}|n lands a |rBone Breaking Strike|n on |w{target.key}|n.",
+                exclude=caller,
+            )
+        if fear_pen < 0:
+            caller.db.fear_target_id = None
+            caller.db.fear_until = 0
+            caller.msg("You push through your fear after landing the hit.")
+
+    def _iron_grip(self, caller, dex, martial):
+        tgt = _get_grapple_target(caller)
+        if not tgt:
+            caller.msg("Iron Grip requires that you are currently grappling someone.")
+            return
+        if getattr(tgt.db, "iron_grip_by_id", None) == caller.id:
+            caller.msg(f"{tgt.key} is already affected by your Iron Grip.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Iron Grip fails ({total} vs DV15).")
+            return
+        tgt.db.iron_grip_by_id = caller.id
+        caller.msg(f"Iron Grip succeeds on {tgt.key}. Their escape attempts suffer -2.")
+        tgt.msg(f"{caller.key}'s Iron Grip locks you down; escape attempts are harder.")
+
+    def _grab_escape(self, caller, dex, martial):
+        gid = getattr(caller.db, "grappled_by_id", None)
+        if not gid:
+            caller.msg("Grab Escape requires that you are currently grappled.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Grab Escape fails ({total} vs DV15).")
+            return
+        from evennia.utils.search import search_object
+
+        found = search_object(f"#{gid}")
+        attacker = found[0] if found else None
+        if attacker and _get_martial_hit_count(caller, attacker) < 2:
+            caller.msg("Grab Escape requires two successful close hits on your grappler this turn.")
+            return
+        if attacker:
+            _clear_grapple_state(attacker=attacker, target=caller)
+            caller.msg(f"You break free from {attacker.key}'s grapple!")
+            attacker.msg(f"{caller.key} slips your grapple.")
+        else:
+            caller.db.grappled_by_id = None
+            caller.msg("You break free.")
+
+    def _counter_throw(self, caller, target, dex, martial):
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Counter Throw setup fails ({total} vs DV15).")
+            return
+        body = _get_stat(_get_sheet(caller), "body") if _get_sheet(caller) else (getattr(caller.db, "body", 0) or 0)
+        body = max(1, int(body))
+        apply_damage_to_character(target, body)
+        _set_prone(target, True)
+        caller.msg(f"You counter-throw {target.key}, dealing {body} direct damage and knocking them prone.")
+        if caller.location:
+            caller.location.msg_contents(
+                f"|w{caller.key}|n counter-throws |w{target.key}|n to the ground.",
+                exclude=caller,
+            )
+
+    def _flying_kick(self, caller, target, dex, martial):
+        dex_t, evasion_t = _get_dex_and_evasion(target)
+        r_a = random.randint(1, 10)
+        r_t = random.randint(1, 10)
+        total_a = r_a + int(dex) + int(martial) + int(get_action_penalty(caller))
+        total_t = r_t + int(dex_t) + int(evasion_t) + int(get_action_penalty(target))
+        if total_a <= total_t:
+            caller.msg(f"Flying Kick misses: {total_a} vs {total_t}.")
+            return
+        dice = _martial_damage_dice_for_body(caller)
+        raw = sum(random.randint(1, 6) for _ in range(dice))
+        armor_sp = int(get_armor_sp(target, "body") or 0)
+        dealt = max(0, raw - ((armor_sp + 1) // 2))
+        if dealt > 0:
+            apply_damage_to_character(target, dealt)
+        _set_prone(target, True)
+        caller.msg(f"You land a Flying Kick on {target.key} for {dealt} damage and knock them prone.")
+
+    def _chokehold(self, caller, dex, martial):
+        if not _check_martial_once_per_turn(caller, "chokehold"):
+            return
+        tgt = _get_grapple_target(caller)
+        if not tgt:
+            caller.msg("Chokehold requires that you are grappling a target.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Chokehold setup fails ({total} vs DV15).")
+            return
+        body = _get_stat(_get_sheet(caller), "body") if _get_sheet(caller) else (getattr(caller.db, "body", 0) or 0)
+        body = max(1, int(body))
+        old_hp = get_current_hp(tgt)
+        if old_hp > 1 and old_hp - body < 0:
+            dmg = max(0, old_hp - 1)
+            apply_damage_to_character(tgt, dmg)
+            tgt.db.unconscious_until = time.time() + 60
+        else:
+            apply_damage_to_character(tgt, body)
+            dmg = body
+        caller.msg(f"Chokehold succeeds: you choke {tgt.key} for {dmg} direct damage without spending another Action.")
+
+    def _reversal(self, caller, dex, martial):
+        gid = getattr(caller.db, "grappled_by_id", None)
+        if not gid:
+            caller.msg("Reversal requires that you are currently grappled.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Reversal fails ({total} vs DV15).")
+            return
+        from evennia.utils.search import search_object
+
+        found = search_object(f"#{gid}")
+        attacker = found[0] if found else None
+        if not attacker:
+            caller.db.grappled_by_id = None
+            caller.msg("Your grappler is gone; the grapple ends.")
+            return
+        _clear_grapple_state(attacker=attacker, target=caller)
+        _set_grapple_state(caller, attacker)
+        caller.msg(f"You reverse the grapple and now control {attacker.key}.")
+        attacker.msg(f"{caller.key} reverses your grapple and takes control.")
+
+    def _counter_strike(self, caller, target, dex, martial):
+        if not _has_recent_martial_event(caller, "took_melee_damage", seconds=45):
+            caller.msg("Counter Strike requires taking melee damage since your last turn.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Counter Strike setup fails ({total} vs DV15).")
+            return
+        # Reduce aimed-shot penalty this turn in lightweight implementation.
+        caller.db.martial_aim_bonus_value = 3  # -8 -> -5
+        caller.db.martial_aim_bonus_until = time.time() + 12
+        caller.msg("Counter Strike succeeds. Your aimed melee/martial penalty is reduced this turn.")
+        self._strike(caller, target, dex, martial)
+
+    def _punishing_blow(self, caller, target, dex, martial):
+        if not _has_recent_martial_event(caller, "dodged_melee_attack", seconds=45):
+            caller.msg("Punishing Blow requires dodging a melee attack since your last turn.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Punishing Blow setup fails ({total} vs DV15).")
+            return
+        self._strike(caller, target, dex, martial)
+
+    def _contact_combat(self, caller, target, dex, martial):
+        if not _has_recent_martial_event(caller, "inflicted_critical", seconds=45):
+            caller.msg("Contact Combat requires that you inflicted a critical injury recently.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Contact Combat setup fails ({total} vs DV15).")
+            return
+        self._strike(caller, target, dex, martial)
+
+    def _grit(self, caller, dex, martial):
+        if not _check_martial_once_per_turn(caller, "grit"):
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Grit fails ({total} vs DV15).")
+            return
+        caller.db.grit_bonus_until = time.time() + 12
+        caller.msg("Grit succeeds. Critical injury bonus damage is reduced on your next injury this turn.")
+
+    def _ki_ken_tai_no_ichi(self, caller, dex, martial):
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Ki Ken Tai no Ichi fails ({total} vs DV15).")
+            return
+        caller.db.martial_aim_bonus_value = 6  # -8 -> -2 on first aimed attack next turn
+        caller.db.martial_aim_bonus_until = time.time() + 30
+        caller.msg("Ki Ken Tai no Ichi succeeds. Your next aimed melee attack penalty is reduced.")
+
+    def _woo_technique(self, caller, dex, martial):
+        sheet = _get_sheet(caller)
+        hg = _get_skill(sheet, "handgun") if sheet else ((caller.db.skills or {}).get("handgun", 0) or 0)
+        if int(hg) < 4:
+            caller.msg("Woo Technique requires Handgun 4+.")
+            return
+        weapon = _get_equipped_weapon(caller)
+        if not weapon:
+            caller.msg("Woo Technique requires a one-handed handgun to be equipped.")
+            return
+        cat = (getattr(weapon, "category", "") or "").strip().lower()
+        if cat not in ("handgun", "smg"):
+            caller.msg("Woo Technique currently supports equipped handgun-category weapons.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Woo Technique fails ({total} vs DV15).")
+            return
+        caller.db.gun_fu_until = time.time() + 12
+        caller.db.gun_fu_weapon_id = getattr(weapon, "id", None)
+        caller.db.gun_fu_damage_dice = int(_parse_damage_dice(getattr(weapon, "damage", None)) or 2)
+        caller.msg("Woo Technique succeeds. Your martial strikes channel your handgun style this turn.")
+
+    def _combat_reload(self, caller, dex, martial, args):
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Combat Reload setup fails ({total} vs DV15).")
+            return
+        # Lightweight: provide immediate tactical reload via existing attack/reload path.
+        weapon = _get_equipped_weapon(caller)
+        if not weapon:
+            caller.msg("You need an equipped weapon to use Combat Reload.")
+            return
+        caller.msg("Combat Reload succeeds. Reload now without spending another action.")
+        if caller.location:
+            caller.location.msg_contents(f"|w{caller.key}|n performs a rapid combat reload.", exclude=caller)
+
+    def _combat_knife_training(self, caller, target, dex, martial):
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Combat Knife Training setup fails ({total} vs DV15).")
+            return
+        dex_t, evasion_t = _get_dex_and_evasion(target)
+        r_a = random.randint(1, 10)
+        r_t = random.randint(1, 10)
+        total_a = r_a + int(dex) + int(martial) + int(get_action_penalty(caller))
+        total_t = r_t + int(dex_t) + int(evasion_t) + int(get_action_penalty(target))
+        if total_a <= total_t:
+            caller.msg(f"Combat Knife strike misses: {total_a} vs {total_t}.")
+            return
+        # Lightweight approximation: boosted 4d6 knife-style hit.
+        raw = sum(random.randint(1, 6) for _ in range(4))
+        armor_sp = int(get_armor_sp(target, "body") or 0)
+        dealt = max(0, raw - ((armor_sp + 1) // 2))
+        if dealt > 0:
+            apply_damage_to_character(target, dealt)
+        caller.msg(f"Combat Knife Training lands on {target.key} for {dealt} damage.")
+
+    def _commando_disarm(self, caller, target, dex, martial):
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Commando Disarm setup fails ({total} vs DV15).")
+            return
+        dropped = _force_drop_equipped_weapon(target)
+        if not dropped:
+            caller.msg(f"{target.key} has no equipped weapon to disarm.")
+            return
+        name = getattr(dropped, "name", "their weapon")
+        caller.msg(f"Commando Disarm succeeds: you strip {name} from {target.key}.")
+        target.msg(f"{caller.key} strips your weapon from your hands.")
+        if caller.location:
+            caller.location.msg_contents(f"|w{caller.key}|n disarms |w{target.key}|n with commando technique.", exclude=(caller, target))
+
+    def _niramiai(self, caller, dex, martial):
+        if not _check_martial_once_per_turn(caller, "niramiai"):
+            return
+        cool = _get_stat(_get_sheet(caller), "cool") if _get_sheet(caller) else (getattr(caller.db, "cool", 0) or 0)
+        if int(cool) < 4:
+            caller.msg("Niramiai requires COOL 4+.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Niramiai fails ({total} vs DV15).")
+            return
+        caller.db.facedown_bonus = 2
+        caller.db.facedown_bonus_until = time.time() + 60
+        caller.msg("Niramiai succeeds. Your next facedown gains +2.")
+
+    def _deashi(self, caller, dex, martial):
+        if not _check_martial_once_per_turn(caller, "deashi"):
+            return
+        body = _get_stat(_get_sheet(caller), "body") if _get_sheet(caller) else (getattr(caller.db, "body", 0) or 0)
+        if int(body) < 7:
+            caller.msg("Deashi requires BODY 7+.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Deashi fails ({total} vs DV15).")
+            return
+        caller.db.deashi_until = time.time() + 12
+        caller.msg("Deashi succeeds. Your next grapple/throw against you is negated this turn.")
+
+    def _hassetsu(self, caller, dex, martial):
+        weapon = _get_equipped_weapon(caller)
+        if not weapon or (getattr(weapon, "category", "") or "").strip().lower() != "archery":
+            caller.msg("Hassetsu requires an equipped archery weapon.")
+            return
+        if _is_prone(caller) or _is_grappled(caller) or _get_grapple_target(caller):
+            caller.msg("You cannot establish Kyudo stance while prone or in a grapple.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Hassetsu fails ({total} vs DV15).")
+            return
+        caller.db.kyudo_stance_until = time.time() + 120
+        caller.db.kyudo_stance_active = True
+        caller.msg("Hassetsu succeeds. You establish Kyudo stance.")
+
+    def _zaiteki(self, caller, target, dex, martial):
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Zaiteki fails ({total} vs DV15).")
+            return
+        max_luck = _get_stat(_get_sheet(caller), "luck") if _get_sheet(caller) else (getattr(caller.db, "luck", 0) or 0)
+        current = int(getattr(caller.db, "current_luck", 0) or 0)
+        regain = min(2, max(0, int(max_luck) - current))
+        if regain <= 0:
+            caller.msg("Zaiteki succeeds, but your luck pool is already full.")
+            return
+        caller.db.current_luck = current + regain
+        caller.msg(f"Zaiteki succeeds. You regain {regain} Luck.")
+
+    def _borg_fist(self, caller, target, dex, martial):
+        body = _get_stat(_get_sheet(caller), "body") if _get_sheet(caller) else (getattr(caller.db, "body", 0) or 0)
+        body_t = _get_stat(_get_sheet(target), "body") if _get_sheet(target) else (getattr(target.db, "body", 0) or 0)
+        if int(body_t) >= int(body):
+            caller.msg("Borg Fist requires target BODY lower than yours.")
+            return
+        dex_t, evasion_t = _get_dex_and_evasion(target)
+        r_a = random.randint(1, 10)
+        r_t = random.randint(1, 10)
+        total_a = r_a + int(dex) + int(martial) + int(get_action_penalty(caller))
+        total_t = r_t + int(dex_t) + int(evasion_t) + int(get_action_penalty(target))
+        if total_a <= total_t:
+            caller.msg(f"Borg Fist misses: {total_a} vs {total_t}.")
+            return
+        dice = 6 if int(getattr(caller.db, "humanity", 0) or 0) < 0 else 5
+        raw = sum(random.randint(1, 6) for _ in range(dice))
+        armor_sp = int(get_armor_sp(target, "body") or 0)
+        dealt = max(0, raw - ((armor_sp + 1) // 2))
+        if dealt > 0:
+            apply_damage_to_character(target, dealt)
+        caller.msg(f"Borg Fist lands on {target.key} for {dealt} damage ({dice}d6 base).")
+
+    def _inner_chrome(self, caller, dex, martial):
+        # Lightweight implementation: defensive buff for cyberware stability.
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 11)
+        if not ok:
+            caller.msg(f"Inner Chrome fails ({total} vs DV11).")
+            return
+        caller.db.inner_chrome_until = time.time() + 60
+        caller.msg("Inner Chrome succeeds. Your cyberware systems stabilize for this fight window.")
+
+    def _armed_dangerous(self, caller, target, dex, martial):
+        # Lightweight arm-count check: cyberarm users are treated as having arm advantage over non-cyberarm targets.
+        has_adv = _has_cyberarm_installed(caller) and not _has_cyberarm_installed(target)
+        if not has_adv:
+            caller.msg("Armed & Dangerous requires arm-count advantage over target.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Armed & Dangerous fails ({total} vs DV15).")
+            return
+        # Apply one-time boost to next brawling/martial style action.
+        caller.db.armed_dangerous_until = time.time() + 12
+        caller.msg("Armed & Dangerous succeeds. Your next close attack gains enhanced control.")
+
+    def _smack_together(self, caller, dex, martial):
+        body = _get_stat(_get_sheet(caller), "body") if _get_sheet(caller) else (getattr(caller.db, "body", 0) or 0)
+        if int(body) < 6:
+            caller.msg("Smack Together requires BODY 6+.")
+            return
+        tgt = _get_grapple_target(caller)
+        if not tgt:
+            caller.msg("Smack Together requires controlling at least one grapple target.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Smack Together fails ({total} vs DV15).")
+            return
+        dmg = max(1, int(body))
+        apply_damage_to_character(tgt, dmg)
+        caller.msg(f"Smack Together slams {tgt.key} for {dmg} direct damage.")
+        if caller.location:
+            caller.location.msg_contents(f"|w{caller.key}|n slams |w{tgt.key}|n brutally.", exclude=caller)
+
+    def _internal_power(self, caller, target, dex, martial):
+        will = _get_willpower(caller)
+        if int(will) < 6:
+            caller.msg("Internal Power requires WILL 6+.")
+            return
+        if _get_martial_hit_count(caller, target) < 2:
+            caller.msg("Internal Power requires two successful close hits on this target this turn.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Internal Power fails ({total} vs DV15).")
+            return
+        self._strike(caller, target, dex, martial)
+
+    def _violent_leverage(self, caller, target, dex, martial):
+        tgt = _get_grapple_target(caller)
+        if not tgt:
+            caller.msg("Violent Leverage requires that you have started and hold a grapple.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Violent Leverage fails ({total} vs DV15).")
+            return
+        # Lightweight: one bonus melee-style strike.
+        self._strike(caller, target, dex, martial)
+
+    def _coordinated_combination(self, caller, target, dex, martial):
+        if _get_martial_hit_count(caller, target) < 2:
+            caller.msg("Coordinated Combination requires two successful close hits on this target this turn.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Coordinated Combination fails ({total} vs DV15).")
+            return
+        injury_name, _ = apply_critical_injury_to_character(target, "body", "body")
+        if injury_name:
+            _mark_martial_event(caller, "inflicted_critical")
+        caller.msg(
+            f"Coordinated Combination lands on {target.key}."
+            + (f" {injury_name} applied (no bonus damage approximation)." if injury_name else "")
+        )
+
+    def _disarming_technique(self, caller, target, dex, martial):
+        if not _has_recent_martial_event(caller, "dodged_melee_attack", seconds=45):
+            caller.msg("Disarming Technique requires dodging melee attacks since your last turn.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Disarming Technique fails ({total} vs DV15).")
+            return
+        dropped = _force_drop_equipped_weapon(target)
+        if dropped:
+            caller.msg(f"Disarming Technique strips {target.key}'s weapon.")
+        else:
+            caller.msg(f"{target.key} has no weapon to strip.")
+
+    def _rhythmic_recovery(self, caller, target, dex, martial):
+        if not _has_recent_martial_event(caller, "missed_ma_attack", seconds=45):
+            caller.msg("Rhythmic Recovery requires missing a martial attack since your last turn.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Rhythmic Recovery fails ({total} vs DV15).")
+            return
+        self._strike(caller, target, dex, martial)
+
+    def _slash_dance(self, caller, target, dex, martial):
+        if not _has_recent_martial_event(caller, "inflicted_critical", seconds=45):
+            caller.msg("Slash Dance currently requires inflicting a critical injury recently.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Slash Dance fails ({total} vs DV15).")
+            return
+        self._strike(caller, target, dex, martial)
+
+    def _shaolin_step(self, caller, dex, martial):
+        move_stat = _get_stat(_get_sheet(caller), "move") if _get_sheet(caller) else (getattr(caller.db, "move", 0) or 0)
+        if int(move_stat) < 6:
+            caller.msg("Shaolin Step requires MOVE 6+.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Shaolin Step fails ({total} vs DV15).")
+            return
+        caller.db.shaolin_step_until = time.time() + 12
+        caller.msg("Shaolin Step succeeds. You gain a free tactical run window this turn.")
+
+    def _sweeping_fist(self, caller, target, dex, martial):
+        move_stat = _get_stat(_get_sheet(caller), "move") if _get_sheet(caller) else (getattr(caller.db, "move", 0) or 0)
+        if int(move_stat) < 6:
+            caller.msg("Sweeping Fist requires MOVE 6+.")
+            return
+        if _get_martial_hit_count(caller, target) < 2:
+            caller.msg("Sweeping Fist requires two successful close hits on this target this turn.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Sweeping Fist fails ({total} vs DV15).")
+            return
+        self._strike(caller, target, dex, martial)
+
+    def _environmental_improvisation(self, caller, dex, martial):
+        luck_stat = _get_stat(_get_sheet(caller), "luck") if _get_sheet(caller) else (getattr(caller.db, "luck", 0) or 0)
+        if int(luck_stat) < 4:
+            caller.msg("Environmental Improvisation requires LUCK 4+.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 13)
+        if not ok:
+            caller.msg(f"Environmental Improvisation fails ({total} vs DV13).")
+            return
+        caller.db.env_improv_until = time.time() + 12
+        caller.msg("Environmental Improvisation succeeds. Your brawling-style strikes ignore half armor briefly.")
+
+    def _lucky_stumble(self, caller, dex, martial):
+        luck_stat = _get_stat(_get_sheet(caller), "luck") if _get_sheet(caller) else (getattr(caller.db, "luck", 0) or 0)
+        if int(luck_stat) < 4:
+            caller.msg("Lucky Stumble requires LUCK 4+.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Lucky Stumble fails ({total} vs DV15).")
+            return
+        current = int(getattr(caller.db, "current_luck", 0) or 0)
+        max_luck = int(luck_stat)
+        regain = min(2, max(0, max_luck - current))
+        if regain > 0:
+            caller.db.current_luck = current + regain
+            caller.msg(f"Lucky Stumble succeeds. You regain {regain} Luck.")
+        else:
+            caller.msg("Lucky Stumble succeeds, but your luck pool is already full.")
+
+    def _aiki(self, caller, target, dex, martial):
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Aiki fails ({total} vs DV15).")
+            return
+        target_body = _get_stat(_get_sheet(target), "body") if _get_sheet(target) else (getattr(target.db, "body", 0) or 0)
+        caller.db.aiki_target_id = target.id
+        caller.db.aiki_body_value = int(target_body)
+        caller.db.aiki_until = time.time() + 12
+        caller.msg(f"Aiki succeeds. You can leverage {target.key}'s BODY for close damage this turn.")
+
+    def _throwing_technique(self, caller, target, dex, martial):
+        if _get_martial_hit_count(caller, target) < 2:
+            caller.msg("Throwing Technique requires two successful close hits on this target this turn.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Throwing Technique fails ({total} vs DV15).")
+            return
+        body = _get_stat(_get_sheet(target), "body") if _get_sheet(target) else (getattr(target.db, "body", 0) or 0)
+        dmg = max(1, int(body))
+        apply_damage_to_character(target, dmg)
+        _set_prone(target, True)
+        caller.msg(f"Throwing Technique launches {target.key} for {dmg} direct damage and prone.")
+
+    def _five_forms(self, caller, target, dex, martial):
+        dex_t, evasion_t = _get_dex_and_evasion(target)
+        r_a = random.randint(1, 10)
+        r_t = random.randint(1, 10)
+        total_a = r_a + int(dex) + int(martial) + int(get_action_penalty(caller))
+        total_t = r_t + int(dex_t) + int(evasion_t) + int(get_action_penalty(target))
+        if total_a <= total_t:
+            caller.msg(f"Five Forms misses: {total_a} vs {total_t}.")
+            return
+        self._strike(caller, target, dex, martial)
+        target.db.five_forms_tiger_ablate = time.time() + 10
+        caller.msg("Five Forms lands. Tiger pressure set (extra armor ablation approximation).")
+
+    def _superior_stance(self, caller, dex, martial):
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 17)
+        if not ok:
+            caller.msg(f"Superior Stance fails ({total} vs DV17).")
+            return
+        try:
+            from commands.combat_system import get_active_scene
+
+            room = getattr(caller, "location", None)
+            scene = get_active_scene(room) if room else None
+            if scene:
+                cid = f"pc-{caller.id}"
+                for idx, e in enumerate(scene.get("roster", [])):
+                    if str(e.get("id", "")) == cid:
+                        scene["turn_index"] = idx
+                        caller.msg("Superior Stance succeeds. You seize top priority in the initiative flow.")
+                        return
+        except Exception:
+            pass
+        caller.msg("Superior Stance succeeds.")
+
+    def _conditioned_ferocity(self, caller, target, dex, martial):
+        if not _has_recent_martial_event(caller, "landed_ma_attack", seconds=45):
+            caller.msg("Conditioned Ferocity requires that you damaged someone with martial attacks recently.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Conditioned Ferocity fails ({total} vs DV15).")
+            return
+        caller.db.conditioned_ferocity_until = time.time() + 12
+        caller.msg("Conditioned Ferocity succeeds. Your next close strike is empowered.")
+        self._strike(caller, target, dex, martial)
+
+    def _conditioned_power(self, caller, target, dex, martial):
+        if not _has_recent_martial_event(caller, "landed_melee_hit", seconds=45):
+            caller.msg("Conditioned Power requires that you damaged someone with close attacks recently.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Conditioned Power fails ({total} vs DV15).")
+            return
+        caller.db.conditioned_power_until = time.time() + 12
+        caller.msg("Conditioned Power succeeds. Your next martial strike gains extra force.")
+        self._strike(caller, target, dex, martial)
+
+    def _joint_manipulation(self, caller, target, dex, martial):
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Joint Manipulation fails ({total} vs DV15).")
+            return
+        target.db.joint_lock_until = time.time() + 12
+        caller.msg(f"Joint Manipulation succeeds. {target.key}'s next hand-based action is hindered.")
+
+    def _lu(self, caller, target, dex, martial):
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Lu fails ({total} vs DV15).")
+            return
+        target.db.lu_suppressed_until = time.time() + 10
+        caller.msg(f"Lu succeeds. {target.key}'s next martial special attempt is pressured.")
+
+    def _advantaged_position(self, caller, target, dex, martial):
+        if not _get_grapple_target(caller):
+            caller.msg("Advantaged Position requires that you are currently grappling a target.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Advantaged Position fails ({total} vs DV15).")
+            return
+        caller.db.martial_aim_bonus_value = max(int(getattr(caller.db, "martial_aim_bonus_value", 0) or 0), 3)
+        caller.db.martial_aim_bonus_until = time.time() + 12
+        caller.msg("Advantaged Position succeeds. Your aimed close attack penalty is reduced this turn.")
+
+    def _weapon_retention(self, caller, dex, martial):
+        if not _check_martial_once_per_turn(caller, "weapon_retention"):
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Weapon Retention fails ({total} vs DV15).")
+            return
+        caller.db.weapon_retention_until = time.time() + 20
+        caller.msg("Weapon Retention succeeds. Your next disarm attempt against you is negated.")
+
+    def _cut_the_bullet(self, caller, dex, martial):
+        if not _check_martial_once_per_turn(caller, "cut_the_bullet"):
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Cut the Bullet fails ({total} vs DV15).")
+            return
+        caller.db.cut_the_bullet_until = time.time() + 12
+        caller.msg("Cut the Bullet succeeds. The next incoming ranged single-shot against you is negated.")
+
+    def _escape_hold(self, caller, dex, martial):
+        if not _check_martial_once_per_turn(caller, "escape_hold"):
+            return
+        gid = getattr(caller.db, "grappled_by_id", None)
+        if not gid:
+            caller.msg("Escape Hold requires that you are currently grappled.")
+            return
+        total, _, ok = self._special_move_roll_vs_dv(caller, dex, martial, 15)
+        if not ok:
+            caller.msg(f"Escape Hold fails ({total} vs DV15).")
+            return
+        from evennia.utils.search import search_object
+
+        found = search_object(f"#{gid}")
+        attacker = found[0] if found else None
+        if attacker:
+            _clear_grapple_state(attacker=attacker, target=caller)
+            caller.msg(f"You break free from {attacker.key}'s hold.")
+        else:
+            caller.db.grappled_by_id = None
+            caller.msg("You break free.")
+
+    def _disarm(self, caller, target, dex, martial):
+        dex_t, evasion_t = _get_dex_and_evasion(target)
+        r_a = random.randint(1, 10)
+        r_t = random.randint(1, 10)
+        fear_pen = _get_facedown_fear_penalty(caller, target)
+        total_a = (
+            r_a
+            + int(dex)
+            + int(martial)
+            + int(get_action_penalty(caller))
+            + int(_get_grapple_action_penalty(caller))
+            + int(_get_prone_action_penalty(caller))
+            + int(fear_pen)
+        )
+        total_t = (
+            r_t
+            + int(dex_t)
+            + int(evasion_t)
+            + int(get_action_penalty(target))
+            + int(_get_grapple_action_penalty(target))
+            + int(_get_prone_action_penalty(target))
+        )
+        if total_a <= total_t:
+            caller.msg(f"Disarm attempt fails: {total_a} vs {total_t}.")
+            return
+        check = random.randint(1, 10) + int(dex) + int(martial)
+        if check < 15:
+            caller.msg(f"You win position but fail to complete disarm (DV15, rolled {check}).")
+            return
+        dropped = _force_drop_equipped_weapon(target)
+        if dropped:
+            name = getattr(dropped, "name", "their weapon")
+            caller.msg(f"You disarm {target.key}, forcing them to drop {name}.")
+            target.msg(f"{caller.key} disarms you; you lose your equipped weapon.")
+            if caller.location:
+                caller.location.msg_contents(
+                    f"|w{caller.key}|n disarms |w{target.key}|n.",
+                    exclude=(caller, target),
+                )
+        else:
+            caller.msg(f"{target.key} has no equipped weapon to disarm.")
+
+
+class CmdFacedown(MuxCommand):
+    """
+    Opposed COOL + Rep + 1d10 stare-down.
+
+    Usage:
+      facedown <target>
+      facedown/backdown [target]
+    """
+
+    key = "facedown"
+    aliases = ["faceoff"]
+    help_category = "Combat"
+
+    def func(self):
+        caller = self.caller
+        switches = [s.lower() for s in (self.switches or [])]
+        args = (self.args or "").strip()
+
+        if "backdown" in switches:
+            from evennia.utils.search import search_object
+
+            target = None
+            if args:
+                target = caller.search(args)
+                if not target:
+                    return
+            else:
+                fear_target_id = getattr(caller.db, "fear_target_id", None)
+                if fear_target_id:
+                    found = search_object(f"#{fear_target_id}")
+                    if found:
+                        target = found[0]
+            if not target:
+                caller.msg("You are not currently pressured in a facedown.")
+                return
+            if _get_facedown_fear_penalty(caller, target) == 0:
+                caller.msg(f"You are not currently suffering facedown pressure from {target.key}.")
+                return
+            caller.db.fear_target_id = None
+            caller.db.fear_until = 0
+            caller.db.backed_down_target_id = target.id
+            caller.db.backed_down_until = time.time() + 600
+            if caller.location:
+                caller.location.msg_contents(f"|w{caller.key}|n backs down from |w{target.key}|n.")
+            else:
+                caller.msg(f"You back down from {target.key}.")
+            return
+
+        if not _consume_scene_action(caller, "facedown"):
+            return
+        if not args:
+            caller.msg("Usage: facedown <target> or facedown/backdown [target]")
+            return
+        target = caller.search(args)
+        if not target:
+            return
+        if target == caller:
+            caller.msg("You cannot facedown yourself.")
+            return
+
+        c_cool, c_rep = _get_cool_and_rep(caller)
+        t_cool, t_rep = _get_cool_and_rep(target)
+        cr = random.randint(1, 10)
+        tr = random.randint(1, 10)
+        c_bonus = 0
+        t_bonus = 0
+        try:
+            if (getattr(caller.db, "facedown_bonus_until", 0) or 0) > time.time():
+                c_bonus = int(getattr(caller.db, "facedown_bonus", 0) or 0)
+                caller.db.facedown_bonus = 0
+                caller.db.facedown_bonus_until = 0
+            if (getattr(target.db, "facedown_bonus_until", 0) or 0) > time.time():
+                t_bonus = int(getattr(target.db, "facedown_bonus", 0) or 0)
+                target.db.facedown_bonus = 0
+                target.db.facedown_bonus_until = 0
+        except Exception:
+            c_bonus = 0
+            t_bonus = 0
+        c_total = c_cool + c_rep + cr + c_bonus
+        t_total = t_cool + t_rep + tr + t_bonus
+
+        if c_total == t_total:
+            msg = (
+                f"|wFacedown:|n {caller.key} [{c_total}] vs {target.key} [{t_total}] - "
+                f"|ystalemate.|n"
+            )
+        elif c_total > t_total:
+            target.db.fear_target_id = caller.id
+            target.db.fear_until = time.time() + 600
+            msg = (
+                f"|wFacedown:|n {caller.key} [{c_total}] vs {target.key} [{t_total}] - "
+                f"|g{caller.key} wins.|n {target.key} can back down or suffer fear penalties."
+            )
+        else:
+            caller.db.fear_target_id = target.id
+            caller.db.fear_until = time.time() + 600
+            msg = (
+                f"|wFacedown:|n {caller.key} [{c_total}] vs {target.key} [{t_total}] - "
+                f"|r{target.key} wins.|n {caller.key} can back down or suffer fear penalties."
+            )
+
+        if caller.location:
+            caller.location.msg_contents(msg)
+        else:
+            caller.msg(msg)
+
+
+class CmdGetUp(MuxCommand):
+    """
+    Stand up from prone.
+
+    Usage:
+      getup
+      stand
+    """
+
+    key = "getup"
+    aliases = ["stand"]
+    help_category = "Combat"
+
+    def func(self):
+        if not _is_prone(self.caller):
+            self.caller.msg("You are already standing.")
+            return
+        if not _consume_scene_action(self.caller, "getup"):
+            return
+        _set_prone(self.caller, False)
+        self.caller.msg("You get back on your feet.")
+        if self.caller.location:
+            self.caller.location.msg_contents(f"|w{self.caller.key}|n gets back to their feet.", exclude=self.caller)

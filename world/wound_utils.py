@@ -14,6 +14,7 @@ from world.wound_data import (
     is_injury_prevented_by_cyberware,
 )
 import random
+import time
 
 
 def get_current_hp(character):
@@ -224,6 +225,22 @@ def apply_critical_injury_to_character(character, table_name, aim_location=None)
 
     # Apply 5 bonus damage (doesn't ablate armor)
     apply_damage_to_character(character, 5, source="critical_injury")
+    # Thrash Sambo: Grit (lightweight integration) negates this bonus once while active.
+    try:
+        grit_until = float(getattr(character.db, "grit_bonus_until", 0) or 0)
+        if grit_until > time.time():
+            current_hp = get_current_hp(character)
+            max_hp = get_max_hp(character)
+            restored = min(max_hp, current_hp + 5)
+            sheet = getattr(character, "character_sheet", None)
+            if sheet:
+                sheet._current_hp = restored
+                sheet.save(skip_recalculation=True)
+            if hasattr(character, "db"):
+                character.db.current_hp = restored
+                character.db.grit_bonus_until = 0
+    except Exception:
+        pass
 
     # Increase base_death_save_penalty if injury has it; add dsp to death_save_penalty (preserve cumulative)
     dsp = injury_data.get("death_save_penalty", 0)

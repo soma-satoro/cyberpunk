@@ -154,8 +154,9 @@ class CmdNote(MuxCommand):
 
     def parse_no_switch_args(self):
         """Parse args when no switch is provided to determine action."""
-        slash_count = self.args.count("/")
         has_equals = "=" in self.args
+        lhs = self.args.split("=", 1)[0] if has_equals else self.args
+        slash_count = lhs.count("/")
 
         if slash_count == 2 and has_equals:
             self.staff_create_note()
@@ -165,6 +166,8 @@ class CmdNote(MuxCommand):
             self.staff_view_specific_note()
         elif not has_equals and slash_count == 0:
             self.view_note_or_player()
+        else:
+            self.caller.msg("Unable to parse note command. See 'help +note' for usage.")
 
     def create_note(self):
         """Create a new note: +note [title]/[category]=[Note Text]"""

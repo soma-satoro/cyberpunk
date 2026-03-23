@@ -389,6 +389,17 @@ ROLE_SKILLS = {
 # Gear OR choices: roles with "choose one" options. Used to show menu during chargen.
 # Format: role -> list of {prompt, options}. Each option is (name, qty) or plain name.
 EQUIPMENT_OR_CHOICES = {
+    "Netrunner": [
+        {
+            "prompt": "Choose your starting cyberdeck:",
+            "options": [
+                "Standard Quality Cyberdeck",
+                "Militech Dataknight-7",
+                "Microtech Warrior",
+                "Raven Microcyb Kestrel 2",
+            ],
+        },
+    ],
     "Rockerboy": [
         {"prompt": "Choose one:", "options": ["Bug Detector", "Electric Guitar"]},
     ],
@@ -425,7 +436,7 @@ EQUIPMENT = {
         "weapons": ["Very Heavy Pistol"],
         "armor": ["Light Armorjack"],
         "gear": [
-            "Agent", "Cyberdeck", "Virtuality Goggles",
+            "Agent", {"or": 0}, "Virtuality Goggles",
             ("Generic Chic Top", 10),
             ("Leisurewear Footwear", 2), "Leisurewear Jewelry", ("Leisurewear Bottoms", 2),
             "Urban Flash Jacket",

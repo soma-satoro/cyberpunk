@@ -56,8 +56,14 @@ def installable_program_or_ice(name: str) -> Optional[dict]:
 
 
 def program_slot_cost(name: str) -> int:
-    """Each program / Black ICE counts as one slot toward the shared pool."""
-    if installable_program_or_ice(name):
+    """
+    Slot cost for a deck payload.
+    - Standard Program: 1 slot
+    - Black ICE: 2 slots
+    """
+    if black_ice_data_by_name(name):
+        return 2
+    if program_data_by_name(name):
         return 1
     return 0
 
@@ -70,6 +76,37 @@ def get_deck_slots_total(deck_gear_name: str) -> Optional[int]:
             return int(cd.get("hardware_slots") or 0) + int(
                 cd.get("program_slots") or 0
             ) + int(cd.get("any_slots") or 0)
+    return None
+
+
+def get_deck_slot_profile(deck_gear_name: str) -> Optional[dict]:
+    """
+    Return slot profile for a deck template.
+
+    Keys:
+      - program_slots
+      - hardware_slots
+      - any_slots
+      - total_slots
+      - max_program_slots (program + any)
+      - max_hardware_slots (hardware + any)
+    """
+    if not deck_gear_name:
+        return None
+    for cd in cyberdecks_data:
+        if cd.get("name") == deck_gear_name:
+            program_slots = int(cd.get("program_slots") or 0)
+            hardware_slots = int(cd.get("hardware_slots") or 0)
+            any_slots = int(cd.get("any_slots") or 0)
+            total_slots = program_slots + hardware_slots + any_slots
+            return {
+                "program_slots": program_slots,
+                "hardware_slots": hardware_slots,
+                "any_slots": any_slots,
+                "total_slots": total_slots,
+                "max_program_slots": program_slots + any_slots,
+                "max_hardware_slots": hardware_slots + any_slots,
+            }
     return None
 
 
@@ -540,7 +577,8 @@ def format_deck_sheet(character, deck_name_filter: Optional[str] = None, width: 
 
     for deck in decks:
         key = deck.name
-        total = get_deck_slots_total(key)
+        slot_profile = get_deck_slot_profile(key)
+        total = slot_profile["total_slots"] if slot_profile else None
         ent = loadouts.get(key) or _empty_entry()
         progs = list(ent["programs"])
         hws = list(ent["hardware"])
@@ -556,6 +594,11 @@ def format_deck_sheet(character, deck_name_filter: Optional[str] = None, width: 
             lines.append(
                 f"|yTotal slots:|n |w{total}|n  |yIn use:|n |w{used}|n  |yFree:|n |w{free}|n  "
                 f"|m({pr_used} program, {hw_used} hardware)|n\n"
+            )
+            lines.append(
+                f"|yProgram max:|n |w{slot_profile['max_program_slots']}|n  "
+                f"|yHardware max:|n |w{slot_profile['max_hardware_slots']}|n  "
+                f"|yAny/All slots:|n |w{slot_profile['any_slots']}|n\n"
             )
 
         lines.append(sheet_section("Programs & Black ICE", width=width))

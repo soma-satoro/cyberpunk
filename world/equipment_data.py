@@ -93,23 +93,23 @@ vehicles = [
     },
     {
         "name": "Cabin Cruiser",
-        "description": "Luxury CHOOH2 powerboat with room to provide accommodations for a small, privileged few. Cabin Cruisers have customized rooms.",
+        "description": "Luxury CHOOH2 powerboat with comfortable accommodations for a small crew. Inventory version represents a standard two-room package.",
         "category": "sea",
         "sdp": 60,
-        "seats": 4,  # 2 per room, minimum 2 rooms
+        "seats": 4,
         "speed_combat": 10,
         "speed_narrative": "15 MPH / 24 KPH",
-        "value": 60000,  # 30,000eb per room, minimum 2 rooms
+        "value": 60000,
     },
     {
         "name": "Yacht",
-        "description": "Luxury CHOOH2 pleasurecraft with ample room to provide accommodations and entertainment for a host and their distinguished guests. Yachts have customized rooms.",
+        "description": "Luxury CHOOH2 pleasurecraft with ample accommodations and entertainment space. Inventory version represents a standard four-room package.",
         "category": "sea",
         "sdp": 100,
-        "seats": 16,  # 4 per room, minimum 4 rooms
+        "seats": 16,
         "speed_combat": 10,
         "speed_narrative": "15 MPH / 24 KPH",
-        "value": 200000,  # 50,000eb per room, minimum 4 rooms
+        "value": 200000,
     },
     # Air Vehicles
     {
@@ -154,13 +154,13 @@ vehicles = [
     },
     {
         "name": "Aerozep",
-        "description": "Modern cargo blimps that range wildly in size depending on their function. Aerozeps have customized rooms.",
+        "description": "Modern cargo blimp for transport and support roles. Inventory version represents a standard two-room under-deck package.",
         "category": "air",
         "sdp": 100,
-        "seats": 4,  # 2 per room, minimum 2 rooms
+        "seats": 4,
         "speed_combat": 20,
         "speed_narrative": "100 MPH / 161 KPH",
-        "value": 60000,  # 30,000eb per room, minimum 2 rooms
+        "value": 60000,
     },
     # Black Chrome vehicles
     {
@@ -490,7 +490,8 @@ weapons = [
         "category": "heavy_weapons",
         "clip": 4,
         "weapon_type": "flamethrower",
-        "quality": "standard"
+        "quality": "standard",
+        "description": "Exotic Shotgun fired with Heavy Weapons. Incendiary Shotgun Shells only. Targets ignited take 4 HP at end of Turn until extinguished. Damage cannot cause Critical Injury. Cannot make Aimed Shots."
     },
     {
         "name": "Light Melee Weapon",
@@ -587,6 +588,189 @@ weapons = [
         "category": "melee",
         "weapon_type": "very heavy melee",
         "quality": "standard"
+    },
+    # Core rulebook exotic weapons
+    {
+        "name": "Air Pistol",
+        "damage": "0d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 100,
+        "category": "handgun",
+        "clip": 12,
+        "weapon_type": "medium pistol",
+        "quality": "standard",
+        "description": "Exotic Medium Pistol. Fires paintballs and deals no HP damage. Acid paintballs ablate armor SP by 1 on hit. Damage cannot cause Critical Injury."
+    },
+    {
+        "name": "Battleglove",
+        "damage": "2d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": False,
+        "weight": 2,
+        "value": 1000,
+        "category": "melee",
+        "clip": 0,
+        "weapon_type": "medium melee",
+        "quality": "standard",
+        "description": "Exotic wearable gauntlet with three Cyberarm/Cyberlimb option slots. Put on/remove as an Action. Cannot be concealed. Stored options are accessible while worn."
+    },
+    {
+        "name": "Constitution Arms Hurricane Assault Weapon",
+        "damage": "5d6",
+        "rof": "2",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 5000,
+        "category": "shoulder_arms",
+        "clip": 16,
+        "weapon_type": "shotgun",
+        "quality": "standard",
+        "description": "Exotic 2 ROF Shotgun. Cannot make Aimed Shots. Drum holds 16 shells. Reloading takes two Actions. Requires BODY 11+ unless mounted."
+    },
+    {
+        "name": "Dartgun",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 100,
+        "category": "handgun",
+        "clip": 8,
+        "weapon_type": "very heavy pistol",
+        "quality": "standard",
+        "description": "Exotic Very Heavy Pistol that only loads Non-Basic Arrow Ammunition. Clip holds 8 arrows and reloads like a pistol."
+    },
+    {
+        "name": "Kendachi Mono-Three",
+        "damage": "4d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 5000,
+        "category": "melee",
+        "clip": 0,
+        "weapon_type": "very heavy melee",
+        "quality": "excellent",
+        "description": "Excellent Quality Two-Handed Exotic Very Heavy Melee Weapon. With correct biometric key, ignores armor lower than SP11. Without key, functions as a standard exotic weapon."
+    },
+    {
+        "name": "Malorian Arms 3516",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 10000,
+        "category": "handgun",
+        "clip": 8,
+        "weapon_type": "very heavy pistol",
+        "quality": "excellent",
+        "description": "Excellent Quality Exotic Very Heavy Pistol. Permanently Smartgun Linked and requires Interface Plugs or Subdermal Grip to fire."
+    },
+    {
+        "name": "Microwaver",
+        "damage": "0d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 500,
+        "category": "handgun",
+        "clip": 8,
+        "weapon_type": "very heavy pistol",
+        "quality": "standard",
+        "description": "Exotic Very Heavy Pistol. On hit, target makes DV15 Cybertech or two cyberware/electronics become inoperable for 1 minute. Uses rechargeable battery packs."
+    },
+    {
+        "name": "Militech \"Cowboy\" U-56 Grenade Launcher",
+        "damage": "6d6",
+        "rof": "2",
+        "hands": 2,
+        "concealable": False,
+        "weight": 3,
+        "value": 5000,
+        "category": "heavy_weapons",
+        "clip": 4,
+        "weapon_type": "grenade launcher",
+        "quality": "standard",
+        "description": "Exotic 2 ROF Grenade Launcher. Can fire all grenade ammunition types. Reloading takes two Actions. Requires BODY 11+ unless mounted."
+    },
+    {
+        "name": "Rhinemetall EMG-86 Railgun",
+        "damage": "5d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 4,
+        "value": 5000,
+        "category": "heavy_weapons",
+        "clip": 4,
+        "weapon_type": "assault rifle",
+        "quality": "standard",
+        "description": "Exotic Assault Rifle fired with Heavy Weapons. Cannot Autofire or make Aimed Shots. Ignores armor below SP11. Reloading takes two Actions. Requires BODY 11+ unless mounted."
+    },
+    {
+        "name": "Shrieker",
+        "damage": "0d6",
+        "rof": "1",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 500,
+        "category": "handgun",
+        "clip": 8,
+        "weapon_type": "very heavy pistol",
+        "quality": "standard",
+        "description": "Exotic Very Heavy Pistol sonic weapon. On hit, target makes DV15 Resist Torture/Drugs or suffers Damaged Ear. User without ear protection also suffers Damaged Ear."
+    },
+    {
+        "name": "Stun Baton",
+        "damage": "2d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": False,
+        "weight": 1,
+        "value": 100,
+        "category": "melee",
+        "clip": 0,
+        "weapon_type": "medium melee",
+        "quality": "standard",
+        "description": "One-Handed Exotic Medium Melee Weapon. If damage would reduce target below 1 HP, target is Unconscious at 1 HP. Damage cannot cause Critical Injury and does not ablate armor."
+    },
+    {
+        "name": "Stun Gun",
+        "damage": "3d6",
+        "rof": "2",
+        "hands": 1,
+        "concealable": True,
+        "weight": 1,
+        "value": 100,
+        "category": "handgun",
+        "clip": 8,
+        "weapon_type": "heavy pistol",
+        "quality": "standard",
+        "description": "Exotic Heavy Pistol. If damage would reduce target below 1 HP, target is Unconscious at 1 HP. Damage cannot cause Critical Injury and does not ablate armor. Uses rechargeable battery packs."
+    },
+    {
+        "name": "Tsunami Arms Helix",
+        "damage": "2d6",
+        "rof": "1",
+        "hands": 2,
+        "concealable": False,
+        "weight": 2,
+        "value": 5000,
+        "category": "shoulder_arms",
+        "clip": 40,
+        "weapon_type": "assault rifle",
+        "quality": "standard",
+        "description": "Exotic Assault Rifle fired only with Autofire (no single shot or Aimed Shots). Consumes 20 bullets per attack. Uses Autofire multiplier (max 5). Reloading takes two Actions."
     },
     # Black Chrome weapons
     {
@@ -2162,13 +2346,13 @@ armors = [
     },
     # Black Chrome fashion and armor
     {
-        "name": "Dirk Combat Jacket",
+        "name": "The Dirk Combat Jacket",
         "sp": 11,
         "ev": 0,
         "locations": "Body",
         "weight": 1,
         "value": 500,
-        "description": "Light Armorjack with Leisurewear appearance. Two clips can be concealed without a Check."
+        "description": "Zhukova International. Light Armorjack with Leisurewear appearance. Two standard-size ammo clips can be concealed without a Check."
     },
     {
         "name": "Gibson Shock Armor",
@@ -2207,6 +2391,33 @@ armors = [
         "description": "Light Armorjack with Urban Flash appearance. Counts as 1 Light Tattoo for Style bonus."
     },
     {
+        "name": "Lotos Netsuit",
+        "sp": 13,
+        "ev": 2,
+        "locations": "Body, Head",
+        "weight": 2,
+        "value": 5000,
+        "description": "Custom armored netsuit. Grants 1 extra Cyberdeck Hardware-only slot while worn. Body and head are a single set. While worn, REF/DEX/MOVE are reduced by 2."
+    },
+    {
+        "name": "Montage Variable Clothing Line",
+        "sp": 11,
+        "ev": 0,
+        "locations": "Body",
+        "weight": 1,
+        "value": 500,
+        "description": "Light Armorjack with programmable appearance (Generic Chic or Gang Colors). Styles can be swapped with a paired Agent."
+    },
+    {
+        "name": "Masetto AirRider",
+        "sp": 7,
+        "ev": 0,
+        "locations": "Body",
+        "weight": 1,
+        "value": 100,
+        "description": "Kevlar Body Armor with crash airbag system. Prevents Whiplash Critical Injury from crashes. After inflation, MOVE is reduced by 5 until deflated."
+    },
+    {
         "name": "SkidRow Trench",
         "sp": 13,
         "ev": 4,
@@ -2223,6 +2434,15 @@ armors = [
         "weight": 1,
         "value": 1000,
         "description": "Light Armorjack with Businesswear appearance. Repairs 1 SP per day when no damage taken."
+    },
+    {
+        "name": "Corporate Island",
+        "sp": 11,
+        "ev": 0,
+        "locations": "Body",
+        "weight": 1,
+        "value": 500,
+        "description": "Nu-Tek Light Armorjack with Businesswear appearance. Comes in dress or casual island styles."
     },
     {
         "name": "Street Viper Riding Suit",
@@ -2644,6 +2864,27 @@ gears = [
         "value": 10
     },
     {
+        "name": "EL-F4-NT Linear Frame",
+        "category": "Linear Frames",
+        "description": "Wearable external linear frame (take on/off with an Action). While properly connected, increases BODY to 12 (cannot exceed 13) and gives easy access to a pair of Techtools. Requires a Neural Link or Neuroport to operate properly. Uses manual controls and does not require Interface Plugs. BODY increase doesn't increase HP or change Death Save.",
+        "weight": 2,
+        "value": 5000
+    },
+    {
+        "name": "Fuma Kotaro Linear Frame",
+        "category": "Linear Frames",
+        "description": "Wearable linear frame available as external or internal. While properly connected, increases BODY to 12 (cannot exceed 13), grants +2 to Stealth Skill Checks, and includes concealed built-in blades: either two Excellent Quality Exotic Heavy Melee Weapons, or one Excellent Quality Exotic Light Melee Weapon plus one Excellent Quality Exotic Very Heavy Melee Weapon. Drawing/sheathing these blades requires no Action. Requires a Neural Link or Neuroport to operate properly. External version requires 2 Interface Plugs and can be taken on/off with an Action; BODY increase doesn't increase HP or change Death Save. Internal version requires BODY 8 and two Grafted Muscle and Bone Lace, causes 14 (4d6) Humanity Loss, and is Borgware.",
+        "weight": 2,
+        "value": 5000
+    },
+    {
+        "name": "LF-001 SWAT Linear Frame",
+        "category": "Linear Frames",
+        "description": "Wearable linear frame available as external or internal. While properly connected, increases BODY to 12 (cannot exceed 13) and negates normal movement penalties for climbing and swimming. Requires a Neural Link or Neuroport to operate properly. External version requires 2 Interface Plugs and can be taken on/off with an Action; BODY increase doesn't increase HP or change Death Save. Internal version requires BODY 8 and two Grafted Muscle and Bone Lace, causes 14 (4d6) Humanity Loss, and is Borgware.",
+        "weight": 2,
+        "value": 5000
+    },
+    {
         "name": "Linear Frame Sigma",
         "category": "Cyberware",
         "description": "Powered exoskeleton giving tremendous strength. User increases BODY to 12 while plugged in (cannot exceed 13). BODY increase doesn't increase HP or change Death Save. Requires 1 installation of Interface Plugs to operate.",
@@ -2733,6 +2974,13 @@ gears = [
         "description": "Lights an area of 100m/yards for 1 hour. Different colors. One use.",
         "weight": 0.5,
         "value": 10
+    },
+    {
+        "name": "Vermilion Linear Frame",
+        "category": "Linear Frames",
+        "description": "Wearable linear frame available as external or internal. While properly connected, increases BODY to 12 (cannot exceed 13), negates normal movement penalty for jumping, and allows operation as if paired Skate Feet were installed. Requires a Neural Link or Neuroport to operate properly. External version requires 2 Interface Plugs and can be taken on/off with an Action; BODY increase doesn't increase HP or change Death Save. Internal version requires BODY 8 and two Grafted Muscle and Bone Lace, causes 14 (4d6) Humanity Loss, and is Borgware.",
+        "weight": 2,
+        "value": 5000
     },
     {
         "name": "Rope",
@@ -3898,6 +4146,29 @@ def initialize_ammunition():
     print(f"Initialized {len(ammunition)} ammunition types.")
 
 def populate_weapons():
+    def _to_int(value, default=0):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _to_float(value, default=0.0):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _to_bool(value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            v = value.strip().lower()
+            if v in {"true", "1", "yes", "y", "on"}:
+                return True
+            if v in {"false", "0", "no", "n", "off"}:
+                return False
+        return bool(value)
+
     allowed_keys = {
         "damage", "rof", "hands", "concealable", "weight", "value",
         "category", "clip", "description", "attachment_slots", "range_dvs",
@@ -3919,17 +4190,72 @@ def populate_weapons():
         if not name:
             continue
         defaults = {k: v for k, v in weapon_data.items() if k in allowed_keys and k != "name"}
-        # Weapon.clip is NOT NULL; ensure we never pass None
-        if "clip" in defaults and defaults["clip"] is None:
-            defaults["clip"] = 0
-        obj, was_created = Weapon.objects.get_or_create(name=name, defaults=defaults)
-        if was_created:
+        # Sanitize data before write to guard against malformed rows.
+        if "hands" in defaults:
+            defaults["hands"] = _to_int(defaults["hands"], 1)
+        if "value" in defaults:
+            defaults["value"] = _to_int(defaults["value"], 0)
+        if "clip" in defaults:
+            defaults["clip"] = _to_int(defaults["clip"], 0)
+        if "attachment_slots" in defaults:
+            defaults["attachment_slots"] = _to_int(defaults["attachment_slots"], 0)
+        if "weight" in defaults:
+            defaults["weight"] = _to_float(defaults["weight"], 0.0)
+        if "concealable" in defaults:
+            defaults["concealable"] = _to_bool(defaults["concealable"])
+        matches = Weapon.objects.filter(name=name).order_by("id")
+        obj = matches.first()
+        if obj is None:
+            obj = Weapon.objects.create(name=name, **defaults)
             created += 1
         else:
+            if matches.count() > 1:
+                logger.warning(
+                    f"Duplicate Weapon rows found for name '{name}' (count={matches.count()}). "
+                    f"Using id={obj.id} as canonical during populate."
+                )
             changed = False
+            # Heal known corrupted integer/boolean fields on existing rows.
+            for field_name, default_val in (
+                ("hands", 1),
+                ("value", 0),
+                ("clip", 0),
+                ("attachment_slots", 0),
+            ):
+                current = getattr(obj, field_name, default_val)
+                coerced = _to_int(current, default_val)
+                if current != coerced:
+                    setattr(obj, field_name, coerced)
+                    changed = True
+            current_weight = getattr(obj, "weight", 0.0)
+            coerced_weight = _to_float(current_weight, 0.0)
+            if current_weight != coerced_weight:
+                obj.weight = coerced_weight
+                changed = True
+            current_concealable = getattr(obj, "concealable", False)
+            coerced_concealable = _to_bool(current_concealable)
+            if current_concealable != coerced_concealable:
+                obj.concealable = coerced_concealable
+                changed = True
+
             for key in allowed_keys:
-                if key in weapon_data and getattr(obj, key, None) != weapon_data[key]:
-                    setattr(obj, key, weapon_data[key])
+                if key not in weapon_data:
+                    continue
+                incoming = weapon_data[key]
+                if key == "hands":
+                    incoming = _to_int(incoming, 1)
+                elif key == "value":
+                    incoming = _to_int(incoming, 0)
+                elif key == "clip":
+                    incoming = _to_int(incoming, 0)
+                elif key == "attachment_slots":
+                    incoming = _to_int(incoming, 0)
+                elif key == "weight":
+                    incoming = _to_float(incoming, 0.0)
+                elif key == "concealable":
+                    incoming = _to_bool(incoming)
+                if getattr(obj, key, None) != incoming:
+                    setattr(obj, key, incoming)
                     changed = True
             if changed:
                 obj.save()

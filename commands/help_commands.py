@@ -27,6 +27,65 @@ class CmdHelpSearch(CmdHelp):
     # Allow "/" after "help" so help/search matches (parent uses r"\s|$" which rejects slash)
     arg_regex = r"[\s/]|$"
 
+    # Consolidated category mapping for command help entries.
+    HELP_CATEGORY_MAP = {
+        "admin": "Administration",
+        "admin commands": "Administration",
+        "system": "Administration",
+        "character": "Character & Identity",
+        "chargen & character info": "Character & Identity",
+        "combat": "Combat & Survival",
+        "inventory": "Economy & Inventory",
+        "economy": "Economy & Inventory",
+        "crafting": "Economy & Inventory",
+        "netrunning": "Netrunning & Matrix",
+        "missions": "Missions & Jobs",
+        "utility commands": "Missions & Jobs",
+        "factions and groups": "Factions & Groups",
+        "event & bulletin board": "Bulletin Board & Events",
+        "building": "Building & Story",
+        "building and housing": "Building & Story",
+        "storyteller": "Building & Story",
+        "storyteller commands": "Building & Story",
+        "rp commands": "Roleplay & Communication",
+        "roleplaying tools": "Roleplay & Communication",
+        "roleplay utilities": "Roleplay & Communication",
+        "communication": "Roleplay & Communication",
+        "comms": "Roleplay & Communication",
+        "ooc/ic movement": "Roleplay & Communication",
+        "general": "World & Information",
+        "game info": "World & Information",
+        "elflines online": "World & Information",
+    }
+
+    def _normalize_help_category(self, category):
+        """Consolidate legacy help categories into a smaller normalized set."""
+        category = (category or "World & Information").strip()
+        normalized = self.HELP_CATEGORY_MAP.get(category.lower(), category)
+        return normalized
+
+    def _normalize_entry_category(self, entry):
+        """Apply category normalization on a help entry in-place."""
+        if hasattr(entry, "help_category"):
+            entry.help_category = self._normalize_help_category(entry.help_category)
+        if hasattr(entry, "search_index_entry") and isinstance(entry.search_index_entry, dict):
+            entry.search_index_entry["category"] = self._normalize_help_category(
+                entry.search_index_entry.get("category", "World & Information")
+            )
+
+    def collect_topics(self, caller, mode="list"):
+        """
+        Collect help topics and normalize categories for consistent grouping.
+
+        This prevents category names from colliding with command names
+        (for example, category "Combat" vs command "combat").
+        """
+        cmd_help, db_help, file_help = super().collect_topics(caller, mode=mode)
+        for collection in (cmd_help, db_help, file_help):
+            for entry in collection.values():
+                self._normalize_entry_category(entry)
+        return cmd_help, db_help, file_help
+
     def format_help_entry(
         self,
         topic="",
@@ -75,10 +134,12 @@ class CmdHelpSearch(CmdHelp):
     def _get_entry_category(self, entry):
         """Get category for a help entry."""
         if hasattr(entry, "help_category"):
-            return entry.help_category
+            return self._normalize_help_category(entry.help_category)
         if hasattr(entry, "search_index_entry") and isinstance(entry.search_index_entry, dict):
-            return entry.search_index_entry.get("category", "General")
-        return "General"
+            return self._normalize_help_category(
+                entry.search_index_entry.get("category", "World & Information")
+            )
+        return "World & Information"
 
     def _search_help(self, search_str):
         """Search all help entries for the given string."""

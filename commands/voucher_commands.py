@@ -70,6 +70,7 @@ class CmdVoucher(MuxCommand):
       +voucher/unlock <voucher>         - Unlock
       +voucher/loc <voucher>/<item#>=<location>  - Set IC location
       +voucher/use <voucher>/<item#>[:<qty>]      - Use/remove items
+      +voucher/withdraw <voucher>/<item#>[:<qty>] - Claim typed items to inventory
       +voucher/chown <voucher>=<player> - Set IC owner
       +voucher/rename <voucher>=<name>  - Rename (max 38 chars)
       +voucher/nuke <voucher>           - Destroy empty voucher
@@ -106,6 +107,8 @@ class CmdVoucher(MuxCommand):
             self.do_loc()
         elif switch == "use":
             self.do_use()
+        elif switch == "withdraw":
+            self.do_withdraw()
         elif switch == "chown":
             self.do_chown()
         elif switch == "rename":
@@ -304,6 +307,13 @@ class CmdVoucher(MuxCommand):
         if not item:
             self.caller.msg(f"No such item #{num}.")
             return
+        # Typed items are intended to behave like normal inventory.
+        # "use" on typed voucher entries claims them into inventory.
+        if (item.get("item_type") or "").strip().lower():
+            from world.voucher.utils import claim_voucher_item_to_inventory
+            ok, msg = claim_voucher_item_to_inventory(self.caller, v, num, quantity=qty)
+            self.caller.msg(msg)
+            return
         have = item.get("quantity", 1)
         if qty > have:
             qty = have
@@ -315,6 +325,44 @@ class CmdVoucher(MuxCommand):
             items[idx - 1]["quantity"] = have - qty
         v.set_items(items)
         self.caller.msg(f"Used {qty} of {item.get('name', '?')}.")
+
+    def do_withdraw(self):
+        """Claim typed voucher item(s) into concrete inventory objects."""
+        parts = self.args.split("/", 1)
+        if len(parts) < 2:
+            self.caller.msg("Usage: +voucher/withdraw <voucher>/<item#>[:<qty>]")
+            return
+        v_arg, rest = parts[0].strip(), parts[1].strip()
+        qty = 1
+        if ":" in rest:
+            num_str, qty_str = rest.split(":", 1)
+            try:
+                qty = int(qty_str.strip())
+            except ValueError:
+                qty = 1
+        else:
+            num_str = rest
+        try:
+            num = int(num_str.strip())
+        except ValueError:
+            self.caller.msg("Item number must be an integer.")
+            return
+        if qty < 1:
+            qty = 1
+
+        v = find_voucher(self.caller, v_arg)
+        if not v:
+            return
+        if v.location != self.caller:
+            self.caller.msg("You don't have that voucher.")
+            return
+        if not v.can_modify(self.caller):
+            self.caller.msg("That voucher is locked.")
+            return
+
+        from world.voucher.utils import claim_voucher_item_to_inventory
+        ok, msg = claim_voucher_item_to_inventory(self.caller, v, num, quantity=qty)
+        self.caller.msg(msg)
 
     def do_chown(self):
         from typeclasses.npcs import is_npc
@@ -621,7 +669,7 @@ class CmdVoucher(MuxCommand):
             except ValueError:
                 self.caller.msg(f"'{value}' is not a valid number for {field}.")
                 return
-        elif field in ("concealable", "is_weapon"):
+        elif field in ("concealable", "is_weapon", "jammed"):
             item_data[field] = value.lower() in ("1", "yes", "true")
         else:
             item_data[field] = value
@@ -629,6 +677,8 @@ class CmdVoucher(MuxCommand):
             item["name"] = value
         item["item_data"] = item_data
         items = v.get_items()
+        from world.voucher.utils import normalize_voucher_item
+        item = normalize_voucher_item(item)
         items[idx - 1] = item
         v.set_items(items)
         self.caller.msg(f"Set {field} to '{value}' on item #{num}.")
@@ -669,9 +719,9 @@ class CmdVoucher(MuxCommand):
                 self.caller.msg(f"Invalid type. Use one of: {', '.join(ITEM_TYPES)}")
                 return
             # Create blank custom item with default stats for that type
-            from world.voucher.utils import _blank_item_data_for_type
+            from world.voucher.utils import _blank_item_data_for_type, normalize_voucher_item
             item_data = _blank_item_data_for_type(item_type, item_name)
-            voucher_item = {
+            voucher_item = normalize_voucher_item({
                 "name": item_name,
                 "description": item_data.get("description", ""),
                 "quantity": 1,
@@ -679,7 +729,7 @@ class CmdVoucher(MuxCommand):
                 "cloneable": False,
                 "item_type": item_type,
                 "item_data": item_data,
-            }
+            })
             items = v.get_items()
             items.append(voucher_item)
             v.set_items(items)
@@ -711,7 +761,8 @@ class CmdVoucher(MuxCommand):
             qty = obj.quantity or 1
             item_data["quantity"] = qty
 
-        voucher_item = {
+        from world.voucher.utils import normalize_voucher_item
+        voucher_item = normalize_voucher_item({
             "name": item_data.get("name", item_name),
             "description": item_data.get("description", ""),
             "quantity": qty,
@@ -719,7 +770,7 @@ class CmdVoucher(MuxCommand):
             "cloneable": False,
             "item_type": item_type,
             "item_data": item_data,
-        }
+        })
 
         # Remove from inventory
         if item_type == "weapon":

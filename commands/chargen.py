@@ -947,7 +947,7 @@ class ConfirmCmdSet(CmdSet):
 class CmdSellYourSoul(Command):
     """
     During chargen: opt into Sell Your Soul for 1500 eb + free Neural Link or Neuroport (choice).
-    Choose employer (Military/Crime/Corporation) and catch (Hostages, Blackmail, etc.).
+    Choose employer (Military/Crime/Corporation/Gang) and catch (Hostages, Blackmail, etc.).
 
     Usage:
       sellyoursoul
@@ -965,6 +965,120 @@ class CmdSellYourSoul(Command):
             self.caller.msg("Your character is already approved.")
             return
         start_sellyoursoul_menu(self.caller)
+
+
+class CmdSetSellYourSoul(MuxCommand):
+    """
+    Staff tool to set or clear Sell Your Soul details on a character sheet.
+
+    Usage:
+      sellyoursoulset <character>=<type>|<organization>|<consequences>|<leverage>|<service>
+      sellyoursoulset/clear <character>
+
+    Examples:
+      sellyoursoulset Razor=gang|Tyger Claws|Wanted in Heywood|Blackmail|Burned a witness list
+      sellyoursoulset Morgan=corporation|Arasaka|Corporate manhunt|Hostages|Extracted a prototype
+      sellyoursoulset/clear Razor
+
+    Notes:
+      type must be one of: military, crime, corporation, gang
+      leverage maps to the character's Sell Your Soul "catch" field.
+    """
+
+    key = "sellyoursoulset"
+    aliases = ["setsellyoursoul", "@sellyoursoul"]
+    locks = "cmd:perm(Admin)"
+    help_category = "Admin"
+
+    VALID_TYPES = {"military", "crime", "corporation", "gang"}
+
+    def _resolve_sheet(self, target_name):
+        target = self.caller.search(target_name, global_search=True)
+        if not target:
+            return None, None
+
+        sheet = getattr(target, "character_sheet", None)
+        if sheet:
+            return target, sheet
+
+        # If target is an account, try attached character.
+        character = getattr(target, "character", None)
+        if character and getattr(character, "character_sheet", None):
+            return character, character.character_sheet
+
+        return target, None
+
+    def func(self):
+        if "clear" in self.switches:
+            target_name = self.args.strip()
+            if not target_name:
+                self.caller.msg("Usage: sellyoursoulset/clear <character>")
+                return
+            char, sheet = self._resolve_sheet(target_name)
+            if not char:
+                return
+            if not sheet:
+                self.caller.msg(f"{char.name} does not have a character sheet.")
+                return
+
+            sheet.sell_your_soul = False
+            sheet.sell_your_soul_employer_type = ""
+            sheet.sell_your_soul_employer = ""
+            sheet.sell_your_soul_catch = ""
+            sheet.sell_your_soul_consequences = ""
+            sheet.sell_your_soul_service = ""
+            sheet.save(skip_recalculation=True)
+            self.caller.msg(f"Cleared Sell Your Soul data for {char.name}.")
+            return
+
+        if not self.args or "=" not in self.args:
+            self.caller.msg(
+                "Usage: sellyoursoulset <character>=<type>|<organization>|<consequences>|<leverage>|<service>"
+            )
+            return
+
+        char_name, payload = [part.strip() for part in self.args.split("=", 1)]
+        if not char_name:
+            self.caller.msg("You must provide a character name before '='.")
+            return
+
+        parts = [p.strip() for p in payload.split("|")]
+        if len(parts) != 5:
+            self.caller.msg(
+                "Expected 5 fields separated by '|': <type>|<organization>|<consequences>|<leverage>|<service>"
+            )
+            return
+
+        employer_type, employer, consequences, leverage, service = parts
+        employer_type = employer_type.lower()
+        if employer_type not in self.VALID_TYPES:
+            self.caller.msg(
+                f"Invalid type '{employer_type}'. Valid types: {', '.join(sorted(self.VALID_TYPES))}."
+            )
+            return
+        if not employer:
+            self.caller.msg("Organization cannot be blank.")
+            return
+
+        char, sheet = self._resolve_sheet(char_name)
+        if not char:
+            return
+        if not sheet:
+            self.caller.msg(f"{char.name} does not have a character sheet.")
+            return
+
+        sheet.sell_your_soul = True
+        sheet.sell_your_soul_employer_type = employer_type
+        sheet.sell_your_soul_employer = employer
+        sheet.sell_your_soul_catch = leverage
+        sheet.sell_your_soul_consequences = consequences
+        sheet.sell_your_soul_service = service
+        sheet.save(skip_recalculation=True)
+
+        self.caller.msg(
+            f"Set Sell Your Soul for {char.name}: "
+            f"{employer_type.title()} / {employer} / leverage '{leverage}'."
+        )
 
 
 class CmdListCharacterSheets(Command):

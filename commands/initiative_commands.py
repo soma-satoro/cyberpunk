@@ -31,7 +31,7 @@ def _living_characters_in_room(room, looker=None):
 
 
 def _initiative_modifier(character):
-    """Cyberware (e.g. Kerenzikov +2) + Solo Combat Awareness (+1 when rank > 0)."""
+    """Cyberware (e.g. Kerenzikov +2) + Solo Initiative Reaction."""
     mod = 0
     try:
         from world.cyberware.stat_bonuses import get_cyberware_initiative_bonus
@@ -40,11 +40,8 @@ def _initiative_modifier(character):
     except Exception:
         pass
     try:
-        from world.improvement_points import get_character_stat_value
-
-        ca = get_character_stat_value(character, "combat_awareness")
-        if ca and int(ca) > 0:
-            mod += 1
+        from world.role_abilities import get_solo_initiative_bonus
+        mod += int(get_solo_initiative_bonus(character) or 0)
     except Exception:
         pass
     return mod
@@ -58,9 +55,9 @@ class CmdInitiative(MuxCommand):
       initiative
       init
 
-    Each eligible character gets 1d10 + Reflex + modifiers (Kerenzikov +2,
-    Combat Awareness +1 if you have the Role Ability at rank 1+).
-    Results are shown highest first. GM resolves ties.
+    Each eligible character gets 1d10 + Reflex + modifiers (e.g. Kerenzikov,
+    Solo Initiative Reaction from Combat Awareness loadout).
+    Results are shown highest first. Ties are auto-resolved by tie-rolls.
     """
 
     key = "initiative"
@@ -84,9 +81,28 @@ class CmdInitiative(MuxCommand):
             ref = int(char.db.reflexes or 0)
             extra = _initiative_modifier(char)
             total = d10 + ref + extra
-            rows.append((total, d10, ref, extra, char))
+            rows.append({"total": total, "d10": d10, "ref": ref, "extra": extra, "char": char, "tie": 0})
 
-        rows.sort(key=lambda r: r[0], reverse=True)
+        # Resolve ties by repeated tie-rolls until each tied group has unique order.
+        totals = {}
+        for row in rows:
+            totals.setdefault(row["total"], []).append(row)
+        for _, group in totals.items():
+            if len(group) <= 1:
+                continue
+            while True:
+                seen = set()
+                collision = False
+                for row in group:
+                    tr = random.randint(1, 10)
+                    row["tie"] = tr
+                    if tr in seen:
+                        collision = True
+                    seen.add(tr)
+                if not collision:
+                    break
+
+        rows.sort(key=lambda r: (r["total"], r["tie"]), reverse=True)
 
         W = 80
         room_title = room.get_display_name(self.caller)
@@ -101,15 +117,23 @@ class CmdInitiative(MuxCommand):
             f"|x{'1d10 + REF + mods':<22}|n\n"
         )
 
-        for idx, (total, d10, ref, extra, char) in enumerate(rows, start=1):
+        for idx, row in enumerate(rows, start=1):
+            total = row["total"]
+            d10 = row["d10"]
+            ref = row["ref"]
+            extra = row["extra"]
+            char = row["char"]
+            tie = row["tie"]
             name = char.get_display_name(self.caller)
             name_plain = ansi.strip_ansi(name)
             if len(name_plain) > 32:
                 name_plain = name_plain[:29] + "..."
             detail = f"{d10}+{ref}+{extra}"
+            if tie:
+                detail += f" (tie {tie})"
             out += f"  |y{idx:>2}|n  |w{name_plain:<32}|n  |c{total:>3}|n  |x{detail:<22}|n\n"
 
-        out += "|x  Highest total acts first. Ties: GM call.|n\n"
+        out += "|x  Highest total acts first. Ties auto-resolved by tie-rolls.|n\n"
         out += footer(width=W, fillchar="-")
 
         self.caller.msg(out)

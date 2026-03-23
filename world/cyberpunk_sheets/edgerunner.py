@@ -1242,6 +1242,8 @@ class EdgerunnerChargen:
         sheet.sell_your_soul_employer_type = ""
         sheet.sell_your_soul_employer = ""
         sheet.sell_your_soul_catch = ""
+        sheet.sell_your_soul_consequences = ""
+        sheet.sell_your_soul_service = ""
         
         sheet.save()
         return sheet

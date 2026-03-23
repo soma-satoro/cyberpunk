@@ -417,15 +417,70 @@ black_ice = [
 # Used when Netrunner Jacks In to target's Neuroport. Interface + 1d10 vs DV.
 # One Quickhack per target per Turn. Must Breach all Passwalls first.
 quickhacks = [
-    {"name": "Impair Movement", "dv": 6, "tier": "Simple", "effect": "Target's MOVE -1 for 60 seconds. 0 MOVE = no Move Action."},
-    {"name": "Sonic Shock", "dv": 6, "tier": "Simple", "effect": "Damaged Ear Critical Injury (no Bonus Damage) for 60 seconds."},
-    {"name": "Overheat", "dv": 8, "tier": "Standard", "effect": "Target on fire. 4 HP damage/turn end until Action to extinguish. Bypasses armor."},
-    {"name": "Short Circuit", "dv": 8, "tier": "Standard", "effect": "GM picks 3 cyberware (not arm/leg/eye/audio/Neuroport). Cease function 60 seconds."},
-    {"name": "Cyberware Malfunction", "dv": 10, "tier": "Difficult", "effect": "Netrunner picks 1 cyberware (not Neuroport/Deck Port). Inoperable 60 seconds. Limbs = Broken Arm/Leg."},
-    {"name": "Lure", "dv": 10, "tier": "Difficult", "effect": "Target's next Turn: forced Move Action (Netrunner controlled). Only if target unaware. No obvious danger."},
-    {"name": "Slow", "dv": 10, "tier": "Difficult", "effect": "Target's MOVE -1d6 for 60 seconds. 0 MOVE = no Move Action."},
-    {"name": "Synapse Burnout", "dv": 10, "tier": "Difficult", "effect": "3d6 damage directly to HP. Bypasses armor."},
-    {"name": "Puppet", "dv": 12, "tier": "Advanced", "effect": "Control target's Action and Move next Turn. Use target's STATs/Skills."},
-    {"name": "Shard Ejection", "dv": 12, "tier": "Advanced", "effect": "Eject 1 chipware to adjacent square. Fails if slot covered."},
-    {"name": "System Reset", "dv": 12, "tier": "Advanced", "effect": "Unconscious 60 seconds or until damage. Target falls Prone."},
+    {
+        "name": "Impair Movement",
+        "dv": 6,
+        "tier": "Simple",
+        "effect": "Target's MOVE lowered by 1 for 60 seconds (20 Rounds). If reduced to 0 MOVE they cannot take a Move Action.",
+    },
+    {
+        "name": "Sonic Shock",
+        "dv": 6,
+        "tier": "Simple",
+        "effect": "Causes Damaged Ear Critical Injury but not Bonus Damage for 60 seconds (20 Rounds).",
+    },
+    {
+        "name": "Overheat",
+        "dv": 8,
+        "tier": "Standard",
+        "effect": "Target takes 4 damage directly to HP at end of their Turn until fire is extinguished. Bypasses armor. Extinguishing requires an Action (ROF1) on the target's Turn.",
+    },
+    {
+        "name": "Short Circuit",
+        "dv": 8,
+        "tier": "Standard",
+        "effect": "GM chooses 3 pieces of cyberware (not Cyberarm, Cyberleg, Cybereye, Cyberaudio, Neuroport or Neuroport Expansion). Selected cyberware ceases to function for 60 seconds (20 Rounds).",
+    },
+    {
+        "name": "Cyberware Malfunction",
+        "dv": 10,
+        "tier": "Difficult",
+        "effect": "Netrunner selects one piece of cyberware (not Neuroport or Neuroport Expansion) to become inoperable for 60 seconds (20 Rounds). Cyberlimbs act as dismembered meat counterparts.",
+    },
+    {
+        "name": "Lure",
+        "dv": 10,
+        "tier": "Difficult",
+        "effect": "Target is forced to take a Move Action controlled by the Netrunner at start of their next Turn. Only works if target is unaware they are being hacked. Target cannot be forced into obvious danger.",
+    },
+    {
+        "name": "Slow",
+        "dv": 10,
+        "tier": "Difficult",
+        "effect": "Target's MOVE lowered by 1d6 for 60 seconds (20 Rounds). If reduced to 0 MOVE they cannot take a Move Action.",
+    },
+    {
+        "name": "Synapse Burnout",
+        "dv": 10,
+        "tier": "Difficult",
+        "effect": "Deal 3d6 damage directly to target's HP. Bypasses armor and does not ablate it.",
+    },
+    {
+        "name": "Puppet",
+        "dv": 12,
+        "tier": "Advanced",
+        "effect": "Netrunner controls target's Action and Move Action on their next Turn. No restrictions beyond physical capability. All Checks use target's STATs and Skills.",
+    },
+    {
+        "name": "Shard Ejection",
+        "dv": 12,
+        "tier": "Advanced",
+        "effect": "Forcibly uninstall and eject one piece of chipware into an adjacent square. Does not work if target has a shard slot cover or tape over the slot.",
+    },
+    {
+        "name": "System Reset",
+        "dv": 12,
+        "tier": "Advanced",
+        "effect": "Target falls Unconscious for 60 seconds (20 Rounds) or until woken by taking damage. Target also falls Prone.",
+    },
 ]
