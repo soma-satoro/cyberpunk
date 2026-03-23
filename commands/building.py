@@ -1,11 +1,14 @@
 from evennia import CmdSet
 from evennia import create_object
+from evennia.objects.models import ObjectDB
 from typeclasses.rental import RentableRoom
 
 from evennia.utils import search, delay
 from evennia.utils.search import search_object
+from evennia.utils.ansi import ANSIString
 from evennia import Command
-from world.utils.formatting import divider, footer, format_stat, header
+from world.utils.formatting import divider, footer, format_key_value, format_stat, header
+from world.utils.ansi_utils import wrap_ansi
 from world.cyberpunk_constants import (
     resource_level_to_descriptor,
     descriptor_to_resource_level,
@@ -58,12 +61,32 @@ class CmdAreaManage(MuxCommand):
 
         if switch == "list":
             areas = area_manager.get_areas()
-            table = EvTable("Code", "Name", "Rooms", "Next #", border="cells")
-            for code, info in sorted(areas.items()):
-                room_count = len(info['rooms'])
-                next_num = info['next_room']
-                table.add_row(code, info['name'], room_count, f"{code}{next_num:02d}")
-            caller.msg(f"Defined Areas:\n{table}")
+            output = [header("Area Directory", width=78)]
+            output.append(
+                wrap_ansi(
+                    "|xUse +area/info <code> for details and +area/rooms <code> to list room mappings.|n",
+                    width=78,
+                )
+            )
+            output.append(divider("Defined Areas", width=78))
+
+            if not areas:
+                output.append("|xNo areas are currently defined.|n")
+            else:
+                for code, info in sorted(areas.items()):
+                    room_count = len(info.get("rooms", {}))
+                    next_num = info.get("next_room", 1)
+                    output.append(
+                        wrap_ansi(
+                            f"|c{code}|n |w{info.get('name', code)}|n - "
+                            f"{room_count} room{'s' if room_count != 1 else ''} - "
+                            f"next: |c{code}{int(next_num):02d}|n",
+                            width=78,
+                        )
+                    )
+
+            output.append(footer(width=78))
+            caller.msg("\n".join(output))
 
         elif switch == "add":
             if not self.args or "=" not in self.args:
@@ -99,13 +122,33 @@ class CmdAreaManage(MuxCommand):
             if not info:
                 caller.msg(f"Area code {code} not found.")
                 return
-            caller.msg(f"|wArea Information: {code}|n")
-            caller.msg(f"Name: {info['name']}")
-            caller.msg(f"Description: {info['description'] or 'No description set'}")
-            caller.msg(f"Next Room Number: {code}{info['next_room']:02d}")
-            caller.msg(f"Total Rooms: {len(info['rooms'])}")
-            if info['rooms']:
-                caller.msg(f"\nRoom Numbers: {', '.join([f'{code}{int(num):02d}' for num in sorted(info['rooms'].keys(), key=int)])}")
+            output = [header(f"Area Information: {code}", width=78)]
+            output.append(divider("Details", width=78))
+            output.append(format_key_value("Code", code, width=72))
+            output.append(format_key_value("Name", info.get("name", code), width=72))
+            output.append(
+                wrap_ansi(
+                    f" |wDescription|n: {info.get('description') or 'No description set'}",
+                    width=78,
+                )
+            )
+            next_num = int(info.get("next_room", 1))
+            output.append(format_key_value("Next Room Number", f"{code}{next_num:02d}", width=72))
+            output.append(format_key_value("Total Rooms", str(len(info.get("rooms", {}))), width=72))
+
+            rooms = info.get("rooms", {})
+            if rooms:
+                output.append(divider("Registered Room Codes", width=78))
+                room_codes = []
+                for num in sorted(rooms.keys(), key=lambda k: int(k) if str(k).isdigit() else str(k)):
+                    if str(num).isdigit():
+                        room_codes.append(f"{code}{int(num):02d}")
+                    else:
+                        room_codes.append(f"{code}{num}")
+                output.append(wrap_ansi(", ".join(room_codes), width=78))
+
+            output.append(footer(width=78))
+            caller.msg("\n".join(output))
 
         elif switch == "rooms":
             if not self.args:
@@ -120,14 +163,32 @@ class CmdAreaManage(MuxCommand):
             if not rooms:
                 caller.msg(f"No rooms found in area {code}.")
                 return
-            table = EvTable("Room Code", "Room Name", "DB#", border="cells")
-            for room_num in sorted(rooms.keys(), key=int):
+            output = [header(f"Area Rooms: {code}", width=78)]
+            output.append(
+                wrap_ansi(
+                    f"|wArea Name:|n {info.get('name', code)}",
+                    width=78,
+                )
+            )
+            output.append(divider("Room Directory", width=78))
+
+            for room_num in sorted(rooms.keys(), key=lambda k: int(k) if str(k).isdigit() else str(k)):
                 room_id = rooms[room_num]
                 room_obj = search_object(f"#{room_id}")
-                room_code = f"{code}{int(room_num):02d}"
-                room_name = room_obj[0].name if room_obj else "|rDeleted Room|n"
-                table.add_row(room_code, room_name, f"#{room_id}")
-            caller.msg(f"Rooms in Area {code} ({info['name']}):\n{table}")
+                if str(room_num).isdigit():
+                    room_code = f"{code}{int(room_num):02d}"
+                else:
+                    room_code = f"{code}{room_num}"
+                if room_obj:
+                    room_name = room_obj[0].key
+                    output.append(f"|c{room_code:<6}|n |w{room_name}|n |x(#{room_id})|n")
+                else:
+                    output.append(f"|c{room_code:<6}|n |rDeleted Room|n |x(#{room_id})|n")
+
+            output.append(divider("", width=78))
+            output.append(f"|gTotal rooms: {len(rooms)}|n")
+            output.append(footer(width=78))
+            caller.msg("\n".join(output))
 
         elif switch == "init":
             if not self.caller.check_permstring("admin"):
@@ -135,7 +196,15 @@ class CmdAreaManage(MuxCommand):
                 return
             area_manager._init_default_areas()
             areas = area_manager.get_areas()
-            caller.msg(f"Area manager initialized. Areas: {', '.join(areas.keys())}")
+            output = [header("Area Manager Initialized", width=78)]
+            output.append(
+                wrap_ansi(
+                    f"|gLoaded areas:|n {', '.join(sorted(areas.keys()))}",
+                    width=78,
+                )
+            )
+            output.append(footer(width=78))
+            caller.msg("\n".join(output))
 
         else:
             caller.msg("Valid switches: /list, /add, /remove, /info, /rooms, /init")
@@ -155,6 +224,11 @@ class CmdRoom(MuxCommand):
       +room/hierarchy <target>=<district>,<area> - Set location hierarchy for display
       +room/tag <target>=<tag1>,<tag2> - Set room tags (vendor tags enable list/buy)
       +room/tags <target>            - View room tags
+      +room/tagsearch                - List all tags currently used in the grid
+      +room/tagsearch <tag[,tag2]>   - Search all grid rooms by room tags (any match)
+      +room/tagsearch/all <tag[,tag2]> - Search all grid rooms requiring all tags
+      +room/searchtag <tag[,tag2]>   - Alias for +room/tagsearch
+      +room/searchtag/all <tag[,tag2]> - Alias for +room/tagsearch/all
       +room/coords <target>=<x>,<y>  - Set coordinates for mapping
       +room/chargen <target>=<on/off> - Convert room to/from ChargenRoom typeclass
 
@@ -168,6 +242,9 @@ class CmdRoom(MuxCommand):
       +room/tag here=bar,nightlife
       +room/tag here=handguns,drugs,cyberware
       +room/tags here
+      +room/tagsearch
+      +room/tagsearch cyberware
+      +room/tagsearch/all vendor,arasaka
 
     Vendor tags (enable list/buy without NPCs): handguns, shoulder_arms, ranged, melee,
     weapons, armor, gear, medical, drugs, electronics, tools, clothing, cyberdecks,
@@ -213,28 +290,179 @@ class CmdRoom(MuxCommand):
 
         return room
 
+    def _normalize_room_tag(self, tag):
+        """Normalize tags for case-insensitive matching."""
+        return str(tag or "").strip().lower().replace(" ", "_")
+
+    def _get_room_tag_set(self, room):
+        """
+        Collect searchable tags strictly from room.db.tags (+room/tag source of truth).
+        """
+        normalized = set()
+
+        for tag in (getattr(room.db, "tags", None) or []):
+            key = self._normalize_room_tag(tag)
+            if key:
+                normalized.add(key)
+
+        return normalized
+
+    def _iter_searchable_rooms(self):
+        """
+        Return searchable rooms as (room_code, room) tuples.
+        This intentionally scans rooms directly (not area-manager registrations),
+        so +room/tagsearch works for any room that has +room/tag data.
+        """
+        room_type_paths = (
+            "typeclasses.rooms.Room",
+            "typeclasses.rooms.RoomParent",
+            "typeclasses.chargen.ChargenRoom",
+        )
+        results = []
+        seen_ids = set()
+
+        room_qs = ObjectDB.objects.filter(db_typeclass_path__in=room_type_paths)
+        for room_db in room_qs:
+            room = getattr(room_db, "typeclass", None) or room_db
+            if room.id in seen_ids:
+                continue
+            seen_ids.add(room.id)
+            code = getattr(room.db, "area_code", None) or f"#{room.id}"
+            results.append((str(code).upper(), room))
+
+        return results
+
+    def _display_tag_search_results(self, search_tags, match_all):
+        """Render a formatted list of grid rooms matching requested tags."""
+        caller = self.caller
+        searchable_rooms = self._iter_searchable_rooms()
+        if not searchable_rooms:
+            caller.msg("|rNo rooms were found to search.|n")
+            return
+
+        matched = []
+        for room_code, room in searchable_rooms:
+            room_tags = self._get_room_tag_set(room)
+            if not room_tags:
+                continue
+            is_match = all(tag in room_tags for tag in search_tags) if match_all else any(
+                tag in room_tags for tag in search_tags
+            )
+            if is_match:
+                matched.append((room_code, room, room_tags))
+
+        matched.sort(key=lambda entry: (entry[0], entry[1].key.lower()))
+
+        mode_text = "ALL tags" if match_all else "ANY tag"
+        query_text = ", ".join(search_tags)
+        output = [header("Grid Tag Search", width=78)]
+        output.append(
+            wrap_ansi(
+                f"|wMode:|n {mode_text}  |wQuery:|n {query_text}  "
+                f"|wRooms Scanned:|n {len(searchable_rooms)}",
+                width=78,
+            )
+        )
+        output.append(divider("Matching Rooms", width=78))
+
+        if not matched:
+            output.append(wrap_ansi("|xNo rooms matched those tag filters.|n", width=78))
+            output.append(footer(width=78))
+            caller.msg("\n".join(output))
+            return
+
+        for room_code, room, room_tags in matched:
+            output.append(f"|c{room_code:<6}|n |w{room.key}|n |x(#{room.id})|n")
+            output.append(
+                wrap_ansi(
+                    f"  |mTags:|n {', '.join(sorted(room_tags))}",
+                    width=78,
+                )
+            )
+
+        output.append(divider("", width=78))
+        output.append(f"|gTotal matches: {len(matched)}|n")
+        output.append(footer(width=78))
+        caller.msg("\n".join(output))
+
+    def _display_tag_catalog(self):
+        """Render a formatted breakdown of all tags currently used across rooms."""
+        caller = self.caller
+        searchable_rooms = self._iter_searchable_rooms()
+        if not searchable_rooms:
+            caller.msg("|rNo rooms were found to search.|n")
+            return
+
+        tag_counts = {}
+        for _room_code, room in searchable_rooms:
+            room_tags = self._get_room_tag_set(room)
+            for tag in room_tags:
+                tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+        output = [header("Grid Tag Directory", width=78)]
+        output.append(
+            wrap_ansi(
+                f"|wRooms Scanned:|n {len(searchable_rooms)}  "
+                f"|wDistinct Tags:|n {len(tag_counts)}",
+                width=78,
+            )
+        )
+        output.append(divider("Tag Breakdown", width=78))
+
+        if not tag_counts:
+            output.append("|xNo room tags are currently set on searchable rooms.|n")
+            output.append(footer(width=78))
+            caller.msg("\n".join(output))
+            return
+
+        sorted_tags = sorted(tag_counts.items(), key=lambda item: (-item[1], item[0]))
+        for tag, count in sorted_tags:
+            output.append(f" |m{tag}|n ({count} room{'s' if count != 1 else ''})")
+
+        output.append(divider("", width=78))
+        output.append(wrap_ansi("|xUse +room/tagsearch <tag> to list rooms with that tag.|n", width=78))
+        output.append(footer(width=78))
+        caller.msg("\n".join(output))
+
     def display_current_settings(self, room):
         """Display the current room settings."""
-        table = EvTable("Setting", "Value", border="cells")
-        table.add_row("Area Name", room.db.area_name or "Not set")
-        table.add_row("Area Code", room.db.area_code or "Not set")
+        caller = self.caller
+        output = [header("Room Settings", width=78)]
+
+        output.append(f"|wRoom:|n {room.get_display_name(caller)}")
+        output.append(divider("Configuration", width=78))
+
+        output.append(format_key_value("Area Name", room.db.area_name or "Not set", width=72))
+        output.append(format_key_value("Area Code", room.db.area_code or "Not set", width=72))
+
         hierarchy = room.db.location_hierarchy
         if hierarchy:
             hierarchy = list(hierarchy) if hasattr(hierarchy, '__iter__') and not isinstance(hierarchy, (str, bytes)) else hierarchy
-            table.add_row("Hierarchy", " - ".join(hierarchy))
+            hierarchy_display = " - ".join(hierarchy)
         else:
-            table.add_row("Hierarchy", "Not set")
+            hierarchy_display = "Not set"
+        output.append(format_key_value("Hierarchy", hierarchy_display, width=72))
+
         res_display = resource_level_to_descriptor(room.db.resources)
-        table.add_row("Resources", res_display)
-        table.add_row("Room Type", room.db.roomtype or "Not set")
-        table.add_row("Unfindable", "Yes" if room.db.unfindable else "No")
+        output.append(format_key_value("Resources", res_display, width=72))
+        output.append(format_key_value("Room Type", room.db.roomtype or "Not set", width=72))
+        output.append(format_key_value("Unfindable", "Yes" if room.db.unfindable else "No", width=72))
+
         tags = getattr(room.db, 'tags', []) or []
-        table.add_row("Tags", ", ".join(tags) if tags else "None")
-        if hasattr(room.db, 'map_x') and hasattr(room.db, 'map_y'):
-            table.add_row("Coords", f"({room.db.map_x}, {room.db.map_y})")
+        output.append(divider("Tags", width=78))
+        if tags:
+            output.append(wrap_ansi(f"|m{', '.join(sorted([str(t) for t in tags]))}|n", width=78))
         else:
-            table.add_row("Coords", "Not set")
-        self.caller.msg(f"Room Settings for {room.name}:\n{table}")
+            output.append("|xNone|n")
+
+        if hasattr(room.db, 'map_x') and hasattr(room.db, 'map_y'):
+            coords_display = f"({room.db.map_x}, {room.db.map_y})"
+        else:
+            coords_display = "Not set"
+        output.append(divider("Coordinates", width=78))
+        output.append(format_key_value("Map Coords", coords_display, width=72))
+        output.append(footer(width=78))
+        caller.msg("\n".join(output))
 
     def func(self):
         if not self.switches:
@@ -254,11 +482,30 @@ class CmdRoom(MuxCommand):
                 self.caller.msg("You must be in a room or specify a valid room.")
                 return
             tags = getattr(room.db, 'tags', []) or []
-            room_info = f"#{room.id}" if room != self.caller.location else "here"
+            room_ref = f"#{room.id}" if room != self.caller.location else "here"
+            output = [header("Room Tags", width=78)]
+            output.append(wrap_ansi(f"|wRoom:|n {room.get_display_name(self.caller)}  |wRef:|n {room_ref}", width=78))
+            output.append(divider("", width=78))
             if tags:
-                self.caller.msg(f"Room tags for {room.name} ({room_info}): {', '.join(tags)}")
+                output.append(wrap_ansi(f"|m{', '.join(sorted([str(t) for t in tags]))}|n", width=78))
             else:
-                self.caller.msg(f"No tags set for room {room.name} ({room_info})")
+                output.append("|xNo tags set.|n")
+            output.append(footer(width=78))
+            self.caller.msg("\n".join(output))
+            return
+
+        if switch in ("searchtag", "tagsearch"):
+            raw = (self.args or "").strip()
+            if not raw:
+                self._display_tag_catalog()
+                return
+
+            search_tags = [self._normalize_room_tag(tag) for tag in raw.split(",") if tag.strip()]
+            if not search_tags:
+                self.caller.msg("Please provide at least one valid tag.")
+                return
+            match_all = any(sw.lower() == "all" for sw in (self.switches or []))
+            self._display_tag_search_results(search_tags, match_all)
             return
 
         # All other switches require a value
@@ -406,7 +653,10 @@ class CmdRoom(MuxCommand):
                 self.caller.msg("Chargen setting must be 'on' or 'off'.")
 
         else:
-            self.caller.msg("Valid switches: res, type, unfindable, area, code, hierarchy, tag, tags, coords, chargen")
+            self.caller.msg(
+                "Valid switches: res, type, unfindable, area, code, hierarchy, "
+                "tag, tags, tagsearch, searchtag, coords, chargen"
+            )
 
     def access(self, srcobj, access_type="cmd", default=False):
         if access_type != "cmd":

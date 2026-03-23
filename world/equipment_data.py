@@ -2543,9 +2543,88 @@ gears = [
     {
         "name": "Agent",
         "category": "Electronics",
+        "quality": "standard",
+        "app_slots": 6,
         "description": "Self-adaptive AI-powered smartphone that learns how best to fit your needs by interacting with you. While not a true AI, it is more than capable of replacing any need for a secretary. Can make phone calls (voice/video), surf the Data Pool, scan for locations and directions, keep your schedule, maintain a personality with name/voice/virtual body, suggest clothes, record audio/video to Memory Chip, link to Cyberware for data storage, link to appliances, monitor resources and auto-reorder at market price, recommend future actions. Gives +2 to Library Search and +2 to Wardrobe & Style (only when wearing Agent-suggested clothes, which change every season). Multiple Agents don't multiply bonuses.",
         "weight": 0.5,
         "value": 100
+    },
+    {
+        "name": "Ask Alex Anything App",
+        "category": "Agent App",
+        "description": "Allows a user to search for and display data from the local CitiNet. From Ziggurat.",
+        "weight": 0,
+        "value": 0
+    },
+    {
+        "name": "BabelChat App",
+        "category": "Agent App",
+        "description": "Allows user to send text messages and exchange instant messages and video chats with other users. From Ziggurat.",
+        "weight": 0,
+        "value": 0
+    },
+    {
+        "name": "BangMe! App",
+        "category": "Agent App",
+        "description": "Money transfer app from Eurobank.",
+        "weight": 0,
+        "value": 10
+    },
+    {
+        "name": "Big SAAI App",
+        "category": "Agent App",
+        "description": "Enhances an Agent's SAAI, increasing the bonus it grants to Library Search to +3. From Ziggurat.",
+        "weight": 0,
+        "value": 100
+    },
+    {
+        "name": "Brainwasher App",
+        "category": "Agent App",
+        "description": "A SAAI-powered therapy app. Could increase or decrease the amount of time therapy takes. Cost is per month. From No/Brainer.",
+        "weight": 0,
+        "value": 50
+    },
+    {
+        "name": "Elflines Online Elftracker App",
+        "category": "Agent App",
+        "description": "Connects to a user's Elflines Online account for data access and elflines chat. From Segotari.",
+        "weight": 0,
+        "value": 50
+    },
+    {
+        "name": "The Garden App",
+        "category": "Agent App",
+        "description": "Grants the user access to the Garden for perusing and sharing content. From Ziggurat.",
+        "weight": 0,
+        "value": 0
+    },
+    {
+        "name": "HusTool App",
+        "category": "Agent App",
+        "description": "Earn small amounts of cash in exchange for performing small tasks. From No/Brainer.",
+        "weight": 0,
+        "value": 20
+    },
+    {
+        "name": "Roach Race App",
+        "category": "Agent App",
+        "description": "A sidescrolling video game about a horse. From CDP S.A.",
+        "weight": 0,
+        "value": 20
+    },
+    {
+        "name": "WatchBox App",
+        "category": "Agent App",
+        "description": "Can watch a space and sound an alarm if specific conditions are met. From No/Brainer.",
+        "weight": 0,
+        "value": 50
+    },
+    {
+        "name": "ZPost App",
+        "category": "Agent App",
+        "description": "Email app from Ziggurat.",
+        "weight": 0,
+        "value": 0
     },
     {
         "name": "Roller Derby Skates",
@@ -2635,6 +2714,8 @@ gears = [
     {
         "name": "EBM Pir2",
         "category": "Agent",
+        "quality": "excellent",
+        "app_slots": 8,
         "description": "EBM's version of the basic Internal Agent improves reliability without increasing the risk of migraines. Cyberaudio Option. Excellent Quality Internal Agent. Install: Mall. Humanity Loss: 3 (1d6).",
         "weight": 0,
         "value": 500
@@ -2642,6 +2723,8 @@ gears = [
     {
         "name": "MediaWare Braingen",
         "category": "Agent",
+        "quality": "poor",
+        "app_slots": 4,
         "description": "A discount Agent, cheaply made but readily available. Rumors of security exploits allowing direct access to a user's brain are unsubstantiated and considered libelous by the company. Cyberaudio Option. Poor Quality Internal Agent. Install: Mall. Humanity Loss: 3 (1d6).",
         "weight": 0,
         "value": 50
@@ -2649,6 +2732,8 @@ gears = [
     {
         "name": "Raven Microcybernetics Drake",
         "category": "Agent",
+        "quality": "standard",
+        "app_slots": 6,
         "description": "A common model of Internal Agent, with no stand-out features but no great weaknesses. Cyberaudio Option. Standard Quality Internal Agent. Install: Mall. Humanity Loss: 3 (1d6).",
         "weight": 0,
         "value": 100
@@ -2656,6 +2741,8 @@ gears = [
     {
         "name": "Rocklin Augmentics Neuron",
         "category": "Agent",
+        "quality": "excellent",
+        "app_slots": 8,
         "description": "A post-war design just hitting the market, Rocklin's Neuron uses revolutionary new technology to project video directly via the user's optic nerve, eliminating the need for cyberoptics. Cyberaudio Option. Excellent Quality Internal Agent. Displays visual output into user's field of vision even if they do not have Cybereyes with Chyron installed. Install: Mall. Humanity Loss: 3 (1d6).",
         "weight": 0,
         "value": 1000
@@ -2663,6 +2750,8 @@ gears = [
     {
         "name": "Segotari Double Agent",
         "category": "Agent",
+        "quality": "poor",
+        "app_slots": 4,
         "description": "The classic, with its peak 2020s styling: black clamshell case with a brushed finish and abstract silver circuit patterns. Feels cheap because it is cheap. A Poor Quality Agent with a touchscreen and audio for input, and a second display-only screen and speaker for output. Onboard accessories: camera, microphone.",
         "weight": 0.5,
         "value": 50
@@ -2670,6 +2759,8 @@ gears = [
     {
         "name": "Wyzard Technologies Merlyn",
         "category": "Agent",
+        "quality": "excellent",
+        "app_slots": 8,
         "description": "People wear a Merlyn to be seen wearing a Merlyn. The dense little wrist-mounted Agent and its flashy holo-display show that you care about taste. An Excellent Quality Agent that straps to the wrist like a watch. Touchscreen and audio input. Holographic and speaker output. A user adds +1 to Wardrobe and Style Skill Checks when visibly wearing a Merlyn. Onboard accessories: camera, flashlight, microphone.",
         "weight": 0.5,
         "value": 1000
@@ -2677,6 +2768,8 @@ gears = [
     {
         "name": "Zetatech Grade A",
         "category": "Agent",
+        "quality": "standard",
+        "app_slots": 6,
         "description": "One of the most ubiquitous Agent models. Unobtrusive. Effective. Rectangular. Available everywhere. A Standard Quality Agent with a single touchscreen for input and output, a microphone for audio input, and a speaker for audio output. Onboard accessories: camera, flashlight, microphone.",
         "weight": 0.5,
         "value": 100
@@ -2684,6 +2777,8 @@ gears = [
     {
         "name": "Zetatech Grade A-Plus",
         "category": "Agent",
+        "quality": "excellent",
+        "app_slots": 8,
         "description": "An upgraded version of the Grade A. An Excellent Quality Agent with a single touchscreen for input and output, a microphone for audio input, a speaker for audio output, and holo-projector for additional visual output. Onboard accessories: camera, flashlight, microphone.",
         "weight": 0.5,
         "value": 500
@@ -4026,6 +4121,7 @@ def initialize_armor():
 @transaction.atomic
 def initialize_gear():
     from world.inventory.models import Gear
+    updatable_keys = {"category", "description", "weight", "value"}
     
     for gear_data in gears:
         if not all(gear_data.values()):
@@ -4046,7 +4142,10 @@ def initialize_gear():
         else:
             # Update existing gear if data has changed
             updated = False
-            for key, value in gear_data.items():
+            for key in updatable_keys:
+                if key not in gear_data:
+                    continue
+                value = gear_data.get(key)
                 if getattr(gear, key) != value:
                     setattr(gear, key, value)
                     updated = True

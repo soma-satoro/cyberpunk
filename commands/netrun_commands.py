@@ -1321,6 +1321,24 @@ class CmdNet(MuxCommand):
         if NetFloorLead.objects.filter(architecture_object_id=arch.id, floor_number=floor_num).exists():
             self.caller.msg("  |cConcealed data trails may exist on this floor.|n |w+net/delve|n  |w+net/leads|n")
 
+    def _has_netrunner_access_role(self, interface_rank=None):
+        """
+        Gate NET access to characters with Netrunner as a primary role, or as a
+        secondary role represented by bought Interface ranks.
+        """
+        sheet = getattr(self.caller, "character_sheet", None)
+        primary_role = ""
+        if sheet:
+            primary_role = str(getattr(sheet, "role", "") or "").strip().lower()
+        if primary_role == "netrunner":
+            return True
+        role_db = str(getattr(self.caller.db, "role", "") or "").strip().lower()
+        if role_db == "netrunner":
+            return True
+        if interface_rank is None:
+            interface_rank = get_interface_rank(self.caller)
+        return int(interface_rank or 0) > 0
+
     def _has_netrunning_gear(self):
         sheet = getattr(self.caller, "character_sheet", None)
         if not sheet:
@@ -1328,25 +1346,40 @@ class CmdNet(MuxCommand):
         inv = getattr(sheet, "inventory", None)
         if not inv:
             return False, ["an inventory"]
+        installed_cyberware = list(
+            CyberwareInstance.objects.filter(character_sheet=sheet, installed=True).select_related("cyberware")
+        )
         has_deck = False
         for gear in inv.gear.all():
             if getattr(gear, "is_cyberdeck", False):
                 has_deck = True
                 break
-        for cw in CyberwareInstance.objects.filter(character_sheet=sheet, installed=True):
+        for cw in installed_cyberware:
             if "cyberdeck" in (cw.cyberware.name or "").lower():
                 has_deck = True
                 break
         cyber_names = set()
-        for cw in CyberwareInstance.objects.filter(character_sheet=sheet, installed=True):
+        for cw in installed_cyberware:
             cyber_names.add(normalize_name(cw.cyberware.name or ""))
+        inv_gear_names = {normalize_name(getattr(g, "name", "") or "") for g in inv.gear.all()}
+        inv_armor_names = {normalize_name(getattr(a, "name", "") or "") for a in inv.armor.all()}
+        equipped_armor = getattr(sheet, "eqarmor", None)
+        if equipped_armor and getattr(equipped_armor, "name", None):
+            inv_armor_names.add(normalize_name(equipped_armor.name))
+
+        has_neuroport = "neuroport" in cyber_names
+        has_neural_link = "neural_link" in cyber_names
+        has_virtuality_cyberware = "virtuality" in cyber_names
+        has_virtuality_goggles = "virtuality_goggles" in inv_gear_names or "virtuality_goggles" in inv_armor_names
+
         needs = []
         if not has_deck:
             needs.append("a Cyberdeck")
-        if "neural_link" not in cyber_names:
-            needs.append("Neural Link cyberware")
-        if "interface_plugs" not in cyber_names:
-            needs.append("Interface Plugs cyberware")
+        if not has_neuroport:
+            if not has_neural_link:
+                needs.append("Neural Link cyberware (or Neuroport)")
+            if not (has_virtuality_goggles or has_virtuality_cyberware):
+                needs.append("Virtuality Goggles or Virtuality cyberware")
         if needs:
             return False, needs
         return True, []
@@ -1440,6 +1473,9 @@ class CmdNet(MuxCommand):
 
         staff_bypass = check_builder_permission(self.caller)
         interface_rank = get_interface_rank(self.caller)
+        if not staff_bypass and not self._has_netrunner_access_role(interface_rank):
+            self.caller.msg("NET access is restricted to Netrunners (primary role or secondary Interface role).")
+            return
         if interface_rank <= 0 and not staff_bypass:
             self.caller.msg("You need Interface rank to netrun (staff may bypass).")
             return
