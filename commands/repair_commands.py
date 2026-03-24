@@ -10,6 +10,7 @@ juryrig/off <name>=<item> - Tech or staff: turn off juryrig
 """
 
 import re
+import math
 
 from evennia.commands.default.muxcommand import MuxCommand
 from world.inventory.models import Armor, Inventory, InventoryArmor
@@ -17,6 +18,8 @@ from world.jobs.models import Job, Queue
 from world.utils.character_utils import get_character_sheet
 from world.cyberpunk_sheets.services import CharacterSheetMoneyService
 from world.cyberware.implanted_armor import repair_subdermal_command, staff_set_implanted_sp
+from world.maker_constants import value_to_price_category, get_maker_time_hours
+from world.maker.upgrades import extract_repair_time_multiplier_from_description
 
 
 def _get_inventory_for_character(char):
@@ -40,6 +43,19 @@ def _find_armor_in_inventory(inv, armor_name):
             )
             return armor, inst
     return None, None
+
+
+def _estimate_full_repair_hours_for_armor(armor):
+    """
+    Estimate full repair time by item value, then apply Maker simplify-repairs modifier.
+    Returns (estimated_hours, multiplier).
+    """
+    value = int(getattr(armor, "value", 0) or 0)
+    category = value_to_price_category(value)
+    base_hours = int(get_maker_time_hours(category, value))
+    multiplier = extract_repair_time_multiplier_from_description(getattr(armor, "description", "") or "")
+    estimated = max(1, int(math.ceil(base_hours * multiplier)))
+    return estimated, multiplier
 
 
 class CmdRepair(MuxCommand):
@@ -92,13 +108,18 @@ class CmdRepair(MuxCommand):
         if inst.current_sp is None or inst.current_sp >= base_sp:
             self.caller.msg(f"Your {armor.name} doesn't need repair (SP at {base_sp}).")
             return
+        est_hours, repair_mult = _estimate_full_repair_hours_for_armor(armor)
 
         queue, _ = Queue.objects.get_or_create(name="EQUIP", defaults={"automatic_assignee": None})
         char_name = getattr(char.db, "full_name", None) or char.key
         title = f"Repair: {armor.name}"
+        mult_note = ""
+        if repair_mult < 1.0:
+            mult_note = " (Simplify Repairs upgrade detected: repair time halved)"
         description = (
             f"{char_name} requests repair of {armor.name}.\n\n"
             f"Current SP: {inst.current_sp}/{base_sp}\n\n"
+            f"Estimated full-repair time: ~{est_hours} hours{mult_note}\n\n"
             f"Staff: Ask the player to roll into this job (roll/job <#>=<stat> + <skill>). "
             f"If successful, deduct cost (money <name>=-<amount>) and approve with:\n"
             f"+repair/approve {char_name}={armor.name}"
@@ -113,6 +134,9 @@ class CmdRepair(MuxCommand):
             template_args={"repair_armor_name": armor.name, "repair_character_id": char.id},
         )
         self.caller.msg(f"|gRepair job #{job.id} created for {armor.name}.|n Staff will process it.")
+        self.caller.msg(f"Estimated full repair time: ~{est_hours}h.")
+        if repair_mult < 1.0:
+            self.caller.msg("|ySimplify Repairs is active on this item (time halved).|n")
         self.caller.msg(
             "Staff will ask you to roll into the job. Use: |wroll/job <job#>=<stat> + <skill>|n"
         )

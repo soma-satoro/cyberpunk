@@ -13,25 +13,43 @@ ITEM_TYPES = ("weapon", "armor", "gear", "cyberware", "ammunition", "vehicle")
 # Gear includes optional armor-like fields (sp, ev, locations) for armor items added as gear
 ITEM_TYPE_FIELDS = {
     "weapon": ["name", "description", "weight", "value", "damage", "rof", "hands", "concealable",
-               "category", "weapon_type", "quality", "ammo_type", "current_ammo", "max_ammo", "clip", "jammed", "range_dvs"],
-    "armor": ["name", "description", "weight", "value", "sp", "ev", "locations"],
-    "gear": ["name", "description", "weight", "value", "category", "sp", "ev", "locations"],
+               "category", "weapon_type", "quality", "ammo_type", "current_ammo", "max_ammo", "clip", "jammed", "range_dvs",
+               "attachment_slots", "custom_item", "maker_upgrades", "upgrade_name", "upgrade_source", "repair_time_multiplier",
+               "non_basic_ammo_compatibility", "foundational_tuning", "move_bonus_on_move_action", "requires_paired_rocket_runner",
+               "body_requirement_reduction", "optimized_popup", "combined_underbarrel", "vorpal_coating", "superscanner"],
+    "armor": ["name", "description", "weight", "value", "sp", "ev", "locations",
+              "custom_item", "maker_upgrades", "upgrade_name", "upgrade_source", "repair_time_multiplier"],
+    "gear": ["name", "description", "weight", "value", "category", "sp", "ev", "locations",
+             "custom_item", "maker_upgrades", "upgrade_name", "upgrade_source", "repair_time_multiplier"],
     "cyberware": ["name", "description", "cost", "humanity_loss", "type", "slots", "is_weapon",
-                  "damage_dice", "damage_die_type", "rate_of_fire", "skill_chip_target"],
+                  "damage_dice", "damage_die_type", "rate_of_fire", "skill_chip_target",
+                  "custom_item", "maker_upgrades", "upgrade_name", "upgrade_source", "repair_time_multiplier",
+                  "foundational_tuning", "move_bonus_on_move_action", "requires_paired_rocket_runner",
+                  "body_requirement_reduction", "optimized_popup", "superscanner"],
     "ammunition": ["name", "ammo_type", "quantity", "cost", "weapon_type", "damage_modifier",
                    "armor_piercing", "description"],
-    "vehicle": ["name", "description", "category", "sdp", "seats", "speed_combat", "speed_narrative", "value"],
+    "vehicle": ["name", "description", "category", "sdp", "seats", "speed_combat", "speed_narrative", "value",
+                "custom_item", "maker_upgrades", "upgrade_name", "upgrade_source", "repair_time_multiplier",
+                "vehicle_armor_sp_bonus", "speed_combat_modifier", "self_driving_vehicle", "self_driving_skill_base",
+                "flashbulb_beacon", "flashbulb_beacon_range", "flashbulb_beacon_resist_dv"],
 }
 
 INT_FIELDS = {
     "quantity", "weight", "value", "sp", "ev", "cost", "humanity_loss", "slots", "hands",
     "current_ammo", "max_ammo", "clip", "damage_dice", "damage_die_type", "rate_of_fire",
     "damage_modifier", "armor_piercing", "sdp", "seats", "speed_combat",
+    "attachment_slots", "move_bonus_on_move_action", "body_requirement_reduction",
+    "vehicle_armor_sp_bonus", "speed_combat_modifier", "self_driving_skill_base",
+    "flashbulb_beacon_range", "flashbulb_beacon_resist_dv",
 }
-BOOL_FIELDS = {"concealable", "is_weapon", "jammed"}
+BOOL_FIELDS = {
+    "concealable", "is_weapon", "jammed", "custom_item", "non_basic_ammo_compatibility",
+    "foundational_tuning", "requires_paired_rocket_runner", "optimized_popup",
+    "combined_underbarrel", "vorpal_coating", "superscanner",
+}
 STRING_FIELDS = {
     "name", "description", "category", "weapon_type", "quality", "ammo_type", "locations",
-    "type", "speed_narrative", "skill_chip_target",
+    "type", "speed_narrative", "skill_chip_target", "upgrade_name", "upgrade_source",
 }
 
 
@@ -76,6 +94,7 @@ def serialize_weapon(weapon):
         "current_ammo": weapon.current_ammo,
         "max_ammo": weapon.max_ammo,
         "clip": weapon.clip,
+        "attachment_slots": getattr(weapon, "attachment_slots", 0) or 0,
         "jammed": getattr(weapon, "jammed", False),
         "range_dvs": getattr(weapon, "range_dvs", None) or {},
     }
@@ -257,9 +276,15 @@ def format_voucher_item(item, item_num=None):
         out += f"|c{name}|n\n"
         out += f"  |gDamage:|n {data.get('damage', 'N/A'):<10} |gROF:|n {data.get('rof', 'N/A'):<5} |gHands:|n {data.get('hands', 'N/A')}\n"
         concealable = "Yes" if data.get("concealable") else "No"
-        out += f"  |gConcealable:|n {concealable:<5} |gWeight:|n {data.get('weight', 0):<5} |gValue:|n |y{data.get('value', 0):>4} eb|n\n"
+        out += (
+            f"  |gConcealable:|n {concealable:<5} |gQuality:|n {(data.get('quality', 'standard') or 'standard'):<10}"
+            f" |gSlots:|n {data.get('attachment_slots', 0):<3} |gWeight:|n {data.get('weight', 0):<5}"
+            f" |gValue:|n |y{data.get('value', 0):>4} eb|n\n"
+        )
         if data.get("current_ammo") is not None and data.get("max_ammo"):
             out += f"  |gAmmo:|n {data.get('current_ammo')}/{data.get('max_ammo')} |gCategory:|n {data.get('category', 'N/A')}\n"
+        if data.get("custom_item"):
+            out += f"  |gCustom:|n Yes  |gUpgrade:|n {data.get('upgrade_name', 'Maker Upgrade')}\n"
         desc = data.get("description", "")
         if desc:
             out += sheet_section("Description", width=W)
@@ -269,6 +294,8 @@ def format_voucher_item(item, item_num=None):
         out += f"|c{name}|n\n"
         out += f"  |gSP:|n {data.get('sp', 'N/A'):<5} |gEV:|n {data.get('ev', 'N/A'):<5} |gWeight:|n {data.get('weight', 0):<5} |gValue:|n |y{data.get('value', 0):>4} eb|n\n"
         out += f"  |gLocations:|n {data.get('locations', 'N/A')}\n"
+        if data.get("custom_item"):
+            out += f"  |gCustom:|n Yes  |gUpgrade:|n {data.get('upgrade_name', 'Maker Upgrade')}\n"
         desc = data.get("description", "")
         if desc:
             out += sheet_section("Description", width=W)
@@ -288,6 +315,8 @@ def format_voucher_item(item, item_num=None):
         out += f"|cSlots:|n {data.get('slots', 'N/A')}\n"
         out += f"|cHumanity Loss:|n {data.get('humanity_loss', 'N/A')}\n"
         out += f"|cCost:|n {data.get('cost', 0)} eb\n"
+        if data.get("custom_item"):
+            out += f"|cCustom:|n Yes ({data.get('upgrade_name', 'Maker Upgrade')})\n"
         out += sheet_section("Description", width=W)
         out += f"{data.get('description', '')}\n"
 
@@ -304,6 +333,8 @@ def format_voucher_item(item, item_num=None):
         out += f"|c{name}|n\n"
         out += f"  |gCategory:|n {data.get('category', 'N/A'):<10} |gSeats:|n {data.get('seats', 'N/A'):<5} |gSpeed:|n {data.get('speed_narrative', 'N/A')}\n"
         out += f"  |gSDP:|n {data.get('sdp', 'N/A'):<5} |gValue:|n |y{data.get('value', 0):>6} eb|n\n"
+        if data.get("custom_item"):
+            out += f"  |gCustom:|n Yes  |gUpgrade:|n {data.get('upgrade_name', 'Maker Upgrade')}\n"
         desc = data.get("description", "")
         if desc:
             out += sheet_section("Description", width=W)
@@ -504,6 +535,7 @@ def _withdraw_one_typed_item(character, voucher_item):
             current_ammo=max(0, data.get("current_ammo", 0)),
             max_ammo=max(0, data.get("max_ammo", 0)),
             clip=max(0, data.get("clip", 0)),
+            attachment_slots=max(0, data.get("attachment_slots", 0)),
             range_dvs=data.get("range_dvs") or {},
             jammed=bool(data.get("jammed", False)),
         )

@@ -10,6 +10,7 @@ display correctly instead of being interpreted as color codes.
 """
 from evennia.commands.default.help import CmdHelp
 from evennia.commands.default.muxcommand import MuxCommand
+from utils import evmore_safe
 
 
 class CmdHelpSearch(CmdHelp):
@@ -112,6 +113,39 @@ class CmdHelpSearch(CmdHelp):
         MuxCommand.parse(self)
         if "search" not in (self.switches or []):
             CmdHelp.parse(self)
+
+    def msg_help(self, text, **kwargs):
+        """
+        Send help output using game-local safe pager wrapper.
+
+        Keeps the same client behavior as Evennia's default `CmdHelp.msg_help`
+        while avoiding duplicate pager cmdset collisions.
+        """
+        if type(self).help_more:
+            usemore = True
+
+            if self.session and self.session.protocol_key in (
+                "webclient/websocket",
+                "webclient/ajax",
+            ):
+                try:
+                    options = self.account.db._saved_webclient_options
+                    if options and options["helppopup"]:
+                        usemore = False
+                except KeyError:
+                    pass
+
+            if usemore:
+                evmore_safe.msg(
+                    self.caller,
+                    text,
+                    session=self.session,
+                    text_kwargs={"type": "help"},
+                    **kwargs,
+                )
+                return
+
+        self.msg(text=(text, {"type": "help"}))
 
     def func(self):
         if "search" in (self.switches or []):

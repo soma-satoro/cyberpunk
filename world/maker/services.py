@@ -16,7 +16,14 @@ from world.maker_constants import (
     get_maker_dv,
     get_maker_time_hours,
     get_materials_cost_fabrication,
+    get_materials_cost_upgrade,
     get_tech_skill_for_item,
+)
+from world.maker.upgrades import (
+    get_upgrade_definition,
+    apply_upgrade_to_item,
+    get_upgrade_cost2,
+    get_item_value_for_upgrade,
 )
 from world.voucher.utils import (
     serialize_weapon,
@@ -25,6 +32,7 @@ from world.voucher.utils import (
     serialize_vehicle,
     serialize_ammunition,
     serialize_cyberware,
+    find_inventory_item,
 )
 from world.cyberpunk_sheets.services import CharacterMoneyService
 
@@ -86,6 +94,51 @@ def find_item_for_fabrication(name):
         return "cyberware", cw, serialize_cyberware(cw)
 
     return None, None, None
+
+
+def create_staff_reward_upgrade(target_character, item_name, upgrade_name, staff_character=None):
+    """
+    Staff-only helper: instantly create an upgraded custom-item voucher reward.
+    No material costs, no queue, no roll, no source-item consumption.
+    Returns (voucher, error_message).
+    """
+    item_type, obj, item_data = find_item_for_fabrication(item_name)
+    if not obj:
+        return None, f"No fabricatable base item found named '{item_name}'."
+    if item_type not in ("weapon", "armor", "gear", "cyberware", "vehicle"):
+        return None, f"{item_type.title()} items are not supported for staff Maker reward upgrades."
+
+    upgrade = get_upgrade_definition(upgrade_name)
+    if not upgrade:
+        return None, f"Unknown upgrade '{upgrade_name}'. Use +make/upgrade to list options."
+
+    upgraded_item_data, apply_err = apply_upgrade_to_item(item_type, item_data, upgrade)
+    if apply_err:
+        return None, apply_err
+
+    voucher = create_object(
+        VOUCHER_TYPECLASS,
+        key=f"Rewarded: {upgraded_item_data.get('name', obj.name)}",
+        location=target_character,
+    )
+    voucher.set_items([
+        {
+            "name": upgraded_item_data.get("name", obj.name),
+            "description": upgraded_item_data.get("description", ""),
+            "quantity": 1,
+            "ic_location": "",
+            "cloneable": False,
+            "item_type": item_type,
+            "item_data": upgraded_item_data,
+        }
+    ])
+    if staff_character and hasattr(voucher, "db"):
+        voucher.db.staff_reward = True
+        voucher.db.staff_reward_by = getattr(staff_character, "key", "staff")
+        voucher.db.staff_reward_upgrade = upgrade.get("key", "")
+        voucher.db.staff_reward_base_item = getattr(obj, "name", item_name)
+
+    return voucher, None
 
 
 # Medical Tech (Pharmaceuticals) - Medtech-only, not street drugs. DV13, 200eb materials, 1hr, doses = Medical Tech.
@@ -231,6 +284,202 @@ def create_fabrication_order(character, item_name, recipient=None):
         time_hours=time_hours,
         tech_skill=tech_skill,
         specialty_rank=fabrication,
+        started_at=now,
+        completed_at=completed_at,
+        recipient=recipient or character,
+    )
+    return order, None
+
+
+def _remove_item_from_inventory(inv, item_type, removal_obj):
+    """Remove a concrete item from inventory, mirroring +voucher/add behavior."""
+    if item_type == "weapon":
+        inv.weapons.remove(removal_obj)
+    elif item_type == "armor":
+        inv.armor.remove(removal_obj)
+    elif item_type == "gear":
+        inv.remove_gear(removal_obj)
+    elif item_type == "cyberware":
+        inv.cyberware.remove(removal_obj)
+        removal_obj.delete()
+    elif item_type == "ammunition":
+        inv.ammunition.remove(removal_obj)
+    elif item_type == "vehicle":
+        inv.vehicles.remove(removal_obj)
+
+
+def _build_voucher_item(name, item_type, item_data, quantity=1):
+    """Build canonical voucher payload for a single typed item."""
+    return {
+        "name": name,
+        "description": item_data.get("description", ""),
+        "quantity": max(1, int(quantity or 1)),
+        "ic_location": "",
+        "cloneable": False,
+        "item_type": item_type,
+        "item_data": dict(item_data or {}),
+    }
+
+
+def _strip_internal_upgrade_keys(item_data):
+    """Strip private Maker order keys from item_data before voucher creation."""
+    cleaned = dict(item_data or {})
+    for key in list(cleaned.keys()):
+        if key.startswith("_maker_"):
+            cleaned.pop(key, None)
+    return cleaned
+
+
+def _compute_upgrade_costs(item_type, base_item_data, upgrade):
+    """Compute Cost #1, Cost #2, labor fee, and timing for an upgrade."""
+    base_value = get_item_value_for_upgrade(item_type, base_item_data)
+    # CPR exception: vehicle upgrades are always treated as Very Expensive (1000eb)
+    # for DV/time/material purposes.
+    if item_type == "vehicle":
+        base_value = 1000
+        price_category = "Very Expensive"
+    else:
+        price_category = value_to_price_category(base_value)
+    materials_cost_1 = get_materials_cost_upgrade(base_value, price_category)
+    materials_cost_2 = get_upgrade_cost2(upgrade)
+    materials_cost = materials_cost_1 + materials_cost_2
+    labor_fee = int((materials_cost_1 + materials_cost_2) * 0.5)
+    total_if_npc = materials_cost + labor_fee
+    return {
+        "base_value": base_value,
+        "price_category": price_category,
+        "cost1": materials_cost_1,
+        "cost2": materials_cost_2,
+        "materials_total": materials_cost,
+        "labor_fee": labor_fee,
+        "npc_total": total_if_npc,
+        "dv": get_maker_dv(price_category),
+        "time_hours": get_maker_time_hours(price_category, base_value),
+    }
+
+
+def preview_upgrade_quote(character, item_name, upgrade_name):
+    """
+    Preview an upgrade quote without consuming materials or removing item.
+    Returns (quote_dict, error_msg).
+    """
+    role = (getattr(character.db, "role", None) or "").strip()
+    if role != "Tech":
+        return None, "Only Tech characters can use Upgrade Expertise."
+
+    upgrade = get_upgrade_definition(upgrade_name)
+    if not upgrade:
+        return None, f"Unknown upgrade '{upgrade_name}'."
+
+    item_type, obj, serializer, _ = find_inventory_item(character, item_name)
+    if not obj:
+        return None, f"You don't have '{item_name}' in your inventory."
+    if item_type not in ("weapon", "armor", "gear", "cyberware", "vehicle"):
+        return None, f"{item_type.title()} items are not currently supported by +make/upgrade."
+
+    base_item_data = serializer(obj)
+    upgraded_item_data, apply_err = apply_upgrade_to_item(item_type, base_item_data, upgrade)
+    if apply_err:
+        return None, apply_err
+    costs = _compute_upgrade_costs(item_type, base_item_data, upgrade)
+    quote = {
+        "item_type": item_type,
+        "item_name": base_item_data.get("name", getattr(obj, "name", "item")),
+        "upgraded_name": upgraded_item_data.get("name", "Custom Item"),
+        "upgrade_key": upgrade["key"],
+        "upgrade_name": upgrade["name"],
+        "upgrade_source": upgrade.get("source", "core"),
+        "tech_skill": get_tech_skill_for_item(item_type, base_item_data.get("category", "")),
+    }
+    quote.update(costs)
+    return quote, None
+
+
+def create_upgrade_order(character, item_name, upgrade_name, recipient=None):
+    """
+    Create an Upgrade Expertise craft order.
+    Consumes an existing inventory item and returns an upgraded custom item on success.
+    If the upgrade fails/cancels, the original item is returned.
+    """
+    role = (getattr(character.db, "role", None) or "").strip()
+    if role != "Tech":
+        return None, "Only Tech characters can use Upgrade Expertise."
+
+    upgrade_rank = getattr(character.db, "maker_upgrade", 0) or 0
+    if upgrade_rank < 1:
+        return None, "You need at least 1 rank in Upgrade Expertise."
+
+    upgrade = get_upgrade_definition(upgrade_name)
+    if not upgrade:
+        return None, f"Unknown upgrade '{upgrade_name}'. Use +make/upgrade to list options."
+
+    item_type, obj, serializer, removal_obj = find_inventory_item(character, item_name)
+    if not obj:
+        return None, f"You don't have '{item_name}' in your inventory."
+    if item_type not in ("weapon", "armor", "gear", "cyberware", "vehicle"):
+        return None, f"{item_type.title()} items are not currently supported by +make/upgrade."
+
+    from world.inventory.models import Inventory
+
+    try:
+        inv, _ = Inventory.get_or_create_for_character(character)
+    except (ValueError, AttributeError):
+        return None, "You don't have a valid inventory."
+
+    base_item_data = serializer(obj)
+    upgraded_item_data, apply_err = apply_upgrade_to_item(item_type, base_item_data, upgrade)
+    if apply_err:
+        return None, apply_err
+
+    costs = _compute_upgrade_costs(item_type, base_item_data, upgrade)
+    price_category = costs["price_category"]
+    materials_cost_1 = costs["cost1"]
+    materials_cost_2 = costs["cost2"]
+    materials_cost = costs["materials_total"]
+    dv = costs["dv"]
+    time_hours = costs["time_hours"]
+    tech_skill = get_tech_skill_for_item(item_type, base_item_data.get("category", ""))
+
+    balance = CharacterMoneyService.get_balance(character)
+    if balance < materials_cost:
+        return None, (
+            f"You need {materials_cost} eb materials (Cost #1 {materials_cost_1} + Cost #2 {materials_cost_2}), "
+            f"but only have {balance} eb."
+        )
+    if not CharacterMoneyService.spend_money(character, materials_cost):
+        return None, "Failed to deduct materials cost."
+
+    # Consume the source item now; we preserve its serialized payload for fail/cancel recovery.
+    _remove_item_from_inventory(inv, item_type, removal_obj)
+
+    now = timezone.now()
+    completed_at = now + timedelta(hours=time_hours)
+    upgraded_item_data["_maker_base_item"] = _build_voucher_item(
+        name=base_item_data.get("name", obj.name),
+        item_type=item_type,
+        item_data=base_item_data,
+        quantity=1,
+    )
+    upgraded_item_data["_maker_upgrade_key"] = upgrade["key"]
+    upgraded_item_data["_maker_upgrade_name"] = upgrade["name"]
+    upgraded_item_data["_maker_upgrade_source"] = upgrade.get("source", "core")
+    upgraded_item_data["_maker_cost_1"] = materials_cost_1
+    upgraded_item_data["_maker_cost_2"] = materials_cost_2
+
+    order = CraftOrder.objects.create(
+        crafter=character,
+        craft_type=CraftOrder.CRAFT_TYPE_UPGRADE,
+        status=CraftOrder.STATUS_IN_PROGRESS,
+        item_type=item_type,
+        item_name=upgraded_item_data.get("name", base_item_data.get("name", obj.name)),
+        item_category=base_item_data.get("category", ""),
+        item_data=upgraded_item_data,
+        materials_cost=materials_cost,
+        price_category=price_category,
+        dv=dv,
+        time_hours=time_hours,
+        tech_skill=tech_skill,
+        specialty_rank=upgrade_rank,
         started_at=now,
         completed_at=completed_at,
         recipient=recipient or character,
@@ -475,20 +724,24 @@ def process_craft_order(order):
     recipient_obj = recipient  # May be ObjectDB
 
     if order.success:
-        # Create voucher with the crafted item
+        # Create voucher with the crafted/upgraded item
+        voucher_prefix = "Crafted"
+        voucher_item_data = _strip_internal_upgrade_keys(order.item_data)
+        if order.craft_type == CraftOrder.CRAFT_TYPE_UPGRADE:
+            voucher_prefix = "Upgraded"
         voucher = create_object(
             "typeclasses.vouchers.Voucher",
-            key=f"Crafted: {order.item_name}",
+            key=f"{voucher_prefix}: {order.item_name}",
             location=recipient_obj,
         )
         voucher_item = {
             "name": order.item_name,
-            "description": order.item_data.get("description", ""),
+            "description": voucher_item_data.get("description", ""),
             "quantity": 1,
             "ic_location": "",
             "cloneable": False,
             "item_type": order.item_type,
-            "item_data": dict(order.item_data),
+            "item_data": voucher_item_data,
         }
         if order.item_type == "ammunition":
             voucher_item["quantity"] = order.item_data.get("quantity", 10)
@@ -512,6 +765,13 @@ def process_craft_order(order):
                 f"|g{craft_label} complete!|n You synthesized {order.item_name} ({doses} dose{'s' if doses != 1 else ''}). "
                 f"Roll: TECH+Medical Tech+1d10 = {total} (d10={d10}) vs DV{order.dv}. Voucher created."
             )
+        elif order.craft_type == CraftOrder.CRAFT_TYPE_UPGRADE:
+            upg_name = (order.item_data or {}).get("_maker_upgrade_name") or "Maker Upgrade"
+            msg = (
+                f"|g{craft_label} complete!|n You successfully upgraded to {order.item_name} "
+                f"({upg_name}). Roll: TECH+{order.tech_skill}+{order.specialty_rank}+1d10 = "
+                f"{total} (d10={d10}) vs DV{order.dv}. Voucher created."
+            )
         else:
             msg = (
                 f"|g{craft_label} complete!|n You successfully crafted {order.item_name}. "
@@ -525,12 +785,46 @@ def process_craft_order(order):
         # Refund materials (except pharma: materials wasted on failure per rulebook)
         if order.craft_type != CraftOrder.CRAFT_TYPE_PHARMA:
             CharacterMoneyService.add_money(crafter, order.materials_cost)
+
+        # Upgrade failure returns the original source item as a voucher.
+        if order.craft_type == CraftOrder.CRAFT_TYPE_UPGRADE:
+            base_item = (order.item_data or {}).get("_maker_base_item")
+            if base_item:
+                restore_name = base_item.get("name", "Original Item")
+                restore_data = dict(base_item.get("item_data") or {})
+                restore_type = base_item.get("item_type", order.item_type)
+                restore_qty = int(base_item.get("quantity", 1) or 1)
+                voucher = create_object(
+                    "typeclasses.vouchers.Voucher",
+                    key=f"Recovered: {restore_name}",
+                    location=crafter,
+                )
+                voucher.set_items([
+                    {
+                        "name": restore_name,
+                        "description": restore_data.get("description", ""),
+                        "quantity": max(1, restore_qty),
+                        "ic_location": "",
+                        "cloneable": False,
+                        "item_type": restore_type,
+                        "item_data": restore_data,
+                    }
+                ])
+                order.voucher = voucher
+                order.save()
+
         craft_label = dict(CraftOrder.CRAFT_TYPE_CHOICES).get(order.craft_type, "Craft")
         if order.craft_type == CraftOrder.CRAFT_TYPE_PHARMA:
             msg = (
                 f"|r{craft_label} failed.|n You couldn't synthesize {order.item_name}. "
                 f"Roll: TECH+Medical Tech+1d10 = {total} (d10={d10}) vs DV{order.dv}. "
                 f"Materials ({order.materials_cost} eb) wasted."
+            )
+        elif order.craft_type == CraftOrder.CRAFT_TYPE_UPGRADE:
+            msg = (
+                f"|r{craft_label} failed.|n Your upgrade on {order.item_name} did not take. "
+                f"Roll: TECH+{order.tech_skill}+{order.specialty_rank}+1d10 = {total} (d10={d10}) vs DV{order.dv}. "
+                f"Materials ({order.materials_cost} eb) refunded and your original item was returned as a voucher."
             )
         else:
             msg = (

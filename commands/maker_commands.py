@@ -8,6 +8,9 @@ from evennia.commands.default.muxcommand import MuxCommand
 from world.maker.models import CraftOrder
 from world.maker.services import (
     create_fabrication_order,
+    create_upgrade_order,
+    preview_upgrade_quote,
+    create_staff_reward_upgrade,
     create_pharma_order,
     create_program_order,
     create_deckoption_order,
@@ -16,6 +19,7 @@ from world.maker.services import (
     PHARMA_ITEMS,
 )
 from world.maker.scripts import get_or_create_maker_script
+from world.maker.upgrades import get_upgrade_listing_rows
 from world.utils.formatting import sheet_header, sheet_section, footer
 from world.voucher.utils import format_voucher_item
 
@@ -28,6 +32,10 @@ class CmdMake(MuxCommand):
       +make                    - List your craft queue
       +make/add <item>         - Tech: fabricate item (weapons, armor, gear, etc.)
       +make/add <item>=<who>   - Craft for someone else
+      +make/upgrade            - Tech: list available upgrades
+      +make/upgrade/add <item>=<upgrade> - Tech: queue an item upgrade
+      +make/upgrade/quote <item>=<upgrade> - Tech: show Cost #1/#2 + NPC labor estimate
+      +make/staff <who>=<item>=<upgrade> - Staff: instant upgraded reward voucher (no cost/roll)
       +make/pharma             - Medtech: list craftable drugs
       +make/pharma/add <drug>  - Medtech: craft a drug
       +make/program            - Netrunner: list craftable programs
@@ -53,6 +61,10 @@ class CmdMake(MuxCommand):
             self._do_add()
         elif switch == "pharma":
             self._do_pharma()
+        elif switch == "upgrade":
+            self._do_upgrade()
+        elif switch == "staff":
+            self._do_staff_reward_upgrade()
         elif switch == "program":
             self._do_program()
         elif switch == "deckoption":
@@ -77,6 +89,7 @@ class CmdMake(MuxCommand):
         if not orders:
             out += "|wNo items in queue.|n\n"
             out += "\n|yTech:|n +make/add <item> - Fabricate weapons, armor, gear, vehicles\n"
+            out += "|yTech:|n +make/upgrade - Upgrade an existing item into a custom item\n"
             out += "|yMedtech:|n +make/pharma - Craft drugs\n"
             out += "|yNetrunner:|n +make/program - Craft programs | +make/deckoption - Craft deck options\n"
         else:
@@ -204,6 +217,84 @@ class CmdMake(MuxCommand):
         out += footer(width=W, fillchar="-")
         self.caller.msg(out)
 
+    def _do_upgrade(self):
+        """Tech: list upgrades or queue an upgrade with /add."""
+        role = (getattr(self.caller.db, "role", None) or "").strip()
+        if role != "Tech":
+            self.caller.msg("Only Tech characters can use Upgrade Expertise.")
+            return
+
+        if "add" in self.switches and len(self.switches) > 1:
+            raw = (self.args or "").strip()
+            if "=" not in raw:
+                self.caller.msg("Usage: +make/upgrade/add <item>=<upgrade key or name>")
+                return
+            item_name, upgrade_name = raw.split("=", 1)
+            item_name = item_name.strip()
+            upgrade_name = upgrade_name.strip()
+            if not item_name or not upgrade_name:
+                self.caller.msg("Usage: +make/upgrade/add <item>=<upgrade key or name>")
+                return
+
+            order, err = create_upgrade_order(self.caller, item_name, upgrade_name)
+            if err:
+                self.caller.msg(f"|r{err}|n")
+                return
+            cost1 = (order.item_data or {}).get("_maker_cost_1", order.materials_cost)
+            cost2 = (order.item_data or {}).get("_maker_cost_2", 0)
+            upg_name = (order.item_data or {}).get("_maker_upgrade_name", "Maker Upgrade")
+            self.caller.msg(
+                f"|gQueued upgrade: {order.item_name}.|n Upgrade: {upg_name}. "
+                f"Materials: {order.materials_cost} eb (Cost #1 {cost1} + Cost #2 {cost2}). "
+                f"DV{order.dv}, ~{order.time_hours}h. Ready around {order.completed_at.strftime('%Y-%m-%d %H:%M')}."
+            )
+            get_or_create_maker_script()
+            return
+        if "quote" in self.switches and len(self.switches) > 1:
+            raw = (self.args or "").strip()
+            if "=" not in raw:
+                self.caller.msg("Usage: +make/upgrade/quote <item>=<upgrade key or name>")
+                return
+            item_name, upgrade_name = raw.split("=", 1)
+            item_name = item_name.strip()
+            upgrade_name = upgrade_name.strip()
+            if not item_name or not upgrade_name:
+                self.caller.msg("Usage: +make/upgrade/quote <item>=<upgrade key or name>")
+                return
+            quote, err = preview_upgrade_quote(self.caller, item_name, upgrade_name)
+            if err:
+                self.caller.msg(f"|r{err}|n")
+                return
+            src = "Invented" if quote["upgrade_source"] == "invented" else "Core"
+            self.caller.msg(
+                f"|wUpgrade Quote|n - {quote['item_name']} -> {quote['upgraded_name']}\n"
+                f"  Upgrade: {quote['upgrade_name']} ({src})\n"
+                f"  DV/Time: DV{quote['dv']} / ~{quote['time_hours']}h ({quote['price_category']})\n"
+                f"  Cost #1 (materials): {quote['cost1']} eb\n"
+                f"  Cost #2 (invented): {quote['cost2']} eb\n"
+                f"  Materials total: {quote['materials_total']} eb\n"
+                f"  NPC labor fee (50%): {quote['labor_fee']} eb\n"
+                f"  |yNPC total estimate: {quote['npc_total']} eb|n\n"
+                f"  |cPlayer Tech install pays materials only: {quote['materials_total']} eb|n"
+            )
+            return
+
+        rows = get_upgrade_listing_rows()
+        W = 80
+        out = sheet_header("Maker Upgrade Expertise", width=W)
+        out += "|yUse +make/upgrade/add <item>=<upgrade key>|n\n"
+        out += "|yUse +make/upgrade/quote <item>=<upgrade key>|n\n\n"
+        out += f"|y{'Key':<28}{'Source':<10}{'Cost #2':<10}{'Types':<30}|n\n"
+        for row in rows:
+            src = "Invented" if row["source"] == "invented" else "Core"
+            cost2 = f"{row['cost2']} eb" if row["cost2"] else "-"
+            out += f"  {row['key'][:27]:<28}{src:<10}{cost2:<10}{row['types'][:29]:<30}\n"
+        out += "\n|yDescriptions|n\n"
+        for row in rows:
+            out += f"  |w{row['key']}|n - {row['description']}\n"
+        out += footer(width=W, fillchar="-")
+        self.caller.msg(out)
+
     def _do_program(self):
         """Netrunner: list programs or add with /add."""
         role = (getattr(self.caller.db, "role", None) or "").strip()
@@ -236,6 +327,45 @@ class CmdMake(MuxCommand):
             out += f"  {(p.get('name') or '?'):<25}{(p.get('type') or '?'):<20}{(p.get('cost') or 0):<10} eb\n"
         out += footer(width=W, fillchar="-")
         self.caller.msg(out)
+
+    def _do_staff_reward_upgrade(self):
+        """Staff: instantly grant a custom upgraded item as a voucher reward."""
+        if not (
+            hasattr(self.caller, "check_permstring")
+            and (self.caller.check_permstring("Builders") or self.caller.check_permstring("Admins"))
+        ):
+            self.caller.msg("Only staff can use +make/staff.")
+            return
+
+        raw = (self.args or "").strip()
+        parts = [p.strip() for p in raw.split("=")] if raw else []
+        if len(parts) != 3 or not all(parts):
+            self.caller.msg("Usage: +make/staff <character>=<base item name>=<upgrade key or name>")
+            return
+
+        who, item_name, upgrade_name = parts
+        target = self.caller.search(who, global_search=True)
+        if not target:
+            return
+
+        voucher, err = create_staff_reward_upgrade(
+            target_character=target,
+            item_name=item_name,
+            upgrade_name=upgrade_name,
+            staff_character=self.caller,
+        )
+        if err:
+            self.caller.msg(f"|r{err}|n")
+            return
+
+        self.caller.msg(
+            f"|gCreated reward voucher '{voucher.key}' for {target.key}.|n "
+            f"Item: {item_name} | Upgrade: {upgrade_name}"
+        )
+        if hasattr(target, "msg"):
+            target.msg(
+                f"|gYou received a custom upgraded reward voucher: {voucher.key}.|n"
+            )
 
     def _do_deckoption(self):
         """Netrunner: list deck options or add with /add."""
@@ -287,10 +417,40 @@ class CmdMake(MuxCommand):
             return
 
         from world.cyberpunk_sheets.services import CharacterMoneyService
+        from evennia import create_object
         CharacterMoneyService.add_money(self.caller, order.materials_cost)
+
+        restored = False
+        if order.craft_type == CraftOrder.CRAFT_TYPE_UPGRADE:
+            base_item = (order.item_data or {}).get("_maker_base_item")
+            if base_item:
+                base_name = base_item.get("name", "Original Item")
+                base_data = dict(base_item.get("item_data") or {})
+                base_type = base_item.get("item_type", order.item_type)
+                qty = max(1, int(base_item.get("quantity", 1) or 1))
+                voucher = create_object(
+                    "typeclasses.vouchers.Voucher",
+                    key=f"Recovered: {base_name}",
+                    location=self.caller,
+                )
+                voucher.set_items([{
+                    "name": base_name,
+                    "description": base_data.get("description", ""),
+                    "quantity": qty,
+                    "ic_location": "",
+                    "cloneable": False,
+                    "item_type": base_type,
+                    "item_data": base_data,
+                }])
+                order.voucher = voucher
+                restored = True
+
         order.status = CraftOrder.STATUS_CANCELLED
         order.save()
-        self.caller.msg(f"|yCancelled order #{oid} ({order.item_name}). Refunded {order.materials_cost} eb.|n")
+        extra = " Original item returned as a voucher." if restored else ""
+        self.caller.msg(
+            f"|yCancelled order #{oid} ({order.item_name}). Refunded {order.materials_cost} eb.{extra}|n"
+        )
 
     def _do_process(self):
         """Staff: force process a specific craft order."""

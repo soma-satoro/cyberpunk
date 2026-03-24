@@ -104,16 +104,26 @@ def get_materials_cost_fabrication(value, price_category):
 
 
 def get_materials_cost_upgrade(value, price_category):
-    """Upgrade: materials same price category as item. Vehicle upgrades = Very Expensive (1000eb)."""
+    """
+    Upgrade materials = item's same price category.
+
+    Uses canonical category baseline prices:
+      Cheap/Everyday 20, Costly 50, Premium 100, Expensive 500,
+      Very Expensive 1000, Luxury 5000, Super Luxury 10000 (minimum baseline).
+    """
+    category_baseline = {
+        "Cheap/Everyday": 20,
+        "Costly": 50,
+        "Premium": 100,
+        "Expensive": 500,
+        "Very Expensive": 1000,
+        "Luxury": 5000,
+        "Super Luxury": 10000,
+    }
     if price_category == "Super Luxury":
-        return value  # Same category = full value for materials
-    cat_idx = MAKER_PRICE_CATEGORIES.index(price_category) if price_category in MAKER_PRICE_CATEGORIES else 0
-    lower_bounds = [20, 50, 100, 500, 1000, 5000, 10000]
-    if cat_idx < len(lower_bounds):
-        low = 0 if cat_idx == 0 else lower_bounds[cat_idx - 1]
-        high = lower_bounds[cat_idx]
-        return (low + high) // 2
-    return value
+        # Super Luxury is 10,000eb+; preserve high-value items by using their full value when provided.
+        return max(10000, int(value or 0))
+    return int(category_baseline.get(price_category, 20))
 
 
 # Tech skill mapping: item type/category -> TECH skill used for repair/fabrication
