@@ -12,6 +12,54 @@ from world.netrunning.models import NetFloorLead, NetLeadExposure, NetLeadResolu
 from world.netrunning.red_netrunning import _format_interface_dice, interface_check
 
 
+def _rumor_intel_for_floor(character, architecture, floor_number: int) -> List[dict]:
+    intel = list(getattr(character.db, "net_rumor_intel", []) or [])
+    out = []
+    for row in intel:
+        if row.get("consumed"):
+            continue
+        if int(row.get("architecture_id", 0) or 0) != int(getattr(architecture, "id", 0) or 0):
+            continue
+        if int(row.get("floor", 0) or 0) != int(floor_number):
+            continue
+        out.append(row)
+    return out
+
+
+def _select_rumor_target(candidates: List[NetFloorLead], rumor_intel: List[dict]) -> Tuple[Optional[NetFloorLead], int]:
+    """
+    Prefer a candidate lead that rumor intel points to. Returns (lead, bonus).
+    """
+    if not candidates or not rumor_intel:
+        return None, 0
+    by_id = {int(lead.id): lead for lead in candidates}
+    for row in rumor_intel:
+        lid = int(row.get("lead_id", 0) or 0)
+        if lid in by_id:
+            bonus = int(row.get("bonus", 0) or 0)
+            return by_id[lid], max(0, bonus)
+    return None, 0
+
+
+def _consume_rumor_intel(character, architecture, floor_number: int, lead: NetFloorLead):
+    intel = list(getattr(character.db, "net_rumor_intel", []) or [])
+    changed = False
+    for row in intel:
+        if row.get("consumed"):
+            continue
+        if int(row.get("architecture_id", 0) or 0) != int(getattr(architecture, "id", 0) or 0):
+            continue
+        if int(row.get("floor", 0) or 0) != int(floor_number):
+            continue
+        if int(row.get("lead_id", 0) or 0) != int(getattr(lead, "id", 0) or 0):
+            continue
+        row["consumed"] = True
+        changed = True
+        break
+    if changed:
+        character.db.net_rumor_intel = intel[-80:]
+
+
 def _prereqs_met(lead: NetFloorLead, character) -> bool:
     pre_ids = list(lead.prerequisite_leads.values_list("pk", flat=True))
     if not pre_ids:
@@ -104,15 +152,21 @@ def delve_next_lead(character, architecture, floor_number: int) -> Tuple[Optiona
             return None, "\n".join(lines)
         return None, "|yNo hidden data signatures left to sweep on this floor.|n"
 
-    lead = candidates[0]
-    total, rank, _die, details = interface_check(character, bonus=0)
-    dice_str = _format_interface_dice(details, 0)
+    rumor_intel = _rumor_intel_for_floor(character, architecture, floor_number)
+    rumor_target, rumor_bonus = _select_rumor_target(candidates, rumor_intel)
+    lead = rumor_target or candidates[0]
+    total, rank, _die, details = interface_check(character, bonus=rumor_bonus)
+    dice_str = _format_interface_dice(details, rumor_bonus)
     dv = int(lead.scan_dv)
     msg0 = f"|cNET sweep|n Interface {rank} + {dice_str} = |w{total}|n vs DV |w{dv}|n ({lead.label})"
+    if rumor_bonus > 0 and rumor_target:
+        msg0 += "\n|mRumor intel aligns with this signature, tightening your search pattern.|n"
     if total <= dv:
         return None, msg0 + "\n|rThe noise swallows the pattern. Nothing new surfaces.|n"
 
     NetLeadExposure.objects.get_or_create(lead=lead, character=character)
+    if rumor_bonus > 0 and rumor_target:
+        _consume_rumor_intel(character, architecture, floor_number, lead)
 
     if lead.lead_type == NetFloorLead.LEAD_FLAVOR:
         NetLeadResolution.objects.get_or_create(lead=lead, character=character)

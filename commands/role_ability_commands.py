@@ -12,6 +12,7 @@ from typing import Dict, List, Tuple
 
 from evennia.commands.default.muxcommand import MuxCommand
 from evennia.utils import gametime
+from evennia.server.models import ServerConfig
 
 from world.improvement_points import get_character_stat_value
 from world.utils.character_utils import is_character_approved
@@ -161,7 +162,7 @@ class CmdBackup(MuxCommand):
                 self.caller.msg(f"You can request backup from tier 1 to your current rank ({rank}).")
                 return
 
-        now = int(gametime.time())
+        now = int(gametime.gametime())
         last_call = int(getattr(self.caller.db, "backup_last_call_ts", 0) or 0)
         if now - last_call < 30:
             self.caller.msg("You just called for backup. Give it a moment before calling again.")
@@ -384,7 +385,7 @@ class CmdImpact(MuxCommand):
         roll = rank + random.randint(1, 10)
         if roll > dv:
             fans = self._fan_store()
-            fans[target] = {"size": size, "since": int(gametime.time()), "name": target_obj.key}
+            fans[target] = {"size": size, "since": int(gametime.gametime()), "name": target_obj.key}
             self.caller.db.rocker_fans = fans
             self.caller.msg(f"|gSuccess.|n You win over |w{target_obj.key}|n as |w{size}|n fans ({roll} vs DV {dv}).")
         else:
@@ -420,7 +421,7 @@ class CmdImpact(MuxCommand):
 
         cooldowns = self._cooldowns()
         cd_key = f"{target_key}|{size}|{_normalize_key(favor)}"
-        now = int(gametime.time())
+        now = int(gametime.gametime())
         until = int(cooldowns.get(cd_key, 0) or 0)
         if until > now:
             self.caller.msg("Those fans recently refused that same favor. You must wait about a week before retrying.")
@@ -457,7 +458,7 @@ class CmdImpact(MuxCommand):
             return
         fans = self._fan_store()
         target_key = f"npc:{target_obj.id}"
-        fans[target_key] = {"size": size, "since": int(gametime.time()), "name": target_obj.key}
+        fans[target_key] = {"size": size, "since": int(gametime.gametime()), "name": target_obj.key}
         self.caller.db.rocker_fans = fans
         self.caller.msg(f"Added fan tag |w{target_obj.key}|n ({size}).")
 
@@ -484,8 +485,10 @@ class CmdScoop(MuxCommand):
       scoop
       scoop/passive
       scoop/rumor [vague|typical|substantial|detailed]
-      scoop/publish <topic>[=<evidence_count>]
-      scoop/publish/newinfo <topic>[=<evidence_count>]
+      scoop/hear
+      scoop/follow <lead_id>
+      scoop/publish <topic>[=<evidence_count>][:<article_text>]
+      scoop/publish/newinfo <topic>[=<evidence_count>][:<article_text>]
     """
 
     key = "scoop"
@@ -500,6 +503,10 @@ class CmdScoop(MuxCommand):
         "detailed": {"passive": 13, "active": 21},
     }
     _ORDER = ("vague", "typical", "substantial", "detailed")
+    _EVIDENCE_BY_TIER = {"vague": 1, "typical": 1, "substantial": 2, "detailed": 3}
+    _SHARED_RUMOR_KEY = "shared_rumor_feed"
+    _FOLLOW_DV_BY_TIER = {"vague": 7, "typical": 9, "substantial": 11, "detailed": 13}
+    _NET_TIERS = {"substantial", "detailed"}
 
     def _believability_chance(self, rank: int) -> int:
         if rank <= 2:
@@ -522,36 +529,291 @@ class CmdScoop(MuxCommand):
                 best = tier
         return best
 
+    def _evidence_pool(self) -> int:
+        try:
+            return max(0, int(getattr(self.caller.db, "media_evidence_pool", 0) or 0))
+        except Exception:
+            return 0
+
+    def _award_evidence(self, tier: str, source: str):
+        amount = int(self._EVIDENCE_BY_TIER.get(tier, 1))
+        pool = self._evidence_pool() + amount
+        self.caller.db.media_evidence_pool = pool
+        plural = "" if amount == 1 else "s"
+        self.caller.msg(
+            f"|gEvidence gained:|n +{amount} point{plural} from {source} intel. "
+            f"|wAvailable evidence:|n {pool}"
+        )
+
+    def _load_shared_rumors(self) -> List[Dict]:
+        data = ServerConfig.objects.conf(self._SHARED_RUMOR_KEY, default=[]) or []
+        return data if isinstance(data, list) else []
+
+    def _save_shared_rumors(self, rumors: List[Dict]):
+        ServerConfig.objects.conf(self._SHARED_RUMOR_KEY, rumors[-200:])
+
+    def _pick_mystery_hook(self) -> Dict:
+        """
+        Select a currently open mystery to reference in street chatter.
+        Returns a lightweight dict safe to persist in ServerConfig.
+        """
+        try:
+            from world.mystery.models import Mystery
+
+            mystery = Mystery.objects.filter(is_solved=False).order_by("?").first()
+            if not mystery:
+                return {}
+            return {
+                "mystery_id": int(mystery.id),
+                "mystery_name": mystery.name,
+                "mystery_hint": (mystery.starting_location_hint or mystery.public_description or "").strip()[:240],
+            }
+        except Exception:
+            return {}
+
+    def _pick_net_hook(self, tier: str) -> Dict:
+        """
+        Select a NET floor lead for higher-quality rumors.
+        """
+        if tier not in self._NET_TIERS:
+            return {}
+        try:
+            from world.netrunning.models import NetFloorLead
+
+            lead = NetFloorLead.objects.order_by("?").first()
+            if not lead:
+                return {}
+            arch = getattr(lead, "architecture_object", None)
+            return {
+                "net_lead_id": int(lead.id),
+                "net_architecture_id": int(lead.architecture_object_id),
+                "net_architecture_key": getattr(arch, "key", "NET"),
+                "net_floor": int(lead.floor_number),
+                "net_label": lead.label,
+            }
+        except Exception:
+            return {}
+
+    def _share_rumor(self, tier: str, source: str):
+        rumors = self._load_shared_rumors()
+        now = int(gametime.gametime())
+        next_id = int(rumors[-1]["id"]) + 1 if rumors else 1
+        mystery_hook = self._pick_mystery_hook()
+        net_hook = self._pick_net_hook(tier)
+        hook = {}
+        hook.update(mystery_hook)
+        hook.update(net_hook)
+        rumors.append(
+            {
+                "id": next_id,
+                "tier": tier,
+                "source": source,
+                "origin": self.caller.key,
+                "timestamp": now,
+                "claimed_by": [],
+                "hook": hook,
+            }
+        )
+        self._save_shared_rumors(rumors)
+        self.caller.msg(f"|xStreet chatter seeded:|n rumor lead #{next_id} enters circulation.")
+
+    def _hear_shared_rumors(self):
+        rumors = self._load_shared_rumors()
+        if not rumors:
+            self.caller.msg("No shared rumor leads are circulating right now.")
+            return
+        lines = ["|wShared Rumor Leads|n (newest first)"]
+        for row in reversed(rumors[-10:]):
+            hook = dict(row.get("hook", {}) or {})
+            tags = []
+            if hook.get("mystery_id"):
+                tags.append("mystery")
+            if hook.get("net_lead_id"):
+                tags.append("net")
+            tag_txt = f" [{' / '.join(tags)}]" if tags else ""
+            lines.append(
+                f"- #{row.get('id')} | {str(row.get('tier', 'vague')).title()} lead | "
+                f"origin: {row.get('origin', 'unknown')}{tag_txt}"
+            )
+        lines.append("")
+        lines.append("Use |wscoop/follow <lead_id>|n to chase one of these leads.")
+        self.caller.msg("\n".join(lines))
+
+    def _grant_mystery_rumor_benefits(self, target: Dict):
+        hook = dict(target.get("hook", {}) or {})
+        mid = int(hook.get("mystery_id") or 0)
+        if mid <= 0:
+            return
+        try:
+            from world.mystery.models import Mystery, MysteryClue, ClueExposure
+            from world.mystery.services import follow_mystery_for_character
+
+            mystery = Mystery.objects.filter(id=mid, is_solved=False).first()
+            if not mystery:
+                return
+            follow_mystery_for_character(self.caller, mystery)
+
+            # Soft assist: expose one first-step clue so player can start investigating.
+            clue = (
+                MysteryClue.objects.filter(mystery=mystery, required_clues__isnull=True, gating_obstacle__isnull=True)
+                .order_by("discovery_priority", "id")
+                .first()
+            )
+            if clue:
+                ClueExposure.objects.get_or_create(character=self.caller, clue=clue)
+
+            hint_row = {
+                "mystery_id": mystery.id,
+                "mystery": mystery.name,
+                "hint": (hook.get("mystery_hint") or mystery.starting_location_hint or "").strip(),
+                "time": int(gametime.gametime()),
+                "source": target.get("origin", "unknown"),
+            }
+            hints = list(getattr(self.caller.db, "mystery_rumor_hints", []) or [])
+            hints.append(hint_row)
+            self.caller.db.mystery_rumor_hints = hints[-50:]
+
+            msg = f"|cMystery thread connected:|n |w{mystery.name}|n."
+            if hint_row["hint"]:
+                msg += f" Start point: {hint_row['hint']}"
+            msg += " (Check |w+mystery|n / |w+investigate/leads|n.)"
+            self.caller.msg(msg)
+        except Exception:
+            return
+
+    def _grant_net_rumor_benefits(self, target: Dict):
+        hook = dict(target.get("hook", {}) or {})
+        lead_id = int(hook.get("net_lead_id") or 0)
+        arch_id = int(hook.get("net_architecture_id") or 0)
+        floor = int(hook.get("net_floor") or 0)
+        if lead_id <= 0 or arch_id <= 0 or floor <= 0:
+            return
+
+        intel = list(getattr(self.caller.db, "net_rumor_intel", []) or [])
+        key = f"{arch_id}:{floor}:{lead_id}"
+        if not any(str(row.get("key", "")) == key for row in intel):
+            intel.append(
+                {
+                    "key": key,
+                    "lead_id": lead_id,
+                    "architecture_id": arch_id,
+                    "architecture_key": hook.get("net_architecture_key", "NET"),
+                    "floor": floor,
+                    "label": hook.get("net_label", "Unknown lead"),
+                    "bonus": 2,
+                    "consumed": False,
+                    "time": int(gametime.gametime()),
+                    "source": target.get("origin", "unknown"),
+                }
+            )
+            self.caller.db.net_rumor_intel = intel[-80:]
+
+        self.caller.msg(
+            "|cNetrunning intel acquired:|n "
+            f"{hook.get('net_architecture_key', 'NET')} floor {floor} may hold |w{hook.get('net_label', 'a hidden lead')}|n. "
+            "This grants a rumor edge on |w+net/delve|n when you're there."
+        )
+
+    def _follow_shared_rumor(self, rank: int):
+        raw = (self.args or "").strip()
+        if not raw:
+            self.caller.msg("Usage: scoop/follow <lead_id>")
+            return
+        try:
+            lead_id = int(raw)
+        except ValueError:
+            self.caller.msg("Lead ID must be a number. Usage: scoop/follow <lead_id>")
+            return
+
+        rumors = self._load_shared_rumors()
+        target = None
+        for row in rumors:
+            if int(row.get("id", 0) or 0) == lead_id:
+                target = row
+                break
+        if not target:
+            self.caller.msg("That lead does not exist anymore.")
+            return
+
+        claimed = list(target.get("claimed_by", []) or [])
+        caller_ref = str(self.caller.id)
+        if caller_ref in claimed:
+            self.caller.msg("You already followed this lead.")
+            return
+
+        tier = _normalize_key(str(target.get("tier", "vague")))
+        dv = int(self._FOLLOW_DV_BY_TIER.get(tier, 9))
+        total = max(0, int(rank or 0)) + random.randint(1, 10)
+        claimed.append(caller_ref)
+        target["claimed_by"] = claimed
+        self._save_shared_rumors(rumors)
+
+        if total > dv:
+            clue = {
+                "lead_id": lead_id,
+                "tier": tier,
+                "time": int(gametime.gametime()),
+                "source": target.get("origin", "unknown"),
+            }
+            clues = list(getattr(self.caller.db, "rumor_clues", []) or [])
+            clues.append(clue)
+            self.caller.db.rumor_clues = clues[-50:]
+            self.caller.msg(
+                f"|gLead followed.|n You pull useful details from rumor #{lead_id} "
+                f"({total} vs DV {dv})."
+            )
+            self._grant_mystery_rumor_benefits(target)
+            self._grant_net_rumor_benefits(target)
+            return
+
+        self.caller.msg(
+            f"|rNo traction.|n You fail to turn rumor #{lead_id} into useful intel "
+            f"({total} vs DV {dv})."
+        )
+
     def func(self):
         if not is_character_approved(self.caller):
             self.caller.msg("You must be approved by staff before using scoop.")
             return
 
         rank = _role_rank(self.caller, "credibility")
-        if rank <= 0:
-            self.caller.msg("You do not have Credibility.")
+        sw = self.switches[0].lower() if self.switches else ""
+        if rank <= 0 and sw not in ("hear", "follow"):
+            self.caller.msg(
+                "You do not have Credibility. You can still use |wscoop/hear|n and |wscoop/follow <lead_id>|n."
+            )
             return
 
         if not self.switches:
             chance = self._believability_chance(rank)
+            pool = self._evidence_pool()
             self.caller.msg(
                 f"|wCredibility Rank:|n {rank}\n"
                 f"|wBelievability baseline:|n {chance}/10\n"
+                f"|wAvailable evidence:|n {pool}\n"
                 "Use |wscoop/passive|n, |wscoop/rumor|n, or |wscoop/publish|n."
             )
             return
 
-        sw = self.switches[0].lower()
         if sw == "passive":
             self._passive(rank)
             return
         if sw == "rumor":
             self._active_rumor(rank)
             return
+        if sw == "hear":
+            self._hear_shared_rumors()
+            return
+        if sw == "follow":
+            self._follow_shared_rumor(rank)
+            return
         if sw == "publish":
             self._publish(rank, allow_repeat=("newinfo" in (self.switches or [])))
             return
-        self.caller.msg("Usage: scoop/passive, scoop/rumor [tier], scoop/publish <topic>[=<evidence_count>]")
+        self.caller.msg(
+            "Usage: scoop/passive, scoop/rumor [tier], scoop/hear, scoop/follow <lead_id>, "
+            "scoop/publish <topic>[=<evidence_count>][:<article_text>]"
+        )
 
     def _passive(self, rank: int):
         total = rank + random.randint(1, 10)
@@ -561,6 +823,8 @@ class CmdScoop(MuxCommand):
                 f"|gPassive rumor hit:|n |w{tier.title()}|n (roll {total}). "
                 "You hear a lead worth following."
             )
+            self._award_evidence(tier, "passive")
+            self._share_rumor(tier, "passive")
         else:
             self.caller.msg(f"No useful passive rumor this cycle (roll {total}).")
 
@@ -578,6 +842,9 @@ class CmdScoop(MuxCommand):
                 f"Active rumor search ({target_tier.title()}): roll {total} vs DV {dv} - "
                 f"{'|gSuccess|n' if ok else '|rFailure|n'}."
             )
+            if ok:
+                self._award_evidence(target_tier, "active")
+                self._share_rumor(target_tier, "active")
             return
 
         best = self._best_rumor_tier(total, mode="active")
@@ -585,13 +852,15 @@ class CmdScoop(MuxCommand):
             self.caller.msg(
                 f"|gActive search finds:|n |w{best.title()} rumor|n (roll {total})."
             )
+            self._award_evidence(best, "active")
+            self._share_rumor(best, "active")
         else:
             self.caller.msg(f"No actionable rumor found this search (roll {total}).")
 
     def _publish(self, rank: int, allow_repeat: bool):
         raw = (self.args or "").strip()
         if not raw:
-            self.caller.msg("Usage: scoop/publish <topic>[=<evidence_count>]")
+            self.caller.msg("Usage: scoop/publish <topic>[=<evidence_count>][:<article_text>]")
             return
 
         # Require Screamsheets board to exist for publishing workflow.
@@ -615,20 +884,33 @@ class CmdScoop(MuxCommand):
             )
             return
 
-        if "=" in raw:
-            topic_raw, evidence_raw = [x.strip() for x in raw.split("=", 1)]
+        if ":" in raw:
+            publish_raw, article_text = [x.strip() for x in raw.split(":", 1)]
+        else:
+            publish_raw, article_text = raw, ""
+
+        if "=" in publish_raw:
+            topic_raw, evidence_raw = [x.strip() for x in publish_raw.split("=", 1)]
             try:
                 evidence_count = max(0, int(evidence_raw))
             except ValueError:
                 self.caller.msg("Evidence count must be a number.")
                 return
         else:
-            topic_raw = raw
+            topic_raw = publish_raw
             evidence_count = 0
 
         topic = _normalize_key(topic_raw)
         if not topic:
             self.caller.msg("Topic cannot be empty.")
+            return
+
+        available_evidence = self._evidence_pool()
+        if evidence_count > available_evidence:
+            self.caller.msg(
+                f"You only have {available_evidence} evidence point(s). "
+                "Gather more with |wscoop/passive|n or |wscoop/rumor|n."
+            )
             return
 
         published = dict(getattr(self.caller.db, "media_published_topics", {}) or {})
@@ -648,15 +930,17 @@ class CmdScoop(MuxCommand):
         d10 = random.randint(1, 10)
         believed = d10 <= final_chance
 
-        now = int(gametime.time())
+        now = int(gametime.gametime())
         published[topic] = {
             "last_published": now,
             "evidence_count": evidence_count,
             "believed": believed,
             "roll": d10,
             "chance": final_chance,
+            "article_text": article_text,
         }
         self.caller.db.media_published_topics = published
+        self.caller.db.media_evidence_pool = max(0, available_evidence - evidence_count)
 
         if believed:
             self.caller.msg(
@@ -678,6 +962,8 @@ class CmdScoop(MuxCommand):
             f"Evidence count: {evidence_count}\n"
             f"Believability roll: {d10} <= {final_chance} ({status})\n"
         )
+        if article_text:
+            body += f"\nArticle:\n{article_text}\n"
         try:
             bbs.create_post("Screamsheets", title, body, self.caller.key)
             self.caller.msg("|xPosted to Screamsheets.|n")

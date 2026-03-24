@@ -19,10 +19,17 @@ class SafeEvMore(EvMore):
             targets.append(account)
 
         for target in targets:
-            try:
-                target.cmdset.remove(CmdSetMore)
-            except Exception:
-                pass
+            # remove any stacked pager cmdsets, not just one instance
+            for _ in range(10):
+                removed = False
+                for cmdset_ref in (CmdSetMore, "more_commands"):
+                    try:
+                        target.cmdset.remove(cmdset_ref)
+                        removed = True
+                    except Exception:
+                        pass
+                if not removed:
+                    break
 
             try:
                 del target.ndb._more
