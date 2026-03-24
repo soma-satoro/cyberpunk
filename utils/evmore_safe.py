@@ -11,25 +11,63 @@ from evennia.utils.evmore import CmdSetMore, EvMore
 class SafeEvMore(EvMore):
     """EvMore variant that safely replaces any existing pager state."""
 
-    def _clear_existing_pager(self):
-        """Remove stale pager state from caller and linked account."""
-        targets = [self._caller]
-        account = getattr(self._caller, "account", None)
-        if account and account is not self._caller:
-            targets.append(account)
+    def _collect_targets(self):
+        """
+        Collect all likely holders of pager state for this interaction.
 
-        for target in targets:
-            # remove any stacked pager cmdsets, not just one instance
-            for _ in range(10):
-                removed = False
-                for cmdset_ref in (CmdSetMore, "more_commands"):
+        Depending on which cmdset the active help command came from, caller may
+        be Character or Account. We include both plus current session puppet.
+        """
+        targets = []
+
+        def _add(obj):
+            if obj and obj not in targets:
+                targets.append(obj)
+
+        _add(self._caller)
+        _add(getattr(self._caller, "account", None))
+        _add(getattr(self._session, "puppet", None))
+        return targets
+
+    def _primary_target(self):
+        """
+        Pick one object to hold the pager cmdset.
+
+        Prefer puppeted Character when available, otherwise fall back to caller.
+        """
+        return getattr(self._session, "puppet", None) or self._caller
+
+    @staticmethod
+    def _is_more_cmdset(cmdset_obj):
+        """Identify Evennia's pager cmdset by key/path."""
+        key = str(getattr(cmdset_obj, "key", "")).lower()
+        path = str(getattr(cmdset_obj, "path", "")).lower()
+        return key == "more_commands" or path.endswith("evennia.utils.evmore.cmdsetmore")
+
+    def _remove_more_cmdsets(self, target):
+        """Remove all pager cmdset instances from a target."""
+        for _ in range(10):
+            removed_any = False
+            try:
+                active_sets = list(target.cmdset.all())
+            except Exception:
+                active_sets = []
+
+            for cmdset_obj in active_sets:
+                if self._is_more_cmdset(cmdset_obj):
                     try:
-                        target.cmdset.remove(cmdset_ref)
-                        removed = True
+                        target.cmdset.remove(cmdset_obj)
+                        removed_any = True
                     except Exception:
                         pass
-                if not removed:
-                    break
+
+            if not removed_any:
+                break
+
+    def _clear_existing_pager(self):
+        """Remove stale pager state from caller and linked account."""
+        for target in self._collect_targets():
+            self._remove_more_cmdsets(target)
 
             try:
                 del target.ndb._more
@@ -48,8 +86,9 @@ class SafeEvMore(EvMore):
             return
 
         self._clear_existing_pager()
-        self._caller.ndb._more = self
-        self._caller.cmdset.add(CmdSetMore)
+        target = self._primary_target()
+        target.ndb._more = self
+        target.cmdset.add(CmdSetMore)
         self.page_top()
 
 
