@@ -13,6 +13,7 @@ Device keys are stable per source:
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Dict, List, Optional, Tuple
 
 from world.cyberware.cyberware_data import CYBERWARE_DATA
@@ -22,6 +23,7 @@ from world.utils.name_fuzzy import pick_named_candidate
 
 LOADOUT_ATTR = "agent_app_loadout"
 AGENT_APP_CATEGORY = "Agent App"
+SECONDARY_APP_CATEGORY = "Electronics"
 
 DEFAULT_APP_SLOTS_BY_QUALITY = {
     "poor": 4,
@@ -47,12 +49,36 @@ def _empty_entry() -> Dict[str, List[str]]:
     return {"apps": []}
 
 
+def _is_installable_agent_app(item: dict) -> bool:
+    """
+    Return True if equipment-data entry can be installed as an Agent app.
+    Primary source is category "Agent App"; secondary source allows
+    Electronics entries that are clearly app items by name.
+    """
+    if not isinstance(item, dict):
+        return False
+    name = str(item.get("name") or "").strip()
+    if not name:
+        return False
+    category = _norm(item.get("category"))
+    if category == _norm(AGENT_APP_CATEGORY):
+        return True
+    if category == _norm(SECONDARY_APP_CATEGORY) and name.lower().endswith(" app"):
+        return True
+    return False
+
+
 def _normalize_entry(raw) -> Dict[str, List[str]]:
-    if isinstance(raw, dict):
-        apps = raw.get("apps") if isinstance(raw.get("apps"), list) else []
+    if isinstance(raw, Mapping):
+        apps_raw = raw.get("apps")
+        apps = (
+            list(apps_raw)
+            if isinstance(apps_raw, Sequence) and not isinstance(apps_raw, (str, bytes))
+            else []
+        )
         return {"apps": [str(x) for x in apps]}
-    if isinstance(raw, list):
-        return {"apps": [str(x) for x in raw]}
+    if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
+        return {"apps": [str(x) for x in list(raw)]}
     return _empty_entry()
 
 
@@ -65,7 +91,7 @@ def app_data_by_name(name: str) -> Optional[dict]:
         return None
     n = _norm(name)
     for item in gears:
-        if _norm(item.get("category")) != _norm(AGENT_APP_CATEGORY):
+        if not _is_installable_agent_app(item):
             continue
         if _norm(item.get("name")) == n:
             return item
@@ -113,7 +139,7 @@ def _app_slots_for_device(device_data: dict) -> int:
 def get_agent_loadouts(character) -> Dict[str, Dict[str, List[str]]]:
     raw = getattr(character.db, LOADOUT_ATTR, None)
     out: Dict[str, Dict[str, List[str]]] = {}
-    if isinstance(raw, dict):
+    if isinstance(raw, Mapping):
         for key, value in raw.items():
             out[str(key)] = _normalize_entry(value)
     return out
@@ -198,10 +224,14 @@ def _consume_app_from_vouchers(character, app_name: str) -> bool:
         for i, item in enumerate(items):
             if _norm(item.get("item_type")) != "gear":
                 continue
-            data = item.get("item_data") or {}
-            if _norm(data.get("category")) != _norm(AGENT_APP_CATEGORY):
+            voucher_name = str(item.get("name") or "")
+            if _norm(voucher_name) != target:
                 continue
-            if _norm(item.get("name")) != target:
+            data = item.get("item_data") or {}
+            # Validate against equipment data by name, so both Agent App and
+            # supported Electronics app entries can be consumed.
+            app_data = app_data_by_name(voucher_name)
+            if not app_data:
                 continue
             obj.set_items(items[:i] + items[i + 1 :])
             if hasattr(obj, "is_empty") and obj.is_empty():
@@ -217,7 +247,7 @@ def ensure_agent_app_gear(app_name: str) -> Optional[Gear]:
     gear, _ = Gear.objects.get_or_create(
         name=app_data["name"],
         defaults={
-            "category": AGENT_APP_CATEGORY,
+            "category": app_data.get("category", AGENT_APP_CATEGORY),
             "description": app_data.get("description", ""),
             "weight": app_data.get("weight", 0),
             "value": _to_int(app_data.get("value"), 0),
@@ -235,8 +265,14 @@ def install_agent_app(character, device_query: str, app_query: str) -> Tuple[boo
     if not app_query:
         return False, "Specify an app name to install."
 
-    app_candidates = [(item.get("name"), item.get("name")) for item in gears if _norm(item.get("category")) == _norm(AGENT_APP_CATEGORY)]
-    canonical_name, err = pick_named_candidate(app_query, app_candidates)
+    app_candidates = [
+        (item.get("name"), item.get("name"))
+        for item in gears
+        if _is_installable_agent_app(item)
+    ]
+    # Use stricter fuzzy matching for app names to avoid incorrect remaps
+    # (e.g., unrelated app names being selected from weak similarity).
+    canonical_name, err = pick_named_candidate(app_query, app_candidates, cutoff=0.85)
     if err:
         return False, err
     if not canonical_name:
@@ -259,7 +295,7 @@ def install_agent_app(character, device_query: str, app_query: str) -> Tuple[boo
         return False, f"{device['label']} has no free app slots ({used}/{capacity} used)."
 
     inv, _ = Inventory.get_or_create_for_character(character)
-    app_gear = inv.gear.filter(name__iexact=canonical_name, category=AGENT_APP_CATEGORY).first()
+    app_gear = inv.gear.filter(name__iexact=canonical_name).first()
     if app_gear:
         inv.remove_gear(app_gear)
     elif not _consume_app_from_vouchers(character, canonical_name):

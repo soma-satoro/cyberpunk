@@ -3403,28 +3403,28 @@ gears = [
     {
         "name": "4Tify App",
         "category": "Electronics",
-        "description": "SecSystems. Scan cover 5min for +1d6 next damage vs it. Requires CitiNet. 100eb.",
+        "description": "SecSystems utility app. Marketed as a home-fortification scanner, but in practice it is used to analyze cover weak points. Rule effect: if a user spends 5 minutes scanning a section of cover while within 1 m/yd of it for the full scan, they gain +1d6 to the next damage dealt against that cover. Requires CitiNet access.",
         "weight": 0,
         "value": 100
     },
     {
         "name": "NCPD Crime Database App",
         "category": "Electronics",
-        "description": "Upload photos for crime records check. 1hr for results. Night City CitiNet only. 500eb.",
+        "description": "NCPD records-request app. Upload a digital photo and the app checks public NCPD records for wanted status, bounties, and criminal history tied to the subject. Results take 1 hour and only include data publicly available from NCPD. NCPD retains access to submitted photos and embedded metadata. Requires CitiNet access in Night City.",
         "weight": 0,
         "value": 500
     },
     {
         "name": "Ziggurat City Database App",
         "category": "Electronics",
-        "description": "+1 Local Expert for one city. One city per purchase. 100eb.",
+        "description": "Ziggurat city reference app. Provides local listings and social data for a single city. Rule effect: owning the database for a given city grants +1 to Local Expert checks related to that city's communities and neighborhoods. Each city database is purchased separately.",
         "weight": 0,
         "value": 100
     },
     {
         "name": "Trauma Team MedScan App",
         "category": "Electronics",
-        "description": "Connects to remote specialist. 100eb: +1 First Aid/Paramedic 1hr. 500eb: +1 Medical Tech/Surgery 4hr. 20eb.",
+        "description": "Trauma Team remote triage app. Requires CitiNet access. Base app can connect a user to a Trauma Team remote specialist service: pay 100eb for up to 1 hour to gain +1 to First Aid or Paramedic checks for Stabilize or Quick Fix; or pay 500eb for guidance during one 4-hour treatment, installation, bodysculpt, or surgery to gain +1 to Medical Tech or Surgery. Executive subscribers can access service through the app without additional fee, subject to provider terms.",
         "weight": 0,
         "value": 20
     },
