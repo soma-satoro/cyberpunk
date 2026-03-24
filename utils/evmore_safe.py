@@ -91,6 +91,25 @@ class SafeEvMore(EvMore):
         target.cmdset.add(CmdSetMore)
         self.page_top()
 
+    def page_quit(self, quiet=False):
+        """
+        Quit pager and clear pager state from all likely holders.
+
+        This mirrors EvMore.page_quit but prevents stale pager state from
+        lingering on account/character/session-puppet combinations.
+        """
+        for target in self._collect_targets():
+            self._remove_more_cmdsets(target)
+            try:
+                del target.ndb._more
+            except Exception:
+                pass
+
+        if not quiet:
+            self._caller.msg(text=self._exit_msg, **self._kwargs)
+        if self.exit_cmd:
+            self._caller.execute_cmd(self.exit_cmd, session=self._session)
+
 
 def msg(
     caller,
