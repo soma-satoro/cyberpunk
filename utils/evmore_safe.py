@@ -29,14 +29,6 @@ class SafeEvMore(EvMore):
         _add(getattr(self._session, "puppet", None))
         return targets
 
-    def _primary_target(self):
-        """
-        Pick one object to hold the pager cmdset.
-
-        Prefer puppeted Character when available, otherwise fall back to caller.
-        """
-        return getattr(self._session, "puppet", None) or self._caller
-
     @staticmethod
     def _is_more_cmdset(cmdset_obj):
         """Identify Evennia's pager cmdset by key/path."""
@@ -86,9 +78,10 @@ class SafeEvMore(EvMore):
             return
 
         self._clear_existing_pager()
-        target = self._primary_target()
-        target.ndb._more = self
-        target.cmdset.add(CmdSetMore)
+        # Keep pager state anchored on the active command caller, matching
+        # Evennia's CmdMore/CmdMoreExit lookup expectations.
+        self._caller.ndb._more = self
+        self._caller.cmdset.add(CmdSetMore)
         self.page_top()
 
     def page_quit(self, quiet=False):

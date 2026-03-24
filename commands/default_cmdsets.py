@@ -85,7 +85,7 @@ from .commonmux.CmdStaff import CmdStaff
 from .dice_commands import CmdDice
 from .npc_commands import CmdNpc
 from .elflines_commands import CmdElo, CmdElfline, CmdEloSetup
-from .help_commands import CmdHelpSearch
+from .help_commands import CmdHelpSearch, CmdPagerDebug
 from .role_ability_commands import CmdBackup, CmdImpact, CmdScoop
 
 from commands.bbs.bbs_admin_commands import CmdResetBBS
@@ -115,6 +115,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         """
         super().at_cmdset_creation()
         self.add(CmdHelpSearch())
+        self.add(CmdPagerDebug())
         self.add(CmdSetLegacyComms())
         self.add(CmdSheet())
         self.add(CmdSelfStat())

@@ -13,6 +13,77 @@ from evennia.commands.default.muxcommand import MuxCommand
 from utils import evmore_safe
 
 
+class CmdPagerDebug(MuxCommand):
+    """
+    Debug active pager state on character/account/session.
+
+    Usage:
+      +pagerdebug
+      pagerdebug
+    """
+
+    key = "+pagerdebug"
+    aliases = ["pagerdebug"]
+    locks = "cmd:perm(Developer) or perm(Admin)"
+    help_category = "Admin"
+
+    @staticmethod
+    def _cmdset_debug_lines(holder_label, holder):
+        """Build debug lines for a cmdset holder."""
+        lines = [f"|w{holder_label}|n: {holder!r}"]
+        if not holder:
+            return lines
+
+        try:
+            cmdsets = list(holder.cmdset.all())
+        except Exception as err:
+            lines.append(f"  cmdset.all() failed: {err!r}")
+            return lines
+
+        lines.append(f"  stored_cmdsets={len(cmdsets)}")
+        more_count = 0
+        for cmdset_obj in cmdsets:
+            key = str(getattr(cmdset_obj, "key", ""))
+            path = str(getattr(cmdset_obj, "path", ""))
+            if key.lower() == "more_commands" or path.lower().endswith(
+                "evennia.utils.evmore.cmdsetmore"
+            ):
+                more_count += 1
+            lines.append(f"    - key={key!r} path={path!r}")
+
+        lines.append(f"  more_cmdset_count={more_count}")
+        try:
+            more_ref = holder.ndb._more
+        except Exception as err:
+            lines.append(f"  ndb._more read failed: {err!r}")
+        else:
+            lines.append(f"  ndb._more={more_ref!r}")
+        return lines
+
+    def func(self):
+        caller = self.caller
+        account = getattr(caller, "account", None)
+        session = self.session
+        puppet = getattr(session, "puppet", None) if session else None
+
+        lines = [
+            "|yPager Debug|n",
+            f"caller={caller!r}",
+            f"account={account!r}",
+            f"session={session!r}",
+            f"session.puppet={puppet!r}",
+            "",
+        ]
+        lines.extend(self._cmdset_debug_lines("Caller", caller))
+        lines.append("")
+        lines.extend(self._cmdset_debug_lines("Account", account))
+        if puppet is not None and puppet is not caller:
+            lines.append("")
+            lines.extend(self._cmdset_debug_lines("Session puppet", puppet))
+
+        self.caller.msg("\n".join(lines))
+
+
 class CmdHelpSearch(CmdHelp):
     """
     Get help, with optional search across all help topics.
