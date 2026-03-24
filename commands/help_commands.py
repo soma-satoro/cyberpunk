@@ -53,6 +53,23 @@ class CmdPagerDebug(MuxCommand):
 
         lines.append(f"  more_cmdset_count={more_count}")
         try:
+            stack = list(getattr(holder.cmdset, "cmdset_stack", []) or [])
+        except Exception as err:
+            lines.append(f"  cmdset_stack read failed: {err!r}")
+            stack = []
+        if stack:
+            lines.append(f"  live_stack_count={len(stack)}")
+            stack_more_count = 0
+            for cs in stack:
+                skey = str(getattr(cs, "key", ""))
+                spath = str(getattr(cs, "path", ""))
+                if skey.lower() == "more_commands" or spath.lower().endswith(
+                    "evennia.utils.evmore.cmdsetmore"
+                ):
+                    stack_more_count += 1
+                lines.append(f"    * stack key={skey!r} path={spath!r}")
+            lines.append(f"  live_stack_more_count={stack_more_count}")
+        try:
             more_ref = holder.ndb._more
         except Exception as err:
             lines.append(f"  ndb._more read failed: {err!r}")

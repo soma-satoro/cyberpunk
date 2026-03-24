@@ -54,6 +54,23 @@ class SafeEvMore(EvMore):
             if not removed_any:
                 break
 
+        # Last-resort: purge directly from live cmdset stack if available.
+        try:
+            stack = list(getattr(target.cmdset, "cmdset_stack", []) or [])
+        except Exception:
+            stack = []
+        if stack:
+            filtered = [cs for cs in stack if not self._is_more_cmdset(cs)]
+            if len(filtered) != len(stack):
+                try:
+                    target.cmdset.cmdset_stack = filtered
+                except Exception:
+                    pass
+                try:
+                    target.cmdset.update()
+                except Exception:
+                    pass
+
         # Fallback: iterate actual stack and remove matching objects.
         for _ in range(10):
             removed_any = False
