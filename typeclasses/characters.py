@@ -229,28 +229,44 @@ class Character(DefaultCharacter):
 
     def _dedupe_default_character_cmdsets(self):
         """
-        Remove duplicate stored DefaultCharacter cmdsets from this character.
+        Normalize CharacterCmdSet storage on this character.
 
         A historical manual add in `at_object_creation` could stack duplicate
-        `commands.default_cmdsets.CharacterCmdSet` entries.
+        `commands.default_cmdsets.CharacterCmdSet` entries. We remove all
+        occurrences and add back one default cmdset.
         """
+        cmdset_path = "commands.default_cmdsets.CharacterCmdSet"
         try:
             cmdsets = list(self.cmdset.all())
         except Exception:
             return
 
         matches = [
-            cs
-            for cs in cmdsets
-            if str(getattr(cs, "key", "")) == "DefaultCharacter"
-            and str(getattr(cs, "path", "")) == "commands.default_cmdsets.CharacterCmdSet"
+            cs for cs in cmdsets if str(getattr(cs, "path", "")) == cmdset_path
         ]
-        # Keep one, remove extras.
-        for extra in matches[1:]:
+        if len(matches) <= 1:
+            return
+
+        # Remove all copies of the Character cmdset, then restore one default.
+        for _ in range(10):
+            removed = False
             try:
-                self.cmdset.remove(extra)
+                self.cmdset.remove(cmdset_path)
+                removed = True
             except Exception:
                 pass
+            try:
+                self.cmdset.remove("DefaultCharacter")
+                removed = True
+            except Exception:
+                pass
+            if not removed:
+                break
+
+        try:
+            self.cmdset.add_default(cmdset_path, persistent=True)
+        except Exception:
+            pass
 
     @classmethod
     def create_character_sheet(cls, account=None):
@@ -340,10 +356,10 @@ class Character(DefaultCharacter):
         from evennia.utils import logger
         logger.log_info(f"at_post_puppet called for {self.key}")
 
-        # One-time self-heal for old characters carrying duplicated cmdsets.
-        self._dedupe_default_character_cmdsets()
-
         super().at_post_puppet(**kwargs)
+
+        # Self-heal for old characters carrying duplicated cmdsets.
+        self._dedupe_default_character_cmdsets()
         
         # Automatically migrate character sheet data to typeclass if needed
         if not self.attributes.has("db_migrated_character_sheet"):
