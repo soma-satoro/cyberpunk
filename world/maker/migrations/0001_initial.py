@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ("objects", "0016_delete_rentableroom_delete_room_delete_roomparent"),
+        ("objects", "0001_initial"),
     ]
 
     operations = [

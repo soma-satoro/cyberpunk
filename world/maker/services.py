@@ -562,7 +562,7 @@ def create_program_order(character, item_name, recipient=None):
     if interface < 1:
         return None, "You need at least 1 rank in Interface to craft programs."
 
-    data = find_program_for_craft(item_name)
+    data, _ = find_program_for_craft(item_name)
     if not data:
         return None, f"No program found named '{item_name}'."
 
@@ -627,7 +627,7 @@ def create_deckoption_order(character, item_name, recipient=None):
     if interface < 1:
         return None, "You need at least 1 rank in Interface to craft deck options."
 
-    data = find_deckoption_for_craft(item_name)
+    data, _ = find_deckoption_for_craft(item_name)
     if not data:
         return None, f"No deck option found named '{item_name}'."
 

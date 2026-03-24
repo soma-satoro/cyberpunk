@@ -136,6 +136,7 @@ class CmdNet(MuxCommand):
             "pathfinder": self.cmd_pathfinder,
             "cloak": self.cmd_cloak,
             "backdoor": self.cmd_backdoor,
+            "bypass": self.cmd_backdoor,
             "eyedee": self.cmd_eyedee,
             "control": self.cmd_control,
             "grab": self.cmd_grab,
@@ -256,6 +257,44 @@ class CmdNet(MuxCommand):
         if check_type == "speed" and "speedy_gonzalvez" in active:
             bonus += 2
         return bonus
+
+    def _installed_cyberware_names(self):
+        """
+        Return normalized installed cyberware names for this character.
+        """
+        sheet = getattr(self.caller, "character_sheet", None)
+        if not sheet:
+            return []
+        try:
+            installed = CyberwareInstance.objects.filter(character_sheet=sheet, installed=True).select_related("cyberware")
+        except Exception:
+            return []
+        return [normalize_name((cw.cyberware.name or "").strip()) for cw in installed if getattr(cw, "cyberware", None)]
+
+    def _net_action_modifiers(self, state):
+        """
+        Compute additive NET Action modifiers from deck/cyberware effects.
+        Returns (bonus_int, [reason strings]).
+        """
+        bonus = 0
+        reasons = []
+        deck_name = str(state.get("deck_name", "") or "")
+        deck_key = normalize_name(deck_name)
+
+        # Deck passive: Raven Microcyb Hummingbird grants +1 NET Action/turn.
+        if deck_key == "raven_microcyb_hummingbird":
+            bonus += 1
+            reasons.append("+1 Raven Microcyb Hummingbird")
+
+        # Ex-Disk: 2+ installed + physically connected through Interface Plugs.
+        installed_names = self._installed_cyberware_names()
+        exdisk_count = sum(1 for name in installed_names if name in {"ex-disk", "ex_disk"})
+        has_interface_plugs = "interface_plugs" in set(installed_names)
+        if exdisk_count >= 2 and has_interface_plugs:
+            bonus += 1
+            reasons.append("+1 Ex-Disk x2 (Interface Plug link)")
+
+        return bonus, reasons
 
     def _get_floor(self, arch, state):
         floors = arch.db.floors or []
@@ -380,6 +419,10 @@ class CmdNet(MuxCommand):
         self.caller.msg(f"|rBrain burn: {amount} damage ({reason}).|n")
         hp = getattr(self.caller.db, "current_hp", None)
         if hp is not None and hp <= 0:
+            # During unsafe jack-out backlash resolution, avoid recursively
+            # calling jack-out again for each individual damage packet.
+            if state.get("_jackout_in_progress"):
+                return
             self.caller.msg("|rYou flatline from neural feedback!|n")
             self._do_jackout(unsafe=True)
 
@@ -414,6 +457,47 @@ class CmdNet(MuxCommand):
             if key:
                 out[key] = name
         return out
+
+    def _apply_jackin_deck_automation(self, state):
+        """
+        Apply immediate-on-jackin deck effects that grant free setup actions.
+        """
+        deck_key = normalize_name(str(state.get("deck_name", "") or ""))
+        installed = state.get("installed_programs", {}) or {}
+        destroyed = set(state.get("destroyed_programs", []) or [])
+        active = state.get("active_programs", {}) or {}
+        notes = []
+
+        if deck_key == "microtech_scout":
+            state["free_pathfinder_uses"] = int(state.get("free_pathfinder_uses", 0) or 0) + 1
+            notes.append("Microtech Scout grants one free Pathfinder use.")
+
+        if deck_key == "microtech_warrior":
+            pkey = "armor"
+            if pkey in installed and pkey not in destroyed and pkey not in active:
+                prog = get_program("armor")
+                if prog:
+                    active[pkey] = {
+                        "name": prog["name"],
+                        "rez": int(prog.get("rez", 0) or 0),
+                        "def": int(prog.get("def", 0) or 0),
+                    }
+                    notes.append("Microtech Warrior auto-activates Armor (no NET Action).")
+
+        if deck_key == "raven_microcyb_kestrel_2":
+            pkey = "speedy_gonzalvez"
+            if pkey in installed and pkey not in destroyed and pkey not in active:
+                prog = get_program("speedy gonzalvez")
+                if prog:
+                    active[pkey] = {
+                        "name": prog["name"],
+                        "rez": int(prog.get("rez", 0) or 0),
+                        "def": int(prog.get("def", 0) or 0),
+                    }
+                    notes.append("Kestrel 2 auto-activates Speedy Gonzalvez (no NET Action).")
+
+        state["active_programs"] = active
+        return notes
 
     def _get_active_ice_on_floor(self, state, floor_num):
         ice_state = state.get("ice_state", {})
@@ -728,8 +812,9 @@ class CmdNet(MuxCommand):
         """
         rank = max(1, get_interface_rank(self.caller))
         base_actions = int(net_actions_for_rank(rank))
+        action_bonus, _reasons = self._net_action_modifiers(state)
         penalty = int(state.get("action_penalty", 0) or 0)
-        return max(2, base_actions - penalty)
+        return max(2, base_actions + int(action_bonus or 0) - penalty)
 
     def _ice_program_damage_dice(self, ice_name):
         key = normalize_name(ice_name or "")
@@ -1263,12 +1348,15 @@ class CmdNet(MuxCommand):
             cleared = state.get("cleared_passwords", [])
             if floor_num not in cleared:
                 self.caller.msg(f"  |yBlocked by Password DV {floor.get('dv', '?')}|n")
+                self.caller.msg("  |xSuggested:|n |w+net/backdoor|n (alias: |w+net/bypass|n)")
             else:
                 self.caller.msg("  |gPassword on this floor is already bypassed.|n")
+                self.caller.msg("  |xSuggested:|n |w+net/move down|n")
         if floor.get("type") in ("file", "paydata"):
             paydata = floor.get("paydata")
             if paydata:
                 self.caller.msg("  |yData cache detected. Use +net/eyedee or +net/grab.|n")
+            self.caller.msg("  |xSuggested:|n |w+net/eyedee|n -> |w+net/grab|n -> |w+net/move down|n")
         if floor.get("type") in ("black_ice", "black_ice_group"):
             active = [i for i in self._ensure_floor_ice_state(state, floor) if i.get("active")]
             if active:
@@ -1277,6 +1365,7 @@ class CmdNet(MuxCommand):
                     "  |rHostile ICE:|n "
                     + ", ".join(f"{labels[idx]}({ice['rez']} REZ)" for idx, ice in enumerate(active))
                 )
+                self.caller.msg("  |xSuggested:|n |w+net/zap|n, |w+net/attack <program>|n, or |w+net/slide up[=<ICE>] |n")
         hostile_runners = [r for r in self._enemy_runners_on_floor(state, floor_num) if r.get("active")]
         if hostile_runners:
             self.caller.msg(
@@ -1297,6 +1386,7 @@ class CmdNet(MuxCommand):
                 self.caller.msg("    |gStatus: COUNTERED (meatspace disable complete).|n")
             elif int(floor_num) in set(state.get("disabled_defenses", []) or []):
                 self.caller.msg("    |yStatus: Toggled OFF via control node.|n")
+            self.caller.msg("  |xSuggested:|n |w+net/control|n, then |w+net/control off|n / |w+net/control on|n")
         children = self._children_for_floor(floor)
         parent = self._parent_for_floor(floor)
         if children:
@@ -1309,8 +1399,10 @@ class CmdNet(MuxCommand):
                 else:
                     child_labels.append(f"F{x}")
             self.caller.msg("  |xConnected deeper floors:|n " + ", ".join(child_labels))
+            self.caller.msg("  |xMove:|n |w+net/move down|n or |w+net/move down=<floor#|branch>|n")
         if parent:
             self.caller.msg(f"  |xConnected upper floor:|n F{parent}")
+            self.caller.msg("  |xRetreat:|n |w+net/move up|n or |w+net/slide up|n")
         if floor.get("is_bottom"):
             self.caller.msg("  |gLowest node reached: you can place a persistent virus here.|n")
             self.caller.msg("  Use |w+net/virus start <dv>/<actions>=<description>|n")
@@ -1382,59 +1474,73 @@ class CmdNet(MuxCommand):
 
     def _do_jackout(self, unsafe=False, exclude_backlash_uid=None):
         state = self._get_state()
+        if not state.get("active"):
+            return
+        if state.get("_jackout_in_progress"):
+            return
+        state["_jackout_in_progress"] = True
+        self._set_state(state)
         arch = self._current_architecture()
-        if unsafe:
-            for floor_ice in (state.get("ice_state", {}) or {}).values():
-                for ice_instance in floor_ice or []:
-                    if not ice_instance.get("active") or not ice_instance.get("encountered"):
-                        continue
-                    if exclude_backlash_uid and int(ice_instance.get("uid", 0) or 0) == int(exclude_backlash_uid):
-                        continue
-                    ice = get_black_ice(normalize_name(ice_instance.get("name", "")))
-                    if not ice:
-                        continue
-                    damage_dice = self._ice_brain_damage_dice(ice.get("name"))
-                    if damage_dice:
-                        self._brain_damage(_roll_dice(damage_dice), f"{ice['name']} (jack-out backlash)")
-                    key = normalize_name(ice.get("name", ""))
-                    if key == "asp":
-                        self._destroy_random_installed_program(state, "Asp")
-                    elif key == "wisp":
-                        state["action_penalty_next"] = max(1, int(state.get("action_penalty_next", 0) or 0))
-                    elif key == "kraken":
-                        state["lock_deeper_rounds"] = max(1, int(state.get("lock_deeper_rounds", 0) or 0))
-                        state["lock_safe_jackout_rounds"] = max(1, int(state.get("lock_safe_jackout_rounds", 0) or 0))
-                    elif key == "hellhound":
-                        if not state.get("on_fire", False):
-                            state["on_fire"] = True
-                            self.caller.msg("|rHellhound flames cling to your body and gear!|n")
-        self._archive_trace_if_exposed(state, arch, unsafe=unsafe)
-        # Move character back to room and destroy body object
-        body_id = state.get("body_id")
-        entry_loc_id = state.get("entry_location_id")
-        if body_id:
-            body = evennia.search_object(f"#{body_id}")
-            if body:
-                body = body[0]
-                # Move character back to room (body's location) before destroying body
-                room = body.location
-                if not room and entry_loc_id:
-                    room_match = evennia.search_object(f"#{entry_loc_id}")
-                    room = room_match[0] if room_match else None
-                if room:
-                    self.caller.move_to(room, quiet=True)
-                body.delete()
-        self._clear_state()
-        if unsafe:
-            self.caller.msg("|rUnsafe jack out! Neural backlash tears through your nervous system.|n")
-        else:
-            self.caller.msg("|gYou safely jack out of the Architecture.|n")
-        if self.caller.location:
-            arch_name = arch.key if arch else "the NET"
-            self.caller.location.msg_contents(
-                f"{self.caller.key} blinks rapidly as their focus returns from {arch_name}.",
-                exclude=self.caller,
-            )
+        try:
+            if unsafe:
+                for floor_ice in (state.get("ice_state", {}) or {}).values():
+                    for ice_instance in floor_ice or []:
+                        if not ice_instance.get("active") or not ice_instance.get("encountered"):
+                            continue
+                        if exclude_backlash_uid and int(ice_instance.get("uid", 0) or 0) == int(exclude_backlash_uid):
+                            continue
+                        ice = get_black_ice(normalize_name(ice_instance.get("name", "")))
+                        if not ice:
+                            continue
+                        damage_dice = self._ice_brain_damage_dice(ice.get("name"))
+                        if damage_dice:
+                            self._brain_damage(_roll_dice(damage_dice), f"{ice['name']} (jack-out backlash)")
+                        key = normalize_name(ice.get("name", ""))
+                        if key == "asp":
+                            self._destroy_random_installed_program(state, "Asp")
+                        elif key == "wisp":
+                            state["action_penalty_next"] = max(1, int(state.get("action_penalty_next", 0) or 0))
+                        elif key == "kraken":
+                            state["lock_deeper_rounds"] = max(1, int(state.get("lock_deeper_rounds", 0) or 0))
+                            state["lock_safe_jackout_rounds"] = max(1, int(state.get("lock_safe_jackout_rounds", 0) or 0))
+                        elif key == "hellhound":
+                            if not state.get("on_fire", False):
+                                state["on_fire"] = True
+                                self.caller.msg("|rHellhound flames cling to your body and gear!|n")
+            self._archive_trace_if_exposed(state, arch, unsafe=unsafe)
+            # Move character back to room and destroy body object
+            body_id = state.get("body_id")
+            entry_loc_id = state.get("entry_location_id")
+            if body_id:
+                body = evennia.search_object(f"#{body_id}")
+                if body:
+                    body = body[0]
+                    # Move character back to room (body's location) before destroying body
+                    room = body.location
+                    if not room and entry_loc_id:
+                        room_match = evennia.search_object(f"#{entry_loc_id}")
+                        room = room_match[0] if room_match else None
+                    if room:
+                        self.caller.move_to(room, quiet=True)
+                    body.delete()
+            self._clear_state()
+            if unsafe:
+                self.caller.msg("|rUnsafe jack out! Neural backlash tears through your nervous system.|n")
+            else:
+                self.caller.msg("|gYou safely jack out of the Architecture.|n")
+            if self.caller.location:
+                arch_name = arch.key if arch else "the NET"
+                self.caller.location.msg_contents(
+                    f"{self.caller.key} blinks rapidly as their focus returns from {arch_name}.",
+                    exclude=self.caller,
+                )
+        finally:
+            # If jack-out aborted due to an unexpected exception, clear
+            # re-entrancy guard so the character is not stuck.
+            current = self._get_state()
+            if current.get("active") and current.get("_jackout_in_progress"):
+                current["_jackout_in_progress"] = False
+                self._set_state(current)
 
     def cmd_scan(self):
         room = self.caller.location
@@ -1531,9 +1637,12 @@ class CmdNet(MuxCommand):
             "counter_job": None,
             "demon_paused": False,
         }
+        setup_notes = self._apply_jackin_deck_automation(state)
         self._set_state(state)
 
         self.caller.msg(f"|gYou jack into {arch.key}. The world resolves into META geometry.|n")
+        for note in setup_notes:
+            self.caller.msg(f"|xDeck Effect:|n {note}")
         if self.caller.location:
             self.caller.location.msg_contents(
                 f"{self.caller.key} goes still as chrome light flickers in their eyes.",
@@ -1567,6 +1676,7 @@ class CmdNet(MuxCommand):
         state = self._get_state()
         rank = get_interface_rank(self.caller)
         actions = self._net_actions_available(state)
+        _action_bonus, action_bonus_reasons = self._net_action_modifiers(state)
         used = int(state.get("net_actions_used", 0) or 0)
         remaining = max(0, actions - used)
         active_programs = state.get("active_programs", {})
@@ -1574,6 +1684,8 @@ class CmdNet(MuxCommand):
             f"|cNetrun Status|n  Arch: |w{arch.key}|n  Interface: {rank}  "
             f"NET Actions: {remaining}/{actions} this turn"
         )
+        if action_bonus_reasons:
+            self.caller.msg("NET Action modifiers: " + ", ".join(action_bonus_reasons))
         self.caller.msg(f"Alarm level: {int(state.get('alarm_level', 0) or 0)}")
         demon = getattr(arch.db, "demon", None) or {}
         if demon:
@@ -1791,6 +1903,12 @@ class CmdNet(MuxCommand):
             self.caller.msg(
                 f"  F{floor['floor']}: {floor.get('name', '?')} ({floor.get('type')}){extra}"
             )
+        free_uses = int(state.get("free_pathfinder_uses", 0) or 0)
+        if free_uses > 0:
+            state["free_pathfinder_uses"] = free_uses - 1
+            self._set_state(state)
+            self.caller.msg("|gPathfinder used for free (Microtech Scout jack-in effect).|n")
+            return
         self._consume_net_action(state, "Pathfinder")
 
     def cmd_cloak(self):
@@ -1842,6 +1960,7 @@ class CmdNet(MuxCommand):
             state["cleared_passwords"] = cleared
             self._set_state(state)
             self.caller.msg("|gPassword bypassed.|n")
+            self.caller.msg("|xPath is open:|n use |w+net/move down|n to continue.")
         else:
             self.caller.msg("|rAccess denied.|n")
             self._register_alarm(state, reason=f"Backdoor failure on Floor {floor.get('floor')}")
@@ -1977,6 +2096,7 @@ class CmdNet(MuxCommand):
             f"|gPaydata copied:|n {paydata.get('label')} "
             f"(Street value {paydata.get('value', 0)} eb)"
         )
+        self.caller.msg("|xNext step:|n |w+net/move down|n for deeper nodes or |w+net/jackout|n when done.")
 
     def cmd_programs(self):
         subs = [s.lower() for s in (self.switches or [])[1:]]
@@ -2379,8 +2499,7 @@ class CmdNet(MuxCommand):
         move_arg = move_arg.strip().lower()
         target_arg = target_arg.strip()
         if not move_arg:
-            self.caller.msg("Usage: +net/slide <up|floor#>[=<ICE name or #>]")
-            return
+            move_arg = "up"
         if len(floor_ice) > 1 and not target_arg:
             labels = self._ice_display_names(floor_ice)
             self.caller.msg(
@@ -2422,7 +2541,6 @@ class CmdNet(MuxCommand):
             self._send_ice_to_home_floor(state, target)
             state["floor"] = new_floor
             self._move_pursuing_ice(state, cur, new_floor)
-            self._set_active_ice_on_floor(state, floor["floor"], floor_ice)
             self._set_state(state)
             self.caller.msg(f"|gYou evade {ice['name']}; it loses you and falls back to its home floor.|n")
             self._show_current_floor(arch, state)

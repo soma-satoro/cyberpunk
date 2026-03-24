@@ -85,7 +85,7 @@ from .commonmux.CmdStaff import CmdStaff
 from .dice_commands import CmdDice
 from .npc_commands import CmdNpc
 from .elflines_commands import CmdElo, CmdElfline, CmdEloSetup
-from .help_commands import CmdHelpSearch, CmdHelpPage, CmdPagerDebug, PagerNavCmdSet
+from .help_commands import CmdHelpSearch, CmdHelpPage, CmdPagerDebug, PagerNavCmdSet, CmdNoMatchExitFallback
 from .role_ability_commands import CmdBackup, CmdImpact, CmdScoop
 
 from commands.bbs.bbs_admin_commands import CmdResetBBS
@@ -115,6 +115,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         """
         super().at_cmdset_creation()
         self.add(PagerNavCmdSet())
+        self.add(CmdNoMatchExitFallback())
         self.add(CmdHelpSearch())
         self.add(CmdHelpPage())
         self.add(CmdPagerDebug())

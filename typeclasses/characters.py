@@ -282,7 +282,33 @@ class Character(DefaultCharacter):
         This protects against transient duplicate `more_commands` insertions
         causing command multimatch (`n-1`, `n-2`) while paging.
         """
+        # Include object/account/session holders; session-level cmdsets can
+        # also suppress exits (no_exits=True) if left stale.
         holders = [self, getattr(self, "account", None)]
+        seen_holders = set()
+
+        def _add_holder(holder):
+            if not holder:
+                return
+            hid = id(holder)
+            if hid in seen_holders:
+                return
+            seen_holders.add(hid)
+            holders.append(holder)
+
+        try:
+            for sess in self.sessions.all():
+                _add_holder(sess)
+        except Exception:
+            pass
+        account = getattr(self, "account", None)
+        if account:
+            try:
+                for sess in account.sessions.all():
+                    _add_holder(sess)
+            except Exception:
+                pass
+
         for holder in holders:
             if not holder:
                 continue
@@ -296,6 +322,60 @@ class Character(DefaultCharacter):
                     holder.cmdset.remove(extra)
                 except Exception:
                     pass
+
+            # Clean up stale interactive cmdsets that suppress exits/objects.
+            # These are added by Evennia's EvMenu/get_input/ask_yes_no and use
+            # no_exits/no_objs=True. If left behind after a crash/reload, local
+            # exit commands disappear until manually removed.
+            for cs in cmdsets:
+                ckey = str(getattr(cs, "key", "")).lower()
+                marker = None
+                if ckey == "menu_cmdset":
+                    marker = "_evmenu"
+                elif ckey == "input_cmdset":
+                    marker = "_getinput"
+                elif ckey == "yes_no_question_cmdset":
+                    marker = "_yes_no_question"
+                if not marker:
+                    continue
+
+                active = False
+                try:
+                    active = bool(getattr(holder.ndb, marker, None))
+                except Exception:
+                    active = False
+
+                # For Session holders, also check linked account/puppet state.
+                if not active:
+                    linked_session_account = getattr(holder, "account", None)
+                    if linked_session_account:
+                        try:
+                            active = bool(getattr(linked_session_account.ndb, marker, None))
+                        except Exception:
+                            active = False
+                    linked_puppet = getattr(holder, "puppet", None)
+                    if not active and linked_puppet:
+                        try:
+                            active = bool(getattr(linked_puppet.ndb, marker, None))
+                        except Exception:
+                            active = False
+
+                if not active:
+                    try:
+                        linked_account = getattr(holder, "account", None)
+                    except Exception:
+                        linked_account = None
+                    if linked_account:
+                        try:
+                            active = bool(getattr(linked_account.ndb, marker, None))
+                        except Exception:
+                            active = False
+
+                if not active:
+                    try:
+                        holder.cmdset.remove(cs)
+                    except Exception:
+                        pass
 
     def at_cmdset_get(self, **kwargs):
         """
@@ -1022,10 +1102,49 @@ class Character(DefaultCharacter):
         return string
 
     def execute_cmd(self, raw_string, session=None, **kwargs):
+        """
+        Execute command input with small parser shims used by this game.
+
+        Includes a direct local-exit fallback for one-word commands so
+        exit aliases remain traversable even if a transient cmdset state
+        suppresses ExitCmdSet merging.
+        """
         # Use regex to match ':' followed immediately by any non-space character
         if re.match(r'^:\S', raw_string):
             # Treat it as a pose command, inserting a space after the colon
             raw_string = "pose " + raw_string[1:]
+
+        # Defensive fallback: if input is a single token that exactly matches
+        # a local exit key/alias, traverse directly.
+        cmdtext = (raw_string or "").strip()
+        if cmdtext and " " not in cmdtext and "/" not in cmdtext and not cmdtext.startswith(("+", "@", "&")):
+            token = cmdtext.lower()
+            location = getattr(self, "location", None)
+            if location:
+                try:
+                    exits = list(location.exits)
+                except Exception:
+                    exits = []
+
+                matches = []
+                for ex in exits:
+                    names = [str(getattr(ex, "key", "")).lower()]
+                    try:
+                        names.extend(alias.lower() for alias in ex.aliases.all())
+                    except Exception:
+                        pass
+                    if token in names:
+                        matches.append(ex)
+
+                # Only traverse on an unambiguous direct match.
+                if len(matches) == 1:
+                    ex = matches[0]
+                    if ex.access(self, "traverse"):
+                        ex.at_traverse(self, ex.destination)
+                    else:
+                        ex.at_failed_traverse(self)
+                    return
+
         return super().execute_cmd(raw_string, session=session, **kwargs)
     
     def migrate_sheet_to_typeclass(self):

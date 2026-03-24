@@ -9,8 +9,11 @@ Help text has ANSI stripped so that pipes (e.g. add|remove) in usage examples
 display correctly instead of being interpreted as color codes.
 """
 from evennia.commands.default.help import CmdHelp
+from evennia.commands.default.syscommands import SystemNoMatch
+from evennia.commands.cmdhandler import CMD_NOMATCH
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.default.muxcommand import MuxCommand
+from evennia.utils.utils import string_suggestions
 
 
 _HELP_PAGER_FOOTER = (
@@ -194,6 +197,41 @@ class CmdPagerNext(MuxCommand):
     help_category = "World & Information"
     auto_help = False
 
+    def _try_direction_fallback(self):
+        """
+        If no pager is active and user entered `n`, try room-exit traversal.
+        """
+        if self.cmdstring.lower() != "n":
+            return False
+
+        caller = self.caller
+        location = getattr(caller, "location", None)
+        if not location:
+            return False
+
+        try:
+            exits = list(location.exits)
+        except Exception:
+            exits = []
+
+        for ex in exits:
+            key = str(getattr(ex, "key", "")).lower()
+            aliases = []
+            try:
+                aliases = [alias.lower() for alias in ex.aliases.all()]
+            except Exception:
+                pass
+            if "n" not in ([key] + aliases):
+                continue
+
+            if ex.access(caller, "traverse"):
+                ex.at_traverse(caller, ex.destination)
+            else:
+                ex.at_failed_traverse(caller)
+            return True
+
+        return False
+
     def func(self):
         # 1) Custom help pager state.
         help_state = _get_help_pager_state(self.caller)
@@ -221,6 +259,15 @@ class CmdPagerNext(MuxCommand):
                 more.page_next()
             except Exception:
                 self.caller.msg("Error in loading the pager. Contact an admin.")
+            return
+
+        if self._try_direction_fallback():
+            return
+
+        # If no pager is active, let plain `n` fall through to the normal
+        # directional command parser rather than swallowing it.
+        if self.cmdstring.lower() == "n":
+            self.caller.execute_cmd("north", session=self.session)
             return
 
         self.caller.msg("No active pager.")
@@ -331,6 +378,11 @@ class PagerNavCmdSet(CmdSet):
     key = "pager_nav_commands"
     priority = 120
     mergetype = "Union"
+    # Keep local room/object commandsets (including ExitCmdSet) available.
+    # Without explicit False, higher-priority cmdset merges can inherit
+    # restrictive flags from other active cmdsets and hide exit aliases.
+    no_exits = False
+    no_objs = False
 
     def at_cmdset_creation(self):
         self.add(CmdPagerNext())
@@ -389,11 +441,17 @@ class CmdPagerDebug(MuxCommand):
             for cs in stack:
                 skey = str(getattr(cs, "key", ""))
                 spath = str(getattr(cs, "path", ""))
+                sno_exits = getattr(cs, "no_exits", None)
+                sno_objs = getattr(cs, "no_objs", None)
+                sprio = getattr(cs, "priority", None)
                 if skey.lower() == "more_commands" or spath.lower().endswith(
                     "evennia.utils.evmore.cmdsetmore"
                 ):
                     stack_more_count += 1
-                lines.append(f"    * stack key={skey!r} path={spath!r}")
+                lines.append(
+                    f"    * stack key={skey!r} path={spath!r} prio={sprio!r} "
+                    f"no_exits={sno_exits!r} no_objs={sno_objs!r}"
+                )
             lines.append(f"  live_stack_more_count={stack_more_count}")
         try:
             more_ref = holder.ndb._more
@@ -419,12 +477,84 @@ class CmdPagerDebug(MuxCommand):
         ]
         lines.extend(self._cmdset_debug_lines("Caller", caller))
         lines.append("")
+        lines.extend(self._cmdset_debug_lines("Session", session))
+        lines.append("")
         lines.extend(self._cmdset_debug_lines("Account", account))
         if puppet is not None and puppet is not caller:
             lines.append("")
             lines.extend(self._cmdset_debug_lines("Session puppet", puppet))
 
         self.caller.msg("\n".join(lines))
+
+
+class CmdNoMatchExitFallback(SystemNoMatch):
+    """
+    Fallback for unmatched input to support local exit aliases reliably.
+
+    If no normal command matched, try exact single-token match against
+    exits in caller's current room before reporting command-not-found.
+    """
+
+    key = CMD_NOMATCH
+    locks = "cmd:all()"
+
+    def func(self):
+        raw = (self.args or "").strip()
+        caller = self.caller
+
+        if raw and " " not in raw and "/" not in raw:
+            token = raw.lower()
+            location = getattr(caller, "location", None)
+            if location:
+                try:
+                    exits = list(location.exits)
+                except Exception:
+                    exits = []
+
+                matches = []
+                for ex in exits:
+                    names = [str(getattr(ex, "key", "")).lower()]
+                    try:
+                        names.extend(alias.lower() for alias in ex.aliases.all())
+                    except Exception:
+                        pass
+                    if token in names:
+                        matches.append(ex)
+
+                if len(matches) == 1:
+                    ex = matches[0]
+                    if ex.access(caller, "traverse"):
+                        ex.at_traverse(caller, ex.destination)
+                    else:
+                        ex.at_failed_traverse(caller)
+                    return
+
+        # Friendly fallback text instead of stock "Huh?"
+        msg = f"Command '{raw}' is not available."
+        suggestions = []
+        try:
+            if raw and getattr(self, "cmdset", None):
+                suggestions = string_suggestions(
+                    raw,
+                    self.cmdset.get_all_cmd_keys_and_aliases(caller),
+                    cutoff=0.7,
+                    maxnum=3,
+                )
+        except Exception:
+            suggestions = []
+
+        if suggestions:
+            if len(suggestions) == 1:
+                msg += f" Maybe you meant '{suggestions[0]}'?"
+            elif len(suggestions) == 2:
+                msg += f" Maybe you meant '{suggestions[0]}' or '{suggestions[1]}'?"
+            else:
+                msg += (
+                    f" Maybe you meant '{suggestions[0]}', '{suggestions[1]}' or "
+                    f"'{suggestions[2]}'?"
+                )
+        msg += " Type 'help' to browse commands."
+        caller.msg(msg)
 
 
 class CmdHelpSearch(CmdHelp):

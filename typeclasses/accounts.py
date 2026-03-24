@@ -88,6 +88,59 @@ class Account(DefaultAccount):
         except Exception:
             pass
 
+    def execute_cmd(self, raw_string, session=None, **kwargs):
+        """
+        Execute an account-level command with local-exit fallback.
+
+        In some cmdset merge states, ExitCmdSet may not be available to the
+        parser. Before delegating to normal handling, attempt direct traversal
+        for a single-token exact exit key/alias match on the current puppet.
+        """
+        cmdtext = (raw_string or "").strip()
+        if cmdtext and " " not in cmdtext and "/" not in cmdtext and not cmdtext.startswith(("+", "@", "&")):
+            try:
+                puppet = self.get_puppet(session) if session else None
+            except Exception:
+                puppet = None
+
+            # In account callertype, session can be None. Fall back to any
+            # currently puppeted object on connected sessions.
+            if puppet is None:
+                try:
+                    for sess in self.sessions.get():
+                        if getattr(sess, "puppet", None):
+                            puppet = sess.puppet
+                            break
+                except Exception:
+                    puppet = None
+
+            if puppet and getattr(puppet, "location", None):
+                token = cmdtext.lower()
+                try:
+                    exits = list(puppet.location.exits)
+                except Exception:
+                    exits = []
+
+                matches = []
+                for ex in exits:
+                    names = [str(getattr(ex, "key", "")).lower()]
+                    try:
+                        names.extend(alias.lower() for alias in ex.aliases.all())
+                    except Exception:
+                        pass
+                    if token in names:
+                        matches.append(ex)
+
+                if len(matches) == 1:
+                    ex = matches[0]
+                    if ex.access(puppet, "traverse"):
+                        ex.at_traverse(puppet, ex.destination)
+                    else:
+                        ex.at_failed_traverse(puppet)
+                    return
+
+        return super().execute_cmd(raw_string, session=session, **kwargs)
+
 class Guest(DefaultGuest):
     """
     This class is used for guest logins. Unlike Accounts, Guests and their

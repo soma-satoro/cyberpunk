@@ -48,6 +48,36 @@ class Exit(ObjectParent, DefaultExit):
 
     """
 
+    def _get_exit_cmd_signature(self):
+        """
+        Return a normalized signature for the exit command identity.
+
+        We compare this between command-handler calls so alias/key changes
+        automatically trigger an ExitCmdSet rebuild.
+        """
+        key = (self.db_key or "").strip().lower()
+        aliases = tuple(
+            sorted(alias.strip().lower() for alias in self.aliases.all() if alias and alias.strip())
+        )
+        return key, aliases
+
+    def at_cmdset_get(self, **kwargs):
+        """
+        Keep ExitCmdSet in sync with live key/alias changes.
+
+        Evennia only rebuilds exit commands when `force_init=True` is passed.
+        If aliases are edited after creation, the commandset can become stale.
+        """
+        call_kwargs = dict(kwargs)
+
+        current_signature = self._get_exit_cmd_signature()
+        cached_signature = getattr(self.ndb, "_exit_cmd_signature", None)
+        if current_signature != cached_signature:
+            call_kwargs["force_init"] = True
+
+        super().at_cmdset_get(**call_kwargs)
+        self.ndb._exit_cmd_signature = current_signature
+
     def at_traverse(self, traversing_object, target_location, **kwargs):
         """
         Block unapproved characters from leaving OOC areas to enter the IC grid.
