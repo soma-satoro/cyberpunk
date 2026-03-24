@@ -268,6 +268,42 @@ class Character(DefaultCharacter):
         except Exception:
             pass
 
+    @staticmethod
+    def _is_more_cmdset(cmdset_obj):
+        """Identify Evennia pager cmdset objects."""
+        key = str(getattr(cmdset_obj, "key", "")).lower()
+        path = str(getattr(cmdset_obj, "path", "")).lower()
+        return key == "more_commands" or path.endswith("evennia.utils.evmore.cmdsetmore")
+
+    def _normalize_pager_cmdsets(self):
+        """
+        Ensure at most one pager cmdset per holder during command resolution.
+
+        This protects against transient duplicate `more_commands` insertions
+        causing command multimatch (`n-1`, `n-2`) while paging.
+        """
+        holders = [self, getattr(self, "account", None)]
+        for holder in holders:
+            if not holder:
+                continue
+            try:
+                cmdsets = list(holder.cmdset.all())
+            except Exception:
+                continue
+            more_sets = [cs for cs in cmdsets if self._is_more_cmdset(cs)]
+            for extra in more_sets[1:]:
+                try:
+                    holder.cmdset.remove(extra)
+                except Exception:
+                    pass
+
+    def at_cmdset_get(self, **kwargs):
+        """
+        Called just before command handler requests cmdsets from this object.
+        """
+        super().at_cmdset_get(**kwargs)
+        self._normalize_pager_cmdsets()
+
     @classmethod
     def create_character_sheet(cls, account=None):
         """Create a character sheet and initialize required related objects."""
