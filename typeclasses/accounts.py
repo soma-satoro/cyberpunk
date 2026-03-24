@@ -82,6 +82,11 @@ class Account(DefaultAccount):
         """
         super().at_post_login(session)
         logger.log_info(f"Account logged in: {self.name}")
+        try:
+            if not self.cmdset.has("commands.help_commands.PagerNavCmdSet"):
+                self.cmdset.add("commands.help_commands.PagerNavCmdSet", persistent=True)
+        except Exception:
+            pass
 
 class Guest(DefaultGuest):
     """

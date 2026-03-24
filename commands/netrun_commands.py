@@ -1077,6 +1077,21 @@ class CmdNet(MuxCommand):
             return None, f"Unable to resolve '{picked}'."
         return resolved, None
 
+    def _net_vendor_tag_status(self):
+        """
+        Return room net-vendor tag status tuple:
+        (room_tags, has_role_tag, has_stock_tag).
+        Role tags: netrunner/hacker
+        Stock tags: program/deck
+        """
+        room = getattr(self.caller, "location", None)
+        if not room:
+            return set(), False, False
+        room_tags = self._room_tag_set(room)
+        has_role_tag = bool({"netrunner", "hacker"} & room_tags)
+        has_stock_tag = bool({"program", "deck"} & room_tags)
+        return room_tags, has_role_tag, has_stock_tag
+
     def _can_buy_programs_here(self):
         """
         Gate +net/buy to tagged rooms.
@@ -1084,26 +1099,7 @@ class CmdNet(MuxCommand):
           role: netrunner or hacker
           stock: program or deck
         """
-        room = getattr(self.caller, "location", None)
-        if not room:
-            return False
-        room_tags = set()
-
-        db_tags = getattr(room.db, "tags", None) or []
-        for t in db_tags:
-            if not t:
-                continue
-            room_tags.add(str(t).strip().lower().replace(" ", "_"))
-
-        try:
-            if hasattr(room, "tags"):
-                for tag in room.tags.get() or []:
-                    room_tags.add(str(tag).strip().lower().replace(" ", "_"))
-        except Exception:
-            pass
-
-        has_role_tag = bool({"netrunner", "hacker"} & room_tags)
-        has_stock_tag = bool({"program", "deck"} & room_tags)
+        _tags, has_role_tag, has_stock_tag = self._net_vendor_tag_status()
         return has_role_tag and has_stock_tag
 
     def _parse_ice_names(self, floor):
@@ -2033,10 +2029,20 @@ class CmdNet(MuxCommand):
 
     def cmd_buy_program(self):
         """Buy a program/Black ICE and add as gear to inventory."""
-        if not self._can_buy_programs_here():
+        room_tags, has_role_tag, has_stock_tag = self._net_vendor_tag_status()
+        if not (has_role_tag and has_stock_tag):
+            missing = []
+            if not has_role_tag:
+                missing.append("role tag (netrunner or hacker)")
+            if not has_stock_tag:
+                missing.append("stock tag (program or deck)")
+            missing_text = ", ".join(missing) if missing else "required vendor tags"
+            tags_text = ", ".join(sorted(room_tags)) if room_tags else "(none)"
             self.caller.msg(
-                "You need to be in a tagged netrunner vendor room to buy programs "
-                "(requires room tags like netrunner/hacker and program/deck)."
+                "You need to be in a tagged netrunner vendor room to buy programs. "
+                f"Missing: {missing_text}. Current room tags: {tags_text}. "
+                "Note: +room/tag replaces tags, so set all needed tags in one command "
+                "(example: +room/tag here=netrunner,deck)."
             )
             return
         if not self.args:

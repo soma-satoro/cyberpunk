@@ -396,6 +396,12 @@ class Character(DefaultCharacter):
 
         # Self-heal for old characters carrying duplicated cmdsets.
         self._dedupe_default_character_cmdsets()
+        # Ensure high-priority pager-next override is present.
+        try:
+            if not self.cmdset.has("commands.help_commands.PagerNavCmdSet"):
+                self.cmdset.add("commands.help_commands.PagerNavCmdSet", persistent=True)
+        except Exception:
+            pass
         
         # Automatically migrate character sheet data to typeclass if needed
         if not self.attributes.has("db_migrated_character_sheet"):

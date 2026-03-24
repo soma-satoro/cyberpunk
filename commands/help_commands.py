@@ -9,8 +9,334 @@ Help text has ANSI stripped so that pipes (e.g. add|remove) in usage examples
 display correctly instead of being interpreted as color codes.
 """
 from evennia.commands.default.help import CmdHelp
+from evennia.commands.cmdset import CmdSet
 from evennia.commands.default.muxcommand import MuxCommand
-from utils import evmore_safe
+
+
+_HELP_PAGER_FOOTER = (
+    "|n(|wHelp pager|n: |w+hpage next|n || |w+hpage prev|n || "
+    "|w+hpage top|n || |w+hpage end|n || |w+hpage quit|n)"
+)
+
+
+def _get_help_pager_session(caller, session=None):
+    """Resolve the session to use for help paging output."""
+    if session:
+        return session
+    sessions = caller.sessions.get()
+    if sessions:
+        return sessions[0]
+    return None
+
+
+def _split_help_pages(text, session):
+    """Split help text into pages based on session dimensions."""
+    if text is None:
+        text = ""
+    lines = str(text).split("\n")
+
+    screen_h = 25
+    screen_w = 80
+    if session:
+        screen_h = session.protocol_flags.get("SCREENHEIGHT", {0: 25}).get(0, 25)
+        screen_w = session.protocol_flags.get("SCREENWIDTH", {0: 80}).get(0, 80)
+
+    height = max(4, int(screen_h) - 4)
+    width = max(1, int(screen_w))
+    height = min(10000 // width, height)
+
+    pages = ["\n".join(lines[i : i + height]) for i in range(0, len(lines), height)]
+    return pages or [""]
+
+
+def _get_help_pager_state(caller):
+    """Get active help pager state from caller or linked account."""
+    state = getattr(caller.ndb, "_help_pager", None)
+    if state:
+        return state
+    account = getattr(caller, "account", None)
+    if account:
+        return getattr(account.ndb, "_help_pager", None)
+    return None
+
+
+def _clear_help_pager_state(caller):
+    """Clear active help pager state from caller and account."""
+    try:
+        del caller.ndb._help_pager
+    except Exception:
+        pass
+    account = getattr(caller, "account", None)
+    if account:
+        try:
+            del account.ndb._help_pager
+        except Exception:
+            pass
+
+
+def _display_help_pager_page(caller, state, show_footer=True):
+    """Render one page of help pager output."""
+    pages = state["pages"]
+    npos = max(0, min(state["npos"], len(pages) - 1))
+    state["npos"] = npos
+    text = pages[npos]
+    if show_footer and len(pages) > 1:
+        text = (
+            f"{text}\n|n(|wPage|n [{npos + 1}/{len(pages)}] "
+            f"|wn|next|n || |wprev|n || "
+            f"|wtop|n || |wend|n || |w+hpage quit|n)"
+        )
+    text_outputfunc = (text, (), state.get("text_kwargs", {}))
+    caller.msg(text=text_outputfunc, session=state.get("session"), **state.get("kwargs", {}))
+
+
+def start_help_pager(caller, text, session=None, **kwargs):
+    """
+    Start a help pager using static command keys.
+
+    This avoids dynamic pager cmdset insertion and one-letter alias multimatch.
+    """
+    session = _get_help_pager_session(caller, session=session)
+    pages = _split_help_pages(text, session)
+
+    # No pager state needed for single-page output.
+    if len(pages) <= 1:
+        text_outputfunc = (pages[0], (), kwargs.pop("text_kwargs", {}))
+        caller.msg(text=text_outputfunc, session=session, **kwargs)
+        return
+
+    text_kwargs = kwargs.pop("text_kwargs", {})
+    state = {
+        "pages": pages,
+        "npos": 0,
+        "session": session,
+        "text_kwargs": text_kwargs,
+        "kwargs": kwargs,
+        "exit_on_lastpage": True,
+    }
+
+    _clear_help_pager_state(caller)
+    caller.ndb._help_pager = state
+    account = getattr(caller, "account", None)
+    if account:
+        account.ndb._help_pager = state
+
+    _display_help_pager_page(caller, state, show_footer=True)
+
+
+class CmdHelpPage(MuxCommand):
+    """
+    Navigate the active help pager.
+
+    Usage:
+      +hpage <next|prev|top|end|quit>
+    """
+
+    key = "+hpage"
+    aliases = ["hpage"]
+    locks = "cmd:all()"
+    help_category = "World & Information"
+
+    def func(self):
+        state = _get_help_pager_state(self.caller)
+        if not state:
+            self.caller.msg("No active help pager. Use |whelp|n to open one.")
+            return
+
+        action = (self.args or "next").strip().lower()
+        pages = state["pages"]
+        last = len(pages) - 1
+
+        if action in ("quit", "q", "abort", "a", "stop", "endpager"):
+            _clear_help_pager_state(self.caller)
+            self.caller.msg("|xExited help pager.|n")
+            return
+
+        if action in ("prev", "previous", "p", "back"):
+            state["npos"] = max(0, state["npos"] - 1)
+            _display_help_pager_page(self.caller, state, show_footer=True)
+            return
+
+        if action in ("top", "start", "first"):
+            state["npos"] = 0
+            _display_help_pager_page(self.caller, state, show_footer=True)
+            return
+
+        if action in ("end", "last", "bottom"):
+            state["npos"] = last
+            _display_help_pager_page(self.caller, state, show_footer=True)
+            return
+
+        # default: next
+        if state["npos"] >= last:
+            _clear_help_pager_state(self.caller)
+            self.caller.msg("|xExited help pager.|n")
+            return
+
+        state["npos"] += 1
+        if state.get("exit_on_lastpage") and state["npos"] >= last:
+            _display_help_pager_page(self.caller, state, show_footer=False)
+            _clear_help_pager_state(self.caller)
+            return
+        _display_help_pager_page(self.caller, state, show_footer=True)
+
+
+class CmdPagerNext(MuxCommand):
+    """
+    Advance an active pager one page.
+
+    Works for both the custom help pager and Evennia's native EvMore pager.
+    """
+
+    key = "n"
+    aliases = ["next"]
+    locks = "cmd:all()"
+    help_category = "World & Information"
+    auto_help = False
+
+    def func(self):
+        # 1) Custom help pager state.
+        help_state = _get_help_pager_state(self.caller)
+        if help_state:
+            pages = help_state["pages"]
+            last = len(pages) - 1
+            if help_state["npos"] >= last:
+                _clear_help_pager_state(self.caller)
+                self.caller.msg("|xExited help pager.|n")
+            else:
+                help_state["npos"] += 1
+                if help_state.get("exit_on_lastpage") and help_state["npos"] >= last:
+                    _display_help_pager_page(self.caller, help_state, show_footer=False)
+                    _clear_help_pager_state(self.caller)
+                    return
+                _display_help_pager_page(self.caller, help_state, show_footer=True)
+            return
+
+        # 2) Native Evennia pager state.
+        more = getattr(self.caller.ndb, "_more", None)
+        if not more and hasattr(self.caller, "account") and self.caller.account:
+            more = getattr(self.caller.account.ndb, "_more", None)
+        if more:
+            try:
+                more.page_next()
+            except Exception:
+                self.caller.msg("Error in loading the pager. Contact an admin.")
+            return
+
+        self.caller.msg("No active pager.")
+
+
+class _PagerActionCommand(MuxCommand):
+    """Base for global pager action commands."""
+
+    action = None
+    auto_help = False
+    locks = "cmd:all()"
+    help_category = "World & Information"
+
+    def _get_more(self):
+        more = getattr(self.caller.ndb, "_more", None)
+        if not more and hasattr(self.caller, "account") and self.caller.account:
+            more = getattr(self.caller.account.ndb, "_more", None)
+        return more
+
+    def _do_help_pager(self, state):
+        pages = state["pages"]
+        last = len(pages) - 1
+        action = self.action
+
+        if action == "quit":
+            _clear_help_pager_state(self.caller)
+            self.caller.msg("|xExited help pager.|n")
+            return True
+        if action == "prev":
+            state["npos"] = max(0, state["npos"] - 1)
+            _display_help_pager_page(self.caller, state, show_footer=True)
+            return True
+        if action == "top":
+            state["npos"] = 0
+            _display_help_pager_page(self.caller, state, show_footer=True)
+            return True
+        if action == "end":
+            state["npos"] = last
+            _display_help_pager_page(self.caller, state, show_footer=True)
+            return True
+        return False
+
+    def _do_more_pager(self, more):
+        action = self.action
+        if action == "quit":
+            more.page_quit()
+            return True
+        if action == "prev":
+            more.page_back()
+            return True
+        if action == "top":
+            more.page_top()
+            return True
+        if action == "end":
+            more.page_end()
+            return True
+        return False
+
+    def func(self):
+        state = _get_help_pager_state(self.caller)
+        if state:
+            if self._do_help_pager(state):
+                return
+
+        more = self._get_more()
+        if more:
+            try:
+                if self._do_more_pager(more):
+                    return
+            except Exception:
+                self.caller.msg("Error in loading the pager. Contact an admin.")
+                return
+
+        self.caller.msg("No active pager.")
+
+
+class CmdPagerTop(_PagerActionCommand):
+    """Jump to top of active pager."""
+
+    key = "top"
+    aliases = ["start", "first"]
+    action = "top"
+
+
+class CmdPagerEnd(_PagerActionCommand):
+    """Jump to end of active pager."""
+
+    key = "end"
+    aliases = ["last", "bottom"]
+    action = "end"
+
+
+class CmdPagerPrev(_PagerActionCommand):
+    """Go to previous page of active pager (full word only)."""
+
+    key = "prev"
+    aliases = ["previous", "back"]
+    action = "prev"
+
+
+class PagerNavCmdSet(CmdSet):
+    """
+    High-priority pager navigation override.
+
+    Lets `n`/`next` work even when native pager cmdsets collide.
+    """
+
+    key = "pager_nav_commands"
+    priority = 120
+    mergetype = "Union"
+
+    def at_cmdset_creation(self):
+        self.add(CmdPagerNext())
+        self.add(CmdPagerTop())
+        self.add(CmdPagerEnd())
+        self.add(CmdPagerPrev())
 
 
 class CmdPagerDebug(MuxCommand):
@@ -224,7 +550,7 @@ class CmdHelpSearch(CmdHelp):
                     pass
 
             if usemore:
-                evmore_safe.msg(
+                start_help_pager(
                     self.caller,
                     text,
                     session=self.session,
