@@ -36,8 +36,25 @@ class SafeEvMore(EvMore):
         path = str(getattr(cmdset_obj, "path", "")).lower()
         return key == "more_commands" or path.endswith("evennia.utils.evmore.cmdsetmore")
 
+    def _anchor_target(self):
+        """Use account as pager anchor when available."""
+        return getattr(self._caller, "account", None) or self._caller
+
     def _remove_more_cmdsets(self, target):
         """Remove all pager cmdset instances from a target."""
+        # Fast path: remove by key/class repeatedly.
+        for _ in range(10):
+            removed_any = False
+            for ref in ("more_commands", CmdSetMore):
+                try:
+                    target.cmdset.remove(ref)
+                    removed_any = True
+                except Exception:
+                    pass
+            if not removed_any:
+                break
+
+        # Fallback: iterate actual stack and remove matching objects.
         for _ in range(10):
             removed_any = False
             try:
@@ -78,10 +95,16 @@ class SafeEvMore(EvMore):
             return
 
         self._clear_existing_pager()
-        # Keep pager state anchored on the active command caller, matching
-        # Evennia's CmdMore/CmdMoreExit lookup expectations.
-        self._caller.ndb._more = self
-        self._caller.cmdset.add(CmdSetMore)
+        # Store reference on all likely holders so CmdMore/CmdMoreExit can
+        # resolve pager state regardless of which object handled the command.
+        for target in self._collect_targets():
+            try:
+                target.ndb._more = self
+            except Exception:
+                pass
+
+        # Add pager cmdset on a single anchor only to avoid duplicate matches.
+        self._anchor_target().cmdset.add(CmdSetMore)
         self.page_top()
 
     def page_quit(self, quiet=False):
