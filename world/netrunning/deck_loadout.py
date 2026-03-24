@@ -9,6 +9,7 @@ Legacy ``cyberdeck_hardware`` (map of deck -> list of hardware only) is migrated
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Dict, List, Optional, Tuple
 
 from world.equipment_data import cyberdecks as cyberdecks_data
@@ -127,12 +128,27 @@ def _empty_entry() -> Dict[str, List[str]]:
     return {"hardware": [], "programs": []}
 
 
+def _to_name_list(value) -> List[str]:
+    """
+    Coerce persisted list-like structures (including Evennia saver containers)
+    into a plain list[str].
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    try:
+        return [str(x) for x in list(value)]
+    except Exception:
+        return []
+
+
 def _normalize_entry(raw) -> Dict[str, List[str]]:
-    if isinstance(raw, dict):
-        hw = raw.get("hardware") if isinstance(raw.get("hardware"), list) else []
-        pr = raw.get("programs") if isinstance(raw.get("programs"), list) else []
-        return {"hardware": [str(x) for x in hw], "programs": [str(x) for x in pr]}
-    if isinstance(raw, list):
+    if isinstance(raw, Mapping):
+        hw = _to_name_list(raw.get("hardware"))
+        pr = _to_name_list(raw.get("programs"))
+        return {"hardware": hw, "programs": pr}
+    if isinstance(raw, (list, tuple, set)):
         return {"hardware": [str(x) for x in raw], "programs": []}
     return _empty_entry()
 
@@ -142,16 +158,16 @@ def get_deck_loadouts(character) -> Dict[str, Dict[str, List[str]]]:
     legacy = getattr(character.db, LEGACY_HW_ATTR, None)
     out: Dict[str, Dict[str, List[str]]] = {}
 
-    if isinstance(modern, dict):
+    if isinstance(modern, Mapping):
         for k, v in modern.items():
             out[str(k)] = _normalize_entry(v)
 
-    if isinstance(legacy, dict):
+    if isinstance(legacy, Mapping):
         for k, v in legacy.items():
             key = str(k)
             if key not in out:
                 out[key] = _normalize_entry(v)
-            elif not out[key]["hardware"] and isinstance(v, list):
+            elif not out[key]["hardware"] and isinstance(v, (list, tuple, set)):
                 out[key]["hardware"] = [str(x) for x in v]
 
     return out

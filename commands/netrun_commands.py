@@ -1467,19 +1467,17 @@ class CmdNet(MuxCommand):
             self.caller.msg("You need to be next to that access point to jack in.")
             return
 
-        staff_bypass = check_builder_permission(self.caller)
         interface_rank = get_interface_rank(self.caller)
-        if not staff_bypass and not self._has_netrunner_access_role(interface_rank):
+        if not self._has_netrunner_access_role(interface_rank):
             self.caller.msg("NET access is restricted to Netrunners (primary role or secondary Interface role).")
             return
-        if interface_rank <= 0 and not staff_bypass:
-            self.caller.msg("You need Interface rank to netrun (staff may bypass).")
+        if interface_rank <= 0:
+            self.caller.msg("You need Interface rank to netrun.")
             return
-        if not staff_bypass:
-            ok, missing = self._has_netrunning_gear()
-            if not ok:
-                self.caller.msg("Missing required netrunning gear: " + ", ".join(missing))
-                return
+        ok, missing = self._has_netrunning_gear()
+        if not ok:
+            self.caller.msg("Missing required netrunning gear: " + ", ".join(missing))
+            return
 
         # Create body object in room (physical body left behind while in the net)
         room = self.caller.location
