@@ -21,7 +21,8 @@ class Character(DefaultCharacter):
     def at_object_creation(self):
         super().at_object_creation()
         self.db.combat_position = 0  # Default starting position
-        self.cmdset.add("commands.default_cmdsets.CharacterCmdSet", permanent=True)
+        # Note to self: Do not add CharacterCmdSet manually here. Evennia already applies
+        # CMDSET_CHARACTER from settings; adding it again duplicates command stacks.
         
         # Initialize character attributes directly on the typeclass
         # Leave full_name empty - chargen will set it. Avoids false "already initialized" prompt.
@@ -226,6 +227,31 @@ class Character(DefaultCharacter):
         # Initialize notes storage (list of dicts: title, category, text, approved, etc.)
         self.db.notes = []
 
+    def _dedupe_default_character_cmdsets(self):
+        """
+        Remove duplicate stored DefaultCharacter cmdsets from this character.
+
+        A historical manual add in `at_object_creation` could stack duplicate
+        `commands.default_cmdsets.CharacterCmdSet` entries.
+        """
+        try:
+            cmdsets = list(self.cmdset.all())
+        except Exception:
+            return
+
+        matches = [
+            cs
+            for cs in cmdsets
+            if str(getattr(cs, "key", "")) == "DefaultCharacter"
+            and str(getattr(cs, "path", "")) == "commands.default_cmdsets.CharacterCmdSet"
+        ]
+        # Keep one, remove extras.
+        for extra in matches[1:]:
+            try:
+                self.cmdset.remove(extra)
+            except Exception:
+                pass
+
     @classmethod
     def create_character_sheet(cls, account=None):
         """Create a character sheet and initialize required related objects."""
@@ -313,6 +339,9 @@ class Character(DefaultCharacter):
         """
         from evennia.utils import logger
         logger.log_info(f"at_post_puppet called for {self.key}")
+
+        # One-time self-heal for old characters carrying duplicated cmdsets.
+        self._dedupe_default_character_cmdsets()
 
         super().at_post_puppet(**kwargs)
         
