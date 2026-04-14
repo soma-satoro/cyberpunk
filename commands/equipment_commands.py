@@ -12,7 +12,12 @@ from world.utils.ansi_utils import wrap_ansi
 from world.utils.formatting import header, footer, divider, section_header
 from .list_commands import _find_item_info, format_item_info, try_resolve_equipdb_catalog_name
 from world.cyberware.utils import populate_cyberware
-from world.netrunning.deckoptions import programs as NETRUN_PROGRAMS
+from world.netrunning.deckoptions import (
+    programs as NETRUN_PROGRAMS,
+    black_ice as NETRUN_BLACK_ICE,
+)
+from world.netrunning.deck_loadout import ensure_program_gear
+from world.utils.name_fuzzy import pick_named_candidate
 from evennia.utils.ansi import ANSIString
 from evennia.utils import evtable
 from math import ceil
@@ -35,6 +40,66 @@ class CmdAddItem(Command):
     locks = "cmd:perm(Admin)"
     help_category = "Admin"
 
+    @staticmethod
+    def _resolve_netrunning_name(item_name, mode="any", allow_fuzzy=False):
+        """
+        Resolve a netrunning Program/Black ICE name.
+        mode: "any", "program", or "black_ice".
+        """
+        query = (item_name or "").strip()
+        if not query:
+            return None
+
+        if mode == "program":
+            rows = list(NETRUN_PROGRAMS)
+        elif mode == "black_ice":
+            rows = list(NETRUN_BLACK_ICE)
+        else:
+            rows = list(NETRUN_PROGRAMS) + list(NETRUN_BLACK_ICE)
+
+        query_lower = query.lower()
+        for row in rows:
+            name = (row.get("name") or "").strip()
+            if name.lower() == query_lower:
+                return name
+
+        if not allow_fuzzy:
+            return None
+
+        candidates = [(row.get("name"), row.get("name")) for row in rows if row.get("name")]
+        picked, _err = pick_named_candidate(query, candidates)
+        return picked
+
+    @staticmethod
+    def _split_netrun_prefix(item_name):
+        """
+        Optional disambiguation prefixes for netrunning items.
+        Examples: pr/armor, program:worm, ice/kraken, blackice:asp
+        """
+        raw = (item_name or "").strip()
+        lowered = raw.lower()
+        prefixes = (
+            ("pr/", "program"),
+            ("pr.", "program"),
+            ("pr:", "program"),
+            ("program/", "program"),
+            ("program.", "program"),
+            ("program:", "program"),
+            ("ice/", "black_ice"),
+            ("ice.", "black_ice"),
+            ("ice:", "black_ice"),
+            ("blackice/", "black_ice"),
+            ("blackice.", "black_ice"),
+            ("blackice:", "black_ice"),
+            ("black_ice/", "black_ice"),
+            ("black_ice.", "black_ice"),
+            ("black_ice:", "black_ice"),
+        )
+        for prefix, mode in prefixes:
+            if lowered.startswith(prefix):
+                return mode, raw[len(prefix):].strip()
+        return "any", raw
+
     def func(self):
         if not self.args or "=" not in self.args:
             self.caller.msg("Usage: additem <player>=<item name>")
@@ -55,6 +120,29 @@ class CmdAddItem(Command):
             return
 
         inventory, _ = Inventory.get_or_create_for_character(player)
+
+        # Netrunning Program / Black ICE support (including names like "Armor").
+        net_mode, net_query = self._split_netrun_prefix(item_name)
+        canonical_netrun = self._resolve_netrunning_name(
+            net_query,
+            mode=net_mode,
+            allow_fuzzy=(net_mode != "any"),
+        )
+        if canonical_netrun:
+            gear = ensure_program_gear(canonical_netrun)
+            if not gear:
+                self.caller.msg(
+                    f"Netrunning item '{canonical_netrun}' could not be materialized as gear."
+                )
+                return
+            inventory.add_gear(gear)
+            self.caller.msg(f"Added {gear.name} to {player.name}'s inventory.")
+            player.msg(f"A {gear.name} has been added to your inventory.")
+            return
+        if net_mode != "any":
+            kind = "Program" if net_mode == "program" else "Black ICE"
+            self.caller.msg(f"{kind} '{net_query}' was not found.")
+            return
 
         # Try weapon, armor, gear, vehicle in order
         try:

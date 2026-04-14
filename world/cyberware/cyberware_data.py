@@ -120,8 +120,8 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 7,
         "cost": 500,
         "is_weapon": False,
-        "description": "Records user's experiences to memory chip or external device. Requires Neural Link.",
-        "requirements": "Neural Link",
+        "description": "Records user's experiences to memory chip or external device. Requires Neural Link or Neuroport.",
+        "requirements": "Neural Link or Neuroport",
     },
     {
         "name": "Chipware Socket",
@@ -130,8 +130,8 @@ CYBERWARE_DATA_LIST = [
         "humanity_loss": 7,
         "cost": 500,
         "is_weapon": False,
-        "description": "A single socket installed in the back of the neck that allows quick installation of a single piece of Chipware, of which there are many varieties. Installing or uninstalling a single piece of Chipware from a Chipware Socket is an Action. The first time you install a piece of Chipware you've never used before, you always accrue Humanity Loss. Re-installing Chipware you've already used doesn't do this. Chipware does not take up a Neural Link Option Slot. Multiple sockets may be installed, but each must be paid for individually. Requires Neural Link.",
-        "requirements": "Neural Link",
+        "description": "A single socket installed in the back of the neck that allows quick installation of a single piece of Chipware, of which there are many varieties. Installing or uninstalling a single piece of Chipware from a Chipware Socket is an Action. The first time you install a piece of Chipware you've never used before, you always accrue Humanity Loss. Re-installing Chipware you've already used doesn't do this. Chipware does not take up a Neural Link Option Slot. Multiple sockets may be installed, but each must be paid for individually. Requires Neural Link or Neuroport.",
+        "requirements": "Neural Link or Neuroport",
     },
     {
         "name": "Interface Plugs",

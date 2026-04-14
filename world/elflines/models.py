@@ -77,7 +77,7 @@ class ElflineSheet(SharedMemoryModel):
     intelligence = models.PositiveIntegerField(default=3, validators=[MinValueValidator(1), MaxValueValidator(10)])
     reflexes = models.PositiveIntegerField(default=3, validators=[MinValueValidator(1), MaxValueValidator(10)])
     dexterity = models.PositiveIntegerField(default=3, validators=[MinValueValidator(1), MaxValueValidator(10)])
-    technology = models.PositiveIntegerField(default=3, validators=[MinValueValidator(1), MaxValueValidator(10)])
+    technique = models.PositiveIntegerField(default=3, validators=[MinValueValidator(1), MaxValueValidator(10)])
     cool = models.PositiveIntegerField(default=3, validators=[MinValueValidator(1), MaxValueValidator(10)])
     willpower = models.PositiveIntegerField(default=3, validators=[MinValueValidator(1), MaxValueValidator(10)])
     move = models.PositiveIntegerField(default=3, validators=[MinValueValidator(1), MaxValueValidator(10)])

@@ -394,21 +394,36 @@ class CmdInventory(MuxCommand):
         output += sheet_section("Gear", width=W)
         gear_items = inv.get_gear_with_quantities() if hasattr(inv, 'get_gear_with_quantities') else [(g, 1) for g in inv.gear.all()]
         gn, gc, gd = 23, 14, 39
+        has_cyberdeck = False
+        has_program_payload = False
         if gear_items:
             output += (
                 f"|y{inv_visible_cell('Gear', gn)} {inv_visible_cell('Category', gc)} "
                 f"{inv_visible_cell('Description', gd)}|n\n"
             )
             for gear, qty in gear_items:
+                category = (gear.category or "")
+                category_lower = category.strip().lower()
+                is_cyberdeck = bool(getattr(gear, "is_cyberdeck", False)) or category_lower == "cyberdeck"
+                if is_cyberdeck:
+                    has_cyberdeck = True
+                if category_lower in ("program", "black ice"):
+                    has_program_payload = True
                 desc_src = gear.description or ""
+                if is_cyberdeck and not desc_src:
+                    desc_src = "Use `deck` for installed programs/hardware."
                 name_display = f"{gear.name} (x{qty})" if qty > 1 else gear.name
                 output += (
                     f"|w{inv_visible_cell(name_display, gn)}|n "
-                    f"|w{inv_visible_cell(gear.category, gc)}|n "
+                    f"|w{inv_visible_cell(category or 'N/A', gc)}|n "
                     f"|w{inv_visible_cell(desc_src, gd)}|n\n"
                 )
         else:
             output += "|wNo gear in inventory.|n\n"
+        if has_program_payload and not has_cyberdeck:
+            output += "|yYou have Programs/Black ICE in inventory but no cyberdeck. Buy or add a cyberdeck to use them.|n\n"
+        if has_cyberdeck:
+            output += "|wCyberdeck detected in inventory. Use |cdeck|n for deck slots and loadout details.|n\n"
         output += "\n"
 
         # Ammunition

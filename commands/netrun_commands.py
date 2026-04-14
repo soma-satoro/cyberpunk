@@ -46,6 +46,7 @@ from world.inventory.models import Inventory
 from world.utils.name_fuzzy import pick_named_candidate
 from world.maker.services import create_program_order
 from world.maker.scripts import get_or_create_maker_script
+from typeclasses.chargen import ChargenRoom
 
 
 def _roll_dice(dice: str) -> int:
@@ -2148,7 +2149,8 @@ class CmdNet(MuxCommand):
     def cmd_buy_program(self):
         """Buy a program/Black ICE and add as gear to inventory."""
         room_tags, has_role_tag, has_stock_tag = self._net_vendor_tag_status()
-        if not (has_role_tag and has_stock_tag):
+        in_chargen = isinstance(getattr(self.caller, "location", None), ChargenRoom)
+        if not in_chargen and not (has_role_tag and has_stock_tag):
             missing = []
             if not has_role_tag:
                 missing.append("role tag (netrunner or hacker)")
@@ -2159,6 +2161,7 @@ class CmdNet(MuxCommand):
             self.caller.msg(
                 "You need to be in a tagged netrunner vendor room to buy programs. "
                 f"Missing: {missing_text}. Current room tags: {tags_text}. "
+                "This restriction is bypassed in chargen rooms. "
                 "Note: +room/tag replaces tags, so set all needed tags in one command "
                 "(example: +room/tag here=netrunner,deck)."
             )

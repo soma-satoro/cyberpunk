@@ -35,8 +35,11 @@ class CmdCyberware(MuxCommand):
       cyberware/install "Popup Melee Weapon" = "<weapon>"
       cyberware/install "Popup Ranged Weapon" = "<weapon>"
       cyberware/parent <option>=<parent>   - Assign option to parent (e.g. image enhance=cybereye)
-      cyberware/unparent <cyberware child>     - Disconnect option from parent; uninstall and refund humanity
+      cyberware/unparent <child>              - Disconnect option from parent; uninstall and refund humanity
+      cyberware/unparent <child>/<parent>     - Disconnect child from a specific parent (e.g. .../neuroport)
       cyberware/unparent <name>/<child>       - Staff: unparent from another character
+      cyberware/unparent <name>/<child>/<parent> - Staff: unparent using explicit parent
+      cyberware/unparent <child>/<parent>=<name> - Staff: target with '=' form
 
     Activate/deactivate: cyberware weapons (Big Knucks, Rippers, Slice N Dice, Wolvers, Popup Melee/Ranged).
     """
@@ -104,23 +107,50 @@ class CmdCyberware(MuxCommand):
             return
         if self.switches and "unparent" in self.switches:
             if not raw:
-                self.caller.msg("Usage: cyberware/unparent <cyberware child>")
-                return
-            # Staff: <name>/<child> to unparent from another character
-            from world.utils.character_utils import is_staff
-            if is_staff(self.caller) and "/" in raw:
-                name_part, child_name = raw.split("/", 1)
-                name_part = name_part.strip()
-                child_name = child_name.strip()
-                target_char, target_sheet = get_staff_target_character(
-                    self.caller, name_part, quiet=True
+                self.caller.msg(
+                    "Usage: cyberware/unparent <child>[/<parent>] "
+                    "(staff: <name>/<child>[/<parent>] or <child>[/<parent>]=<name>)"
                 )
-                if target_char is None or target_sheet is None:
-                    self.caller.msg(f"No character named '{name_part}' found.")
-                    return
-                self._do_unparent(target_sheet, child_name)
+                return
+            # Staff forms:
+            #   <name>/<child>
+            #   <name>/<child>/<parent>
+            #   <child>/<parent>=<name>   (or <name>=<child>/<parent>)
+            from world.utils.character_utils import is_staff
+            target_sheet = character_sheet
+            child_expr = raw.strip()
+
+            if is_staff(self.caller):
+                # Allow explicit target using '=' in either direction.
+                if "=" in child_expr:
+                    left, right = [p.strip() for p in child_expr.split("=", 1)]
+                    left_char, left_sheet = get_staff_target_character(self.caller, left, quiet=True)
+                    right_char, right_sheet = get_staff_target_character(self.caller, right, quiet=True)
+                    if right_char is not None and right_sheet is not None:
+                        target_sheet = right_sheet
+                        child_expr = left
+                    elif left_char is not None and left_sheet is not None:
+                        target_sheet = left_sheet
+                        child_expr = right
+                    else:
+                        self.caller.msg(f"No character named '{right}' found.")
+                        return
+                elif "/" in child_expr:
+                    # Staff shorthand: <name>/<child>[/<parent>]
+                    name_part, remainder = child_expr.split("/", 1)
+                    target_char, maybe_sheet = get_staff_target_character(
+                        self.caller, name_part.strip(), quiet=True
+                    )
+                    if target_char is not None and maybe_sheet is not None:
+                        target_sheet = maybe_sheet
+                        child_expr = remainder.strip()
+
+            if "/" in child_expr:
+                child_name, parent_name = [p.strip() for p in child_expr.rsplit("/", 1)]
             else:
-                self._do_unparent(character_sheet, raw.strip())
+                child_name, parent_name = child_expr, None
+
+            self._do_unparent(target_sheet, child_name, parent_name=parent_name)
             return
         if not raw:
             self.list_cyberware(character_sheet)
@@ -192,20 +222,58 @@ class CmdCyberware(MuxCommand):
         child_inst.save()
         self.caller.msg(f"Assigned {child_inst.cyberware.name} to {parent_inst.cyberware.name}.")
 
-    def _do_unparent(self, character_sheet, child_name):
+    def _do_unparent(self, character_sheet, child_name, parent_name=None):
         """Disconnect a cyberware option from its parent; uninstall and refund humanity."""
+        child_lookup = (child_name or "").strip()
+        parent_lookup = (parent_name or "").strip()
+        if not child_lookup:
+            self.caller.msg("Usage: cyberware/unparent <child>[/<parent>]")
+            return
+
+        candidates = list(
+            CyberwareInstance.objects.filter(
+                character_sheet=character_sheet,
+                installed=True,
+                parent__isnull=False,
+            ).select_related("cyberware", "parent", "parent__cyberware").order_by("id")
+        )
+        if parent_lookup:
+            parent_norm = parent_lookup.lower().replace("_", " ").strip()
+            candidates = [
+                inst
+                for inst in candidates
+                if (inst.parent and (inst.parent.cyberware.name or "").lower().strip() == parent_norm)
+            ]
+
+        child_norm = child_lookup.lower().replace("_", " ").strip()
+        exact = [
+            inst for inst in candidates
+            if (inst.cyberware.name or "").lower().strip() == child_norm
+        ]
+        child_inst = exact[0] if exact else None
+        if not child_inst and candidates:
+            child_inst, _ = pick_named_candidate(
+                child_lookup.replace("_", " "),
+                [(inst.cyberware.name or "", inst) for inst in candidates],
+            )
+
+        if not child_inst:
+            parent_hint = f" on parent '{parent_lookup}'" if parent_lookup else ""
+            self.caller.msg(
+                f"No installed {child_lookup} with a parent{parent_hint} found. "
+                "Use cyberware/parent to assign options to limbs."
+            )
+            return
+
+        # Ensure selected instance belongs to this sheet even when using helper matching.
         child_inst = CyberwareInstance.objects.filter(
+            id=child_inst.id,
             character_sheet=character_sheet,
-            cyberware__name__iexact=child_name,
             installed=True,
             parent__isnull=False,
         ).select_related("cyberware", "parent").first()
-
         if not child_inst:
-            self.caller.msg(
-                f"No installed {child_name} with a parent found. "
-                "Use cyberware/parent to assign options to limbs."
-            )
+            self.caller.msg("That cyberware option is no longer installed with a parent.")
             return
 
         cyberware = child_inst.cyberware

@@ -77,16 +77,16 @@ CHILD_REQUIRES_PARENT = {
     # Chipware Socket is child of Neural Link
     "chipware socket": ["neural link", "neuroport"],
     "budget chipware socket": ["neural link", "neuroport"],
-    # Chipware -> Chipware Socket
-    "chemical analyzer": ["chipware socket", "budget chipware socket"],
-    "memory chip": ["chipware socket", "budget chipware socket"],
-    "olfactory boost": ["chipware socket", "budget chipware socket"],
-    "pain editor": ["chipware socket", "budget chipware socket"],
-    "basic skill chip": ["chipware socket", "budget chipware socket"],
-    "advanced skill chip": ["chipware socket", "budget chipware socket"],
-    "tactile boost": ["chipware socket", "budget chipware socket"],
-    "explicit memory stimulator": ["chipware socket", "budget chipware socket"],
-    "poser chip": ["chipware socket", "budget chipware socket"],
+    # Chipware -> Chipware Socket, Budget Chipware Socket, or Neuroport shard slots
+    "chemical analyzer": ["chipware socket", "budget chipware socket", "neuroport"],
+    "memory chip": ["chipware socket", "budget chipware socket", "neuroport"],
+    "olfactory boost": ["chipware socket", "budget chipware socket", "neuroport"],
+    "pain editor": ["chipware socket", "budget chipware socket", "neuroport"],
+    "basic skill chip": ["chipware socket", "budget chipware socket", "neuroport"],
+    "advanced skill chip": ["chipware socket", "budget chipware socket", "neuroport"],
+    "tactile boost": ["chipware socket", "budget chipware socket", "neuroport"],
+    "explicit memory stimulator": ["chipware socket", "budget chipware socket", "neuroport"],
+    "poser chip": ["chipware socket", "budget chipware socket", "neuroport"],
     # Subdermal Grip takes Neural Link slot (special case)
     "subdermal grip": ["neural link", "neuroport"],
     # Cybereye options (any foundation eye type may host options)
@@ -492,6 +492,19 @@ def _norm(s):
     return (s or "").strip().lower()
 
 
+def _child_requirement_key(cyberware_name):
+    """
+    Normalize dynamic chip variants to their base catalog key.
+    Example: "Basic Skill Chip (Zoology)" -> "basic skill chip".
+    """
+    name = _norm(cyberware_name)
+    if name.startswith("basic skill chip"):
+        return "basic skill chip"
+    if name.startswith("advanced skill chip"):
+        return "advanced skill chip"
+    return name
+
+
 def get_cyberware_data(cyberware):
     """Get entry from CYBERWARE_DATA by name."""
     name = getattr(cyberware, "name", None) or ""
@@ -503,6 +516,10 @@ def get_required_parents(cyberware):
     Get list of valid parent names from cyberware data.
     Returns list of parent name alternatives (any one satisfies).
     """
+    key = _child_requirement_key(getattr(cyberware, "name", ""))
+    if key in CHILD_REQUIRES_PARENT:
+        return list(CHILD_REQUIRES_PARENT[key])
+
     data = get_cyberware_data(cyberware)
     req = data.get("requirements")
     if not req:
@@ -587,7 +604,7 @@ def get_valid_parents_for_child(child_cyberware):
     Entries also in CHILD_REQUIRES_PARENT (e.g. Subdermal Grip -> Neural Link) keep
     their explicit rule set.
     """
-    name = _norm(getattr(child_cyberware, "name", ""))
+    name = _child_requirement_key(getattr(child_cyberware, "name", ""))
     if name in CHILD_REQUIRES_PARENT:
         return CHILD_REQUIRES_PARENT[name]
     if name in SOLO_ARM_OPTIONS:
@@ -624,6 +641,17 @@ def parent_name_matches_child_valid_hosts(parent_name_norm, valid_parents):
     if vp_set <= ARM_LIMB_HOST_LOWERS and parent_name_norm in ARM_LIMB_HOST_LOWERS:
         return True
     return False
+
+
+def is_neuroport_chipware_item(cyberware):
+    """
+    True for chipware items that can be installed directly into Neuroport shard slots.
+    """
+    valid = get_valid_parents_for_child(cyberware)
+    return (
+        "neuroport" in valid
+        and ("chipware socket" in valid or "budget chipware socket" in valid)
+    )
 
 
 def find_best_cyberaudio_parent(character_sheet, child_cyberware, character=None):
@@ -882,6 +910,20 @@ def validate_slot_availability_for_parent(parent_inst, child_inst):
         else:
             total_slots = _count_cyberaudio_slots(char_sheet)
             used_slots = _count_used_cyberaudio_slots(char_sheet)
+    elif parent_name == "neuroport" and is_neuroport_chipware_item(child_cw):
+        # Neuroport has two direct chipware shard slots, separate from Neuralware option slots.
+        max_direct_chipware = 2
+        used_direct_chipware = sum(
+            1
+            for c in parent_inst.children.filter(installed=True).select_related("cyberware")
+            if is_neuroport_chipware_item(c.cyberware)
+        )
+        if used_direct_chipware >= max_direct_chipware:
+            return False, (
+                "Neuroport already has 2 direct chipware items installed. "
+                "Install a Chipware Socket (or remove a chip) to add more."
+            )
+        return True, ""
     elif parent_name in ("neural link", "neuroport"):
         total_slots = _count_neural_slots(char_sheet)
         used_slots = _count_used_neural_slots(char_sheet)
@@ -1050,6 +1092,9 @@ def _count_used_neural_slots(char_sheet):
             continue
         pname = _norm(inst.parent.cyberware.name)
         if pname in ("neural link", "neuroport"):
+            # Neuroport direct chipware uses dedicated shard slots, not Neuralware option slots.
+            if pname == "neuroport" and is_neuroport_chipware_item(inst.cyberware):
+                continue
             cost = get_child_slot_cost(inst.cyberware)
             used += cost
     return used
@@ -1359,7 +1404,7 @@ def _count_fashionware_slots_used(character_sheet):
 
 
 def _count_chipware_sockets(character_sheet):
-    """Count Chipware Sockets and their used slots."""
+    """Count chipware capacity (sockets + Neuroport direct shard slots) and used slots."""
     sockets = list(
         CyberwareInstance.objects.filter(
             character_sheet=character_sheet,
@@ -1367,11 +1412,22 @@ def _count_chipware_sockets(character_sheet):
             cyberware__name__in=["Chipware Socket", "Budget Chipware Socket"],
         ).select_related("cyberware")
     )
-    total = len(sockets)
+    neuroports = list(
+        CyberwareInstance.objects.filter(
+            character_sheet=character_sheet,
+            installed=True,
+            cyberware__name__iexact="Neuroport",
+        ).select_related("cyberware")
+    )
+    total = len(sockets) + (2 * len(neuroports))
     used = 0
     for s in sockets:
         for c in s.children.all():
-            if _norm(c.cyberware.name) not in ZERO_SLOT_ITEMS:
+            if c.installed and _norm(c.cyberware.name) not in ZERO_SLOT_ITEMS:
+                used += 1
+    for np_inst in neuroports:
+        for c in np_inst.children.all():
+            if c.installed and is_neuroport_chipware_item(c.cyberware):
                 used += 1
     return used, total
 

@@ -454,8 +454,12 @@ def _get_instance_category(inst, parent_name=None):
 
     if cw_type == "fashionware":
         return "Fashionware"
+    from world.cyberware.validation import is_neuroport_chipware_item
+
     if name in ("neural link", "neuroport"):
         return "Neural Link Options"
+    if parent_name and parent_name == "neuroport" and is_neuroport_chipware_item(cw):
+        return "Chipware"
     if parent_name and parent_name in ("neural link", "neuroport"):
         return "Neural Link Options"
     if name in ("chipware socket", "budget chipware socket"):
@@ -501,6 +505,8 @@ def format_cyberware_by_category(installed_instances, character_sheet):
         get_slot_summaries,
         get_parent_instance_slot_usage,
         get_child_slot_cost,
+        is_neuroport_chipware_item,
+        ZERO_SLOT_ITEMS,
     )
 
     if not installed_instances:
@@ -556,11 +562,34 @@ def format_cyberware_by_category(installed_instances, character_sheet):
             opt_name = f"{opt_name} ({m.popup_weapon_name})"
         return opt_name
 
+    def _chipware_parent_slot_usage(parent_inst):
+        """
+        Chipware capacity by parent:
+          - Chipware Socket / Budget: 1 each
+          - Neuroport direct shard slots: 2 (separate from Neural Link option slots)
+        """
+        pname = _norm(parent_inst.cyberware.name)
+        if pname in ("chipware socket", "budget chipware socket"):
+            used = sum(
+                1
+                for c in parent_inst.children.all()
+                if c.installed and _norm(c.cyberware.name) not in ZERO_SLOT_ITEMS
+            )
+            return used, 1
+        if pname == "neuroport":
+            used = sum(
+                1
+                for c in parent_inst.children.all()
+                if c.installed and is_neuroport_chipware_item(c.cyberware)
+            )
+            return used, 2
+        return get_parent_instance_slot_usage(parent_inst)
+
     # Collect parent instances per category for limb/socket grouping
     # Include borgware (Artificial Shoulder Mount, MultiOptic Mount, Sensor Array) so they're added as parents
     limb_parent_names = {
         "Neural Link Options": ("neural link", "neuroport"),
-        "Chipware": ("chipware socket", "budget chipware socket"),
+        "Chipware": ("chipware socket", "budget chipware socket", "neuroport"),
         "Cybereye Options": ("cybereye", "sponsored cybereye", "kiroshi monovision", "cyclops international bug eye", "multioptic mount"),
         "Cyberaudio Options": ("cyberaudio suite", "discount cyberaudio suite", "sensor array"),
         "Cyberarm Options": ("cyberarm", "neo-soviet cyberarm", "artificial shoulder mount"),
@@ -624,9 +653,9 @@ def format_cyberware_by_category(installed_instances, character_sheet):
 
             if cat in PARENT_GROUPED_CATEGORIES:
                 m_name = _norm(m.cyberware.name)
-                # Chipware Socket is a display parent in Chipware (even though it's a child of Neural Link)
-                if cat == "Chipware" and m_name in ("chipware socket", "budget chipware socket"):
-                    slot_info = get_parent_instance_slot_usage(m)
+                # Sockets and Neuroport are display parents in Chipware.
+                if cat == "Chipware" and m_name in ("chipware socket", "budget chipware socket", "neuroport"):
+                    slot_info = _chipware_parent_slot_usage(m)
                     if slot_info and not any(p.id == m.id for p, _ in parent_groups[cat]):
                         parent_groups[cat].append((m, []))
                 elif is_parent:
@@ -696,15 +725,17 @@ def format_cyberware_by_category(installed_instances, character_sheet):
                     rows_by_category[cat] = []
                 rows_by_category[cat].append((display, m.cyberware.type, m.cyberware.humanity_loss))
 
-    # Second pass: for Chipware, parents (sockets) may appear as Neural Link children.
-    # Ensure all Chipware Socket instances that have chips are in parent_groups["Chipware"]
-    # and that sockets without chips also appear (empty)
-    chipware_sockets = [i for i in installed if _norm(i.cyberware.name) in ("chipware socket", "budget chipware socket")]
-    existing_socket_ids = {p.id for p, _ in parent_groups["Chipware"]}
-    for s in chipware_sockets:
-        if s.id not in existing_socket_ids:
-            parent_groups["Chipware"].append((s, []))
-    # Sort Chipware by socket order (keep insertion order; sockets from Neural Link iteration come first)
+    # Second pass: ensure all chipware-capable parents are represented, even if empty.
+    chipware_parents = [
+        i
+        for i in installed
+        if _norm(i.cyberware.name) in ("chipware socket", "budget chipware socket", "neuroport")
+    ]
+    existing_chip_parent_ids = {p.id for p, _ in parent_groups["Chipware"]}
+    for pinst in chipware_parents:
+        if pinst.id not in existing_chip_parent_ids:
+            parent_groups["Chipware"].append((pinst, []))
+    # Sort Chipware by parent row order
     parent_groups["Chipware"].sort(key=lambda x: (x[0].id,))
 
     # Ensure Neural Link Options, Cybereye, Cyberarm, Cyberleg, Cyberaudio have parents
@@ -879,7 +910,11 @@ def format_cyberware_by_category(installed_instances, character_sheet):
             for parent_inst, children in parent_groups[cat]:
                 pname_norm = _norm(parent_inst.cyberware.name)
                 is_borgware = pname_norm in BORGWARE_PARENT_NAMES
-                slot_usage = get_parent_instance_slot_usage(parent_inst)
+                slot_usage = (
+                    _chipware_parent_slot_usage(parent_inst)
+                    if cat == "Chipware"
+                    else get_parent_instance_slot_usage(parent_inst)
+                )
                 pname = _parent_display_name(parent_inst) or parent_inst.cyberware.name
                 cw_type = str(parent_inst.cyberware.type or "")[:TYPE_W]
                 hl = parent_inst.cyberware.humanity_loss or 0

@@ -239,6 +239,44 @@ class CmdStat(AdminCommand):
             self.caller.msg(f"{char.name} doesn't have a character sheet.")
             return
 
+        # Parse value early so language routing can run before stat/skill mapping.
+        try:
+            new_value = int(value_str)
+        except ValueError:
+            self.caller.msg(f"Level must be a number, got: {value_str}")
+            return
+
+        # Languages: handle before get_full_attribute_name fallback so names like
+        # "Japanese" never get stored as ad-hoc skills in db.skills.
+        lang_query = (stat_name or "").strip().lower()
+        lang_name = None
+        lang_match = next(
+            (lang for lang in LANGUAGES if getattr(lang, "name", "").lower() == lang_query),
+            None,
+        )
+        if lang_match:
+            lang_name = lang_match.name
+        else:
+            db_lang = Language.objects.filter(name__iexact=stat_name.strip()).first()
+            if db_lang:
+                lang_name = db_lang.name
+
+        if lang_name:
+            if new_value < 0 or new_value > 10:
+                self.caller.msg("Language level must be between 0 and 10. Use 0 to remove.")
+                return
+            if new_value == 0:
+                char.remove_language(lang_name)
+                self.caller.msg(f"Removed {lang_name} from {char.name}'s languages.")
+                if char.sessions.all():
+                    char.msg(f"Staff removed your {lang_name} language.")
+            else:
+                char.add_language(lang_name, new_value)
+                self.caller.msg(f"Set {char.name}'s {lang_name} to level {new_value}.")
+                if char.sessions.all():
+                    char.msg(f"Your {lang_name} language has been set to {new_value} by staff.")
+            return
+
         # Resolve stat name (abbreviations, spaces, ROLE_SKILL_NAME_MAP, etc.)
         from world.utils.character_utils import (
             get_full_attribute_name,
@@ -258,13 +296,6 @@ class CmdStat(AdminCommand):
             return
         # Apply ROLE_SKILL_NAME_MAP (e.g. diagnosis->medicine, melee_weapon->melee)
         full_key = ROLE_SKILL_NAME_MAP.get(full_key, full_key)
-
-        # Parse value
-        try:
-            new_value = int(value_str)
-        except ValueError:
-            self.caller.msg(f"Level must be a number, got: {value_str}")
-            return
 
         # Humanity: 0-100, capped by 10*Empathy
         if full_key == "humanity":

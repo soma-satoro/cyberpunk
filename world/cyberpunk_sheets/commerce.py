@@ -49,6 +49,9 @@ from world.chargen_constants import (
     CHARGEN_EURODOLLARS_EDGERUNNER,
     CHARGEN_EURODOLLARS_COMPLETE_PACKAGE,
 )
+from world.netrunning import deckoptions
+from world.netrunning.deck_loadout import installable_program_or_ice, ensure_program_gear
+from world.utils.name_fuzzy import pick_named_candidate
 
 
 class Merchant:
@@ -90,7 +93,7 @@ def _is_fashion_item(item, item_type, gear_category=None):
 def _get_chargen_catalog(category=None, subcategory=None):
     """
     Build catalog of chargen items (value <= 1000).
-    category: 'weapons', 'armor', 'gear', 'cyberware' or None for all.
+    category: 'weapons', 'armor', 'gear', 'cyberware', 'programs' or None for all.
     subcategory: filter by subcategory (e.g. 'medical' for gear, 'shoulder_arms' for weapons).
     """
     catalog = []
@@ -164,12 +167,54 @@ def _get_chargen_catalog(category=None, subcategory=None):
                     "_type": "ammo",
                     "_ammo_data": a,
                 })
+    if category is None or category == "programs":
+        sub_l = (subcategory or "").lower().replace("_", " ")
+        for p in deckoptions.programs:
+            if int(p.get("cost", 0) or 0) > CHARGEN_MAX_PRICE:
+                continue
+            ptype = str(p.get("type", "program"))
+            if subcategory and ptype.lower().replace("_", " ") != sub_l:
+                continue
+            catalog.append(
+                {
+                    "name": p.get("name", ""),
+                    "value": int(p.get("cost", 0) or 0),
+                    "type": ptype,
+                    "atk": int(p.get("atk", 0) or 0),
+                    "dfv": int(p.get("dfv", 0) or 0),
+                    "rez": int(p.get("rez", 0) or 0),
+                    "effect": p.get("effect", ""),
+                    "_type": "program",
+                }
+            )
+        if not subcategory or sub_l in ("black ice", "black_ice", "ice"):
+            for b in deckoptions.black_ice:
+                if int(b.get("cost", 0) or 0) > CHARGEN_MAX_PRICE:
+                    continue
+                catalog.append(
+                    {
+                        "name": b.get("name", ""),
+                        "value": int(b.get("cost", 0) or 0),
+                        "type": "Black ICE",
+                        "atk": int(b.get("atk", 0) or 0),
+                        "dfv": int(b.get("dfv", 0) or 0),
+                        "rez": int(b.get("rez", 0) or 0),
+                        "effect": b.get("effect", ""),
+                        "_type": "black_ice",
+                    }
+                )
     return catalog
 
 
 def _get_chargen_subcategories():
     """Return dict of main_category -> set of subcategories present in chargen catalog."""
-    result = {"weapons": set(), "armor": set(), "gear": set(), "cyberware": set()}
+    result = {
+        "weapons": set(),
+        "armor": set(),
+        "gear": set(),
+        "cyberware": set(),
+        "programs": set(),
+    }
     for w in weapons:
         if w.get("value", 0) <= CHARGEN_MAX_PRICE and w.get("category"):
             result["weapons"].add(w["category"])
@@ -185,6 +230,11 @@ def _get_chargen_subcategories():
     for cw in Cyberware.objects.filter(cost__lte=CHARGEN_MAX_PRICE).values_list("type", flat=True).distinct():
         if cw:
             result["cyberware"].add(cw)
+    for p in deckoptions.programs:
+        if int(p.get("cost", 0) or 0) <= CHARGEN_MAX_PRICE and p.get("type"):
+            result["programs"].add(str(p["type"]))
+    if any(int(b.get("cost", 0) or 0) <= CHARGEN_MAX_PRICE for b in deckoptions.black_ice):
+        result["programs"].add("Black ICE")
     return result
 
 
@@ -388,6 +438,7 @@ class CmdBuy(MuxCommand):
     Usage:
       buy <item name> from <merchant>   - Buy from an NPC vendor
       buy <item name>                   - In chargen or vendor room: buy equipment
+      buy/program <name>                - Buy Program or Black ICE to inventory
       buy/cyberware <name>              - Buy body cyberware (implants)
       buy/cyberware pair=<Name> <Name>   - Buy paired Cybereye/Cyberarm/Cyberleg (requires existing, e.g. pair=Cybereye Cybereye)
       buy/cyberware parent=<option>/<parent> - Buy option and attach to parent limb
@@ -400,7 +451,7 @@ class CmdBuy(MuxCommand):
     """
 
     key = "buy"
-    switches = [("stash", "stash"), ("cyberware", "cyberware"), ("quality", "quality")]
+    switches = [("stash", "stash"), ("cyberware", "cyberware"), ("quality", "quality"), ("program", "program")]
     locks = "cmd:all()"
     help_category = "Economy"
 
@@ -408,7 +459,7 @@ class CmdBuy(MuxCommand):
         MuxCommand.parse(self)
         # Fallback: if parser put switch in args (e.g. "/cyberware biomonitor"), strip it
         args = (self.args or "").strip()
-        for prefix in ("/cyberware ", "cyberware ", "/stash ", "stash "):
+        for prefix in ("/cyberware ", "cyberware ", "/stash ", "stash ", "/program ", "program "):
             if args.lower().startswith(prefix.lower()):
                 self.args = args[len(prefix):].strip()
                 break
@@ -416,6 +467,10 @@ class CmdBuy(MuxCommand):
     def func(self):
         in_chargen = isinstance(self.caller.location, ChargenRoom)
         in_vendor_room = is_vendor_room(self.caller.location)
+
+        if "program" in (self.switches or []):
+            self._buy_program_or_ice(in_chargen=in_chargen)
+            return
 
         if "quality" in (self.switches or []) or (
             self.args and "=" in self.args
@@ -437,17 +492,17 @@ class CmdBuy(MuxCommand):
                 self.caller.msg(
                     "Usage: buy <item name> - Purchase equipment (weapons, armor, gear, cyberdecks). "
                     "Use buy/cyberware <name> for body cyberware. "
-                    "Use +net/buy <program or Black ICE> (buy/program) for net programs. "
+                    "Use +net/buy <program or Black ICE> or buy/program <name> for net programs. "
                     "Use buy/cyberware pair=Cybereye Cybereye for paired limbs. "
                     "Use buy/cyberware parent=<option>/<parent> to attach options to a limb. "
                     "Use 'list chargen/weapons', 'list chargen/armor', 'list chargen/gear', "
-                    "or 'list chargen/cyberware' to see available items."
+                    "'list chargen/cyberware', or 'list chargen/programs' to see available items."
                 )
             elif in_vendor_room:
                 self.caller.msg(
                     "Usage: buy <item name> - Purchase from this vendor. "
                     "Use buy/cyberware <name> for cyberware. "
-                    "Use +net/buy <program or Black ICE> (buy/program) for net programs. "
+                    "Use +net/buy <program or Black ICE> or buy/program <name> for net programs. "
                     "Use buy/cyberware pair=Cybereye Cybereye for paired limbs. "
                     "Use buy/cyberware parent=<option>/<parent> to attach options to a limb. "
                     "Use 'list' to see available items."
@@ -457,6 +512,74 @@ class CmdBuy(MuxCommand):
                     "Usage: buy <item name> from <merchant> - Purchase from a vendor in your location."
                 )
             return
+
+    def _buy_program_or_ice(self, in_chargen=False):
+        """Buy a Program or Black ICE to inventory."""
+        item_query = (self.args or "").strip()
+        if not item_query:
+            self.caller.msg("Usage: buy/program <program or Black ICE name>")
+            return
+
+        if not in_chargen:
+            room = getattr(self.caller, "location", None)
+            room_tags = set()
+            if room:
+                for key, _cat in (room.tags.all(return_key_and_category=True) or []):
+                    if key:
+                        room_tags.add(str(key).strip().lower())
+            has_role_tag = bool({"netrunner", "hacker"} & room_tags)
+            has_stock_tag = bool({"program", "deck"} & room_tags)
+            if not (has_role_tag and has_stock_tag):
+                self.caller.msg(
+                    "You need to be in a tagged netrunner vendor room to buy programs "
+                    "(or be in the chargen room)."
+                )
+                return
+
+        data = installable_program_or_ice(item_query)
+        if not data:
+            candidates = []
+            for p in deckoptions.programs:
+                if p.get("name"):
+                    candidates.append((p["name"], p["name"]))
+            for b in deckoptions.black_ice:
+                if b.get("name"):
+                    candidates.append((b["name"], b["name"]))
+            picked, err = pick_named_candidate(item_query, candidates)
+            if err:
+                self.caller.msg(err)
+                return
+            if not picked:
+                self.caller.msg(f"Unknown program or Black ICE: '{item_query}'.")
+                return
+            data = installable_program_or_ice(picked)
+
+        name = (data or {}).get("name", "").strip()
+        if not name:
+            self.caller.msg("Unable to resolve that item.")
+            return
+
+        cost = int((data or {}).get("cost", 0) or 0)
+        balance = CharacterMoneyService.get_balance(self.caller)
+        if balance < cost:
+            self.caller.msg(f"You need {cost} eb, but only have {balance} eb.")
+            return
+        if not CharacterMoneyService.spend_money(self.caller, cost):
+            self.caller.msg("Purchase failed; funds could not be deducted.")
+            return
+
+        gear = ensure_program_gear(name)
+        if not gear:
+            CharacterMoneyService.add_money(self.caller, cost)
+            self.caller.msg("Purchase failed; item could not be materialized.")
+            return
+
+        inventory, _ = Inventory.get_or_create_for_character(self.caller)
+        inventory.add_gear(gear)
+        self.caller.msg(
+            f"|gPurchased|n {name} for |y{cost} eb|n. "
+            f"It is in your inventory (use |wdeck/install <deck>={name}|n)."
+        )
 
     def _buy_from_vendor_room(self):
         """Handle purchase from tag-based vendor room (no NPC merchant)."""
@@ -619,7 +742,7 @@ class CmdBuy(MuxCommand):
             self.caller.msg(
                 f"'{item_name}' is not available in the chargen catalog. "
                 "Use 'list chargen/weapons', 'list chargen/armor', 'list chargen/gear', "
-                "or 'list chargen/cyberware' to see options. " + hint
+                "'list chargen/cyberware', or 'list chargen/programs' to see options. " + hint
             )
             return
 
@@ -1101,27 +1224,53 @@ class CmdBuy(MuxCommand):
             self.caller.msg(error_message)
             return
         inventory, _ = Inventory.get_or_create_for_character(self.caller)
-        parent_candidates = list(inventory.cyberware.filter(
-            cyberware__name__iexact=parent_name,
-            installed=True,
-        ).select_related("cyberware"))
+        parent_name_lower = parent_name.strip().lower()
+        parent_candidates = list(
+            inventory.cyberware.filter(
+                cyberware__name__iexact=parent_name,
+                installed=True,
+            ).select_related("cyberware")
+        )
+        # Neuroport can host chipware similarly to a Chipware Socket.
+        if (
+            not parent_candidates
+            and parent_name_lower in ("chipware socket", "budget chipware socket")
+        ):
+            parent_candidates = list(
+                inventory.cyberware.filter(
+                    cyberware__name__iexact="Neuroport",
+                    installed=True,
+                ).select_related("cyberware")
+            )
         if not parent_candidates:
             self.caller.msg(f"You don't have {parent_name} installed. Install the parent limb first.")
             return
         # For Cyberaudio Suite: try main suite first, then Sensor Array when full
         parent_inst = None
-        if parent_name.lower() in ("cyberaudio suite", "discount cyberaudio suite"):
+        if parent_name_lower in ("cyberaudio suite", "discount cyberaudio suite"):
             parent_inst, err = find_best_cyberaudio_parent(character_sheet, cyberware)
             if err:
                 self.caller.msg(err)
                 return
         # For Chipware Socket / Budget Chipware Socket: find one with available slots
-        elif parent_name.lower() in ("chipware socket", "budget chipware socket"):
+        elif parent_name_lower in ("chipware socket", "budget chipware socket"):
             for cand in parent_candidates:
                 ok, _ = validate_parent_for_new_child(cand, cyberware)
                 if ok:
                     parent_inst = cand
                     break
+            if parent_inst is None:
+                neuroport_candidates = list(
+                    inventory.cyberware.filter(
+                        cyberware__name__iexact="Neuroport",
+                        installed=True,
+                    ).select_related("cyberware")
+                )
+                for cand in neuroport_candidates:
+                    ok, _ = validate_parent_for_new_child(cand, cyberware)
+                    if ok:
+                        parent_inst = cand
+                        break
         if parent_inst is None:
             parent_inst, err = select_balanced_parent_instance(parent_candidates, cyberware)
             if err:
@@ -1664,6 +1813,7 @@ class CmdListItems(MuxCommand):
       list chargen                    - In chargen: show category menu
       list chargen/weapons            - All weapons (or list chargen weapons)
       list chargen/gear               - All gear
+      list chargen/programs           - Netrunning Programs and Black ICE
       list chargen/medical            - Gear in Medical category
       list chargen/shoulder_arms      - Weapons in shoulder_arms category
       list chargen/search <string>    - Search chargen catalog (in chargen room)
@@ -1727,12 +1877,12 @@ class CmdListItems(MuxCommand):
             if in_chargen:
                 self.caller.msg(
                     "Usage: list chargen | list chargen/weapons | list chargen/armor | "
-                    "list chargen/gear | list chargen/cyberware"
+                    "list chargen/gear | list chargen/cyberware | list chargen/programs"
                 )
             else:
                 self.caller.msg(
                     "Usage: list from <merchant> | list chargen/weapons | list chargen/armor | "
-                    "list chargen/gear | list chargen/cyberware"
+                    "list chargen/gear | list chargen/cyberware | list chargen/programs"
                 )
             return
 
@@ -1795,9 +1945,9 @@ class CmdListItems(MuxCommand):
 
     def _list_chargen(self, category=None):
         """List items in the chargen catalog (value <= 1000 eb), formatted like equipdb.
-        category=None shows a menu. category can be main (weapons/armor/gear/cyberware)
+        category=None shows a menu. category can be main (weapons/armor/gear/cyberware/programs)
         or subcategory (medical, shoulder_arms, etc.)."""
-        main_cats = ("weapons", "armor", "gear", "cyberware")
+        main_cats = ("weapons", "armor", "gear", "cyberware", "programs")
         subcats = _get_chargen_subcategories()
 
         if not category:
@@ -1856,6 +2006,9 @@ class CmdListItems(MuxCommand):
                 "|wCyberware pairs:|n buy/cyberware pair=Cybereye Cybereye | "
                 "|wAttach option:|n buy/cyberware parent=Image Enhance/Cybereye"
             )
+        elif main_cat == "programs":
+            output.append(self._format_chargen_programs(catalog))
+            output.append("|wBuy:|n +net/buy <name>  or  buy/program <name>")
 
         output.append(footer())
         self.caller.msg("\n".join(filter(None, output)))
@@ -1881,6 +2034,7 @@ class CmdListItems(MuxCommand):
                 output.append(f"  |y{mc.title()}|n: |w{mc}|n")
         output.append("")
         output.append("Examples: |wlist chargen gear|n  |wlist chargen medical|n  |wlist chargen/search pistol|n")
+        output.append("          |wlist chargen programs|n  |wbuy/program armor|n")
         output.append("          |wlist/search pistol|n  |wlist/info Medium Pistol|n")
         output.append("          |wlist/info constitutional arms multi|n  (fuzzy string matching)")
         output.append(footer())
@@ -2069,6 +2223,38 @@ class CmdListItems(MuxCommand):
         out.append(section_header("", width=78))
         out.append("|wBuy:|n buy/cyberware <name> | buy/cyberware pair=Cybereye Cybereye | buy/cyberware parent=<option>/<parent>")
         return "\n".join(out) + "\n"
+
+    def _format_chargen_programs(self, catalog):
+        """Format netrunning Programs and Black ICE like equipdb."""
+        programs_rows = [row for row in catalog if row.get("_type") == "program"]
+        black_ice_rows = [row for row in catalog if row.get("_type") == "black_ice"]
+        out = []
+
+        if programs_rows:
+            out.append(section_header("Netrunning Programs", width=78))
+            for p in sorted(
+                programs_rows,
+                key=lambda row: ((row.get("type") or "").lower(), (row.get("name") or "").lower()),
+            ):
+                nm = crop(str(p.get("name", "?")), width=28, suffix="...")
+                out.append(
+                    f"|c{nm:<28}|n |gType:|n {str(p.get('type', '-')):<24} "
+                    f"|gATK/DFV/REZ:|n {int(p.get('atk', 0) or 0)}/{int(p.get('dfv', 0) or 0)}/{int(p.get('rez', 0) or 0)} "
+                    f"|gCost:|n |y{int(p.get('value', 0) or 0)} eb|n"
+                )
+            out.append(section_header("", width=78))
+
+        if black_ice_rows:
+            out.append(section_header("Black ICE", width=78))
+            for b in sorted(black_ice_rows, key=lambda row: (row.get("name") or "").lower()):
+                nm = crop(str(b.get("name", "?")), width=28, suffix="...")
+                out.append(
+                    f"|c{nm:<28}|n |gATK/DFV/REZ:|n {int(b.get('atk', 0) or 0)}/{int(b.get('dfv', 0) or 0)}/{int(b.get('rez', 0) or 0)} "
+                    f"|gCost:|n |y{int(b.get('value', 0) or 0)} eb|n"
+                )
+            out.append(section_header("", width=78))
+
+        return "\n".join(out) + ("\n" if out else "")
 
 class CleanExitEvMenu(EvMenu):
     def close_menu(self):
